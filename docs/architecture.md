@@ -35,6 +35,10 @@ A session mutation requires all of the following:
 This protects legacy sessions, manually created sessions, stale metadata, and names reused after a
 session exits.
 
+After validation, WF carries the expected tmux ID into the backend operation and targets `$session_id`
+for attach, pane capture, rename, option changes, and deletion. It does not validate an ID and then
+return to the reusable name for the final command.
+
 ## Adoption
 
 Preview records exact tmux IDs, normalized legacy values, every source path, and SHA-256 hashes for

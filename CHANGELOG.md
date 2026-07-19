@@ -13,6 +13,7 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 ### Changed
 
 - Session ownership now requires a matching tmux owner marker in addition to metadata and tmux ID
+- Sensitive tmux operations retain the verified session ID through the final tmux command
 - Removed the user-facing classic bridge from the Textual application and Typer CLI
 
 ## [0.1.0] - 2026-07-19

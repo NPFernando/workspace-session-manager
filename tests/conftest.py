@@ -61,6 +61,12 @@ class FakeBackend:
     def session_exists(self, name: str) -> bool:
         return name in self.sessions
 
+    def require_expected(self, name: str, expected_id: str | None) -> TmuxSession:
+        session = self.get_session(name)
+        if expected_id is not None and session.session_id != expected_id:
+            raise TmuxError("tmux ID mismatch")
+        return session
+
     def create_session(
         self,
         name: str,
@@ -77,19 +83,19 @@ class FakeBackend:
         self.set_option(name, "@wf_owner", "wf-session-manager")
         return session
 
-    def capture_pane(self, name: str, lines: int) -> str:
-        self.get_session(name)
+    def capture_pane(self, name: str, lines: int, expected_id: str | None = None) -> str:
+        self.require_expected(name, expected_id)
         return "\n".join(self.previews.get(name, "").splitlines()[-lines:])
 
-    def attach(self, name: str) -> int:
-        self.get_session(name)
+    def attach(self, name: str, expected_id: str | None = None) -> int:
+        self.require_expected(name, expected_id)
         self.attached.append(name)
         return 0
 
-    def rename_session(self, old_name: str, new_name: str) -> None:
+    def rename_session(self, old_name: str, new_name: str, expected_id: str | None = None) -> None:
         if new_name in self.sessions:
             raise SessionExistsError(new_name)
-        session = self.get_session(old_name)
+        session = self.require_expected(old_name, expected_id)
         del self.sessions[old_name]
         self.sessions[new_name] = session.model_copy(update={"name": new_name})
         for (session_name, option), value in list(self.options.items()):
@@ -98,25 +104,29 @@ class FakeBackend:
                 self.options[(new_name, option)] = value
 
     def kill_session(self, name: str, expected_id: str | None = None) -> None:
-        session = self.get_session(name)
-        if expected_id is not None and session.session_id != expected_id:
-            raise TmuxError("tmux ID mismatch")
+        self.require_expected(name, expected_id)
         del self.sessions[name]
         for key in [key for key in self.options if key[0] == name]:
             del self.options[key]
 
-    def set_option(self, name: str, option: str, value: str) -> None:
-        session = self.get_session(name)
+    def set_option(
+        self,
+        name: str,
+        option: str,
+        value: str,
+        expected_id: str | None = None,
+    ) -> None:
+        session = self.require_expected(name, expected_id)
         self.options[(name, option)] = value
         if option == "@wf_owner":
             self.sessions[name] = session.model_copy(update={"wf_owner": value})
 
-    def get_option(self, name: str, option: str) -> str | None:
-        self.get_session(name)
+    def get_option(self, name: str, option: str, expected_id: str | None = None) -> str | None:
+        self.require_expected(name, expected_id)
         return self.options.get((name, option))
 
-    def unset_option(self, name: str, option: str) -> None:
-        session = self.get_session(name)
+    def unset_option(self, name: str, option: str, expected_id: str | None = None) -> None:
+        session = self.require_expected(name, expected_id)
         self.options.pop((name, option), None)
         if option == "@wf_owner":
             self.sessions[name] = session.model_copy(update={"wf_owner": None})

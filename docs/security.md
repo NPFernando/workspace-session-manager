@@ -11,7 +11,8 @@
 - Accidental publication of local paths, logs, or secrets
 
 tmux commands are constructed as argument arrays. Managed names use a strict lowercase allowlist, and
-tmux targets use exact-name syntax. TOML configuration is parsed, not sourced.
+discovery uses exact-name syntax. Once ownership is validated, sensitive operations target the
+verified tmux session ID. TOML configuration is parsed, not sourced.
 
 ## Trust boundaries
 

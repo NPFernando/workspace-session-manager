@@ -247,7 +247,9 @@ class MigrationManager:
             raise MigrationError(f"unsafe tmux session name: {session.name!r}")
         if self.store.load(session.name) is not None:
             raise MigrationError(f"metadata already exists for {session.name}")
-        previous_owner = self.backend.get_option(session.name, OWNER_OPTION)
+        previous_owner = self.backend.get_option(
+            session.name, OWNER_OPTION, expected_id=session.session_id
+        )
         if previous_owner is not None:
             raise MigrationError(
                 f"tmux owner option already exists for {session.name}: {previous_owner}"
@@ -330,11 +332,11 @@ class MigrationManager:
             self._journal_path(journal.migration_id), journal.model_dump_json(indent=2)
         )
 
-    def _restore_owner(self, name: str, previous_owner: str | None) -> None:
+    def _restore_owner(self, name: str, previous_owner: str | None, expected_id: str) -> None:
         if previous_owner is None:
-            self.backend.unset_option(name, OWNER_OPTION)
+            self.backend.unset_option(name, OWNER_OPTION, expected_id=expected_id)
         else:
-            self.backend.set_option(name, OWNER_OPTION, previous_owner)
+            self.backend.set_option(name, OWNER_OPTION, previous_owner, expected_id=expected_id)
 
     def apply(self, path: Path) -> MigrationJournal:
         with self._locked():
@@ -347,7 +349,11 @@ class MigrationManager:
                 current_record = self.store.load(entry.record.name)
                 if current_record and current_record.record_id == entry.record.record_id:
                     self.store.delete(entry.record.name)
-                self._restore_owner(entry.record.name, entry.previous_owner)
+                self._restore_owner(
+                    entry.record.name,
+                    entry.previous_owner,
+                    entry.record.tmux_session_id,
+                )
             except Exception as cleanup_error:  # pragma: no cover - exceptional recovery path
                 cleanup_errors.append(f"{entry.record.name}: {cleanup_error}")
         return cleanup_errors
@@ -356,7 +362,12 @@ class MigrationManager:
         recovery_errors: list[str] = []
         for entry in entries:
             try:
-                self.backend.set_option(entry.record.name, OWNER_OPTION, OWNER_VALUE)
+                self.backend.set_option(
+                    entry.record.name,
+                    OWNER_OPTION,
+                    OWNER_VALUE,
+                    expected_id=entry.record.tmux_session_id,
+                )
                 if self.store.load(entry.record.name) is None:
                     self.store.save_new(entry.record)
             except Exception as recovery_error:  # pragma: no cover - exceptional recovery path
@@ -410,7 +421,12 @@ class MigrationManager:
                 session = self.backend.get_session(record.name)
                 if session.session_id != record.tmux_session_id:
                     raise MigrationError(f"tmux ID changed for {record.name}")
-                self.backend.set_option(record.name, OWNER_OPTION, OWNER_VALUE)
+                self.backend.set_option(
+                    record.name,
+                    OWNER_OPTION,
+                    OWNER_VALUE,
+                    expected_id=record.tmux_session_id,
+                )
                 claimed.append(entry)
                 self.store.save_new(record)
         except Exception as error:
@@ -487,7 +503,11 @@ class MigrationManager:
         for entry in journal.items:
             record = self.store.load(entry.record.name)
             session = self.backend.get_session(entry.record.name)
-            marker = self.backend.get_option(entry.record.name, OWNER_OPTION)
+            marker = self.backend.get_option(
+                entry.record.name,
+                OWNER_OPTION,
+                expected_id=entry.record.tmux_session_id,
+            )
             if session.session_id != entry.record.tmux_session_id:
                 raise MigrationError(f"tmux ID changed for {entry.record.name}")
             if record is None or record.record_id != entry.record.record_id:
@@ -501,7 +521,11 @@ class MigrationManager:
         try:
             for entry in reversed(journal.items):
                 self.store.delete(entry.record.name)
-                self._restore_owner(entry.record.name, entry.previous_owner)
+                self._restore_owner(
+                    entry.record.name,
+                    entry.previous_owner,
+                    entry.record.tmux_session_id,
+                )
                 restored.append(entry)
         except Exception as error:
             to_reapply = [entry, *reversed(restored)]

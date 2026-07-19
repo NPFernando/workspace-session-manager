@@ -127,6 +127,17 @@ class TmuxBackend:
     def session_exists(self, name: str) -> bool:
         return any(session.name == name for session in self.list_sessions())
 
+    def _session_target(self, name: str, expected_id: str | None) -> str:
+        if expected_id is None:
+            return f"={name}"
+        session = self.get_session(name)
+        if session.session_id != expected_id:
+            raise TmuxError(
+                f"refusing to target {name}: expected tmux ID {expected_id}, "
+                f"found {session.session_id}"
+            )
+        return expected_id
+
     def create_session(
         self,
         name: str,
@@ -152,11 +163,17 @@ class TmuxBackend:
         )
         created_id = result.stdout.strip()
         try:
-            self.set_option(name, "@wf_owner", "wf-session-manager")
+            self.set_option(
+                name,
+                "@wf_owner",
+                "wf-session-manager",
+                expected_id=created_id or None,
+            )
             if agent_command:
                 command_line = shlex.join(agent_command)
-                self._run("send-keys", "-t", f"={name}:", "-l", "--", command_line)
-                self._run("send-keys", "-t", f"={name}:", "Enter")
+                target = f"{created_id}:" if created_id else f"={name}:"
+                self._run("send-keys", "-t", target, "-l", "--", command_line)
+                self._run("send-keys", "-t", target, "Enter")
             session = self.get_session(name)
             if created_id and session.session_id != created_id:
                 raise TmuxError("tmux session ID changed during creation")
@@ -165,12 +182,20 @@ class TmuxBackend:
             self.kill_session(name, expected_id=created_id or None)
             raise
 
-    def set_option(self, name: str, option: str, value: str) -> None:
-        self._run("set-option", "-q", "-t", f"={name}:", option, value)
+    def set_option(
+        self,
+        name: str,
+        option: str,
+        value: str,
+        expected_id: str | None = None,
+    ) -> None:
+        target = self._session_target(name, expected_id)
+        self._run("set-option", "-q", "-t", f"{target}:", option, value)
 
-    def get_option(self, name: str, option: str) -> str | None:
+    def get_option(self, name: str, option: str, expected_id: str | None = None) -> str | None:
+        target = self._session_target(name, expected_id)
         result = self._runner(
-            ("tmux", "show-options", "-qv", "-t", f"={name}:", option),
+            ("tmux", "show-options", "-qv", "-t", f"{target}:", option),
             capture=True,
             timeout=5.0,
         )
@@ -178,41 +203,36 @@ class TmuxBackend:
             return None
         return result.stdout.strip() or None
 
-    def unset_option(self, name: str, option: str) -> None:
-        self._run("set-option", "-q", "-u", "-t", f"={name}:", option)
+    def unset_option(self, name: str, option: str, expected_id: str | None = None) -> None:
+        target = self._session_target(name, expected_id)
+        self._run("set-option", "-q", "-u", "-t", f"{target}:", option)
 
-    def capture_pane(self, name: str, lines: int) -> str:
-        session = self.get_session(name)
-        del session
+    def capture_pane(self, name: str, lines: int, expected_id: str | None = None) -> str:
+        target = self._session_target(name, expected_id)
         return self._run(
             "capture-pane",
             "-p",
             "-t",
-            f"={name}:",
+            f"{target}:",
             "-S",
             f"-{lines}",
         ).stdout
 
-    def attach(self, name: str) -> int:
-        self.get_session(name)
+    def attach(self, name: str, expected_id: str | None = None) -> int:
+        target = self._session_target(name, expected_id)
         command = "switch-client" if os.environ.get("TMUX") else "attach-session"
-        result = self._run(command, "-t", f"={name}", capture=False, timeout=None)
+        result = self._run(command, "-t", target, capture=False, timeout=None)
         return result.returncode
 
-    def rename_session(self, old_name: str, new_name: str) -> None:
-        self.get_session(old_name)
+    def rename_session(self, old_name: str, new_name: str, expected_id: str | None = None) -> None:
+        target = self._session_target(old_name, expected_id)
         if self.session_exists(new_name):
             raise SessionExistsError(f"session already exists: {new_name}")
-        self._run("rename-session", "-t", f"={old_name}", new_name)
+        self._run("rename-session", "-t", target, new_name)
 
     def kill_session(self, name: str, expected_id: str | None = None) -> None:
-        session = self.get_session(name)
-        if expected_id is not None and session.session_id != expected_id:
-            raise TmuxError(
-                f"refusing to kill {name}: expected tmux ID {expected_id}, "
-                f"found {session.session_id}"
-            )
-        self._run("kill-session", "-t", f"={name}")
+        target = self._session_target(name, expected_id)
+        self._run("kill-session", "-t", target)
 
 
 BackendFactory = Callable[[], TmuxBackend]

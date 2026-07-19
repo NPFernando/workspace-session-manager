@@ -3,7 +3,8 @@ from collections.abc import Sequence
 
 import pytest
 
-from wf_session_manager.tmux import FIELD_SEPARATOR, TmuxBackend
+from wf_session_manager.errors import TmuxError
+from wf_session_manager.tmux import FIELD_SEPARATOR, TMUX_FORMAT, TmuxBackend
 
 
 class RecordingRunner:
@@ -81,3 +82,80 @@ def test_unset_session_option_uses_exact_pane_target() -> None:
         "=claude-api:",
         "@wf_owner",
     )
+
+
+def live_session_line(session_id: str = "$3", name: str = "claude-api") -> str:
+    return FIELD_SEPARATOR.join(
+        (session_id, name, "1767225600", "0", "1", "/srv/api", "claude", "")
+    )
+
+
+def test_expected_id_is_used_for_final_tmux_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TMUX", raising=False)
+    capture_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
+    TmuxBackend(capture_runner).capture_pane("claude-api", 20, expected_id="$3")
+    assert capture_runner.calls[-1] == (
+        "tmux",
+        "capture-pane",
+        "-p",
+        "-t",
+        "$3:",
+        "-S",
+        "-20",
+    )
+
+    option_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
+    TmuxBackend(option_runner).set_option(
+        "claude-api", "@wf_owner", "wf-session-manager", expected_id="$3"
+    )
+    assert option_runner.calls[-1] == (
+        "tmux",
+        "set-option",
+        "-q",
+        "-t",
+        "$3:",
+        "@wf_owner",
+        "wf-session-manager",
+    )
+
+    read_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
+    TmuxBackend(read_runner).get_option("claude-api", "@wf_owner", expected_id="$3")
+    assert read_runner.calls[-1] == (
+        "tmux",
+        "show-options",
+        "-qv",
+        "-t",
+        "$3:",
+        "@wf_owner",
+    )
+
+    unset_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
+    TmuxBackend(unset_runner).unset_option("claude-api", "@wf_owner", expected_id="$3")
+    assert unset_runner.calls[-1] == (
+        "tmux",
+        "set-option",
+        "-q",
+        "-u",
+        "-t",
+        "$3:",
+        "@wf_owner",
+    )
+
+    attach_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
+    TmuxBackend(attach_runner).attach("claude-api", expected_id="$3")
+    assert attach_runner.calls[-1] == ("tmux", "attach-session", "-t", "$3")
+
+    rename_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
+    TmuxBackend(rename_runner).rename_session("claude-api", "claude-new", expected_id="$3")
+    assert rename_runner.calls[-1] == ("tmux", "rename-session", "-t", "$3", "claude-new")
+
+    kill_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
+    TmuxBackend(kill_runner).kill_session("claude-api", expected_id="$3")
+    assert kill_runner.calls[-1] == ("tmux", "kill-session", "-t", "$3")
+
+
+def test_expected_id_mismatch_never_runs_final_tmux_command() -> None:
+    runner = RecordingRunner(stdout=f"{live_session_line(session_id='$replacement')}\n")
+    with pytest.raises(TmuxError, match="expected tmux ID \\$original"):
+        TmuxBackend(runner).kill_session("claude-api", expected_id="$original")
+    assert runner.calls == [("tmux", "list-sessions", "-F", TMUX_FORMAT)]

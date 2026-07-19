@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeBackend
-from wf_session_manager.errors import MigrationError, StateError
+from wf_session_manager.errors import MigrationError, StateError, TmuxError
 from wf_session_manager.legacy import LegacyMetadataReader
 from wf_session_manager.migration import MigrationJournal, MigrationManager
 from wf_session_manager.models import SessionMetadata, SessionState, Tool
@@ -182,10 +182,10 @@ def test_rollback_failure_restores_entire_adoption_batch(
     journal = manager.apply(plan_path)
     original_unset = fake_backend.unset_option
 
-    def fail_last(name: str, option: str) -> None:
+    def fail_last(name: str, option: str, expected_id: str | None = None) -> None:
         if name == "claude-one":
             raise StateError("simulated tmux failure")
-        original_unset(name, option)
+        original_unset(name, option, expected_id=expected_id)
 
     monkeypatch.setattr(fake_backend, "unset_option", fail_last)
     with pytest.raises(MigrationError, match="adoption was restored"):
@@ -316,3 +316,41 @@ def test_rollback_finalization_failure_restores_adoption(
     assert manager.store.load("claude-old") is not None
     assert fake_backend.get_option("claude-old", "@wf_owner") == "wf-session-manager"
     assert manager.load_journal(journal.migration_id).status == "applied"
+
+
+def test_apply_refuses_name_reused_before_owner_marker(
+    tmp_path: Path,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy = tmp_path / "legacy"
+    write_legacy(legacy, "claude-old")
+    fake_backend.add("claude-old", session_id="$original")
+    manager = make_manager(tmp_path, fake_backend, (legacy,))
+    plan_path = tmp_path / "plan.json"
+    manager.write_plan(manager.preview(), plan_path)
+    original_set_option = fake_backend.set_option
+    replaced = False
+
+    def replace_before_set(
+        name: str,
+        option: str,
+        value: str,
+        expected_id: str | None = None,
+    ) -> None:
+        nonlocal replaced
+        if not replaced:
+            replaced = True
+            fake_backend.sessions[name] = fake_backend.sessions[name].model_copy(
+                update={"session_id": "$replacement"}
+            )
+        original_set_option(name, option, value, expected_id=expected_id)
+
+    monkeypatch.setattr(fake_backend, "set_option", replace_before_set)
+    with pytest.raises(TmuxError, match="ID mismatch"):
+        manager.apply(plan_path)
+
+    assert fake_backend.get_session("claude-old").session_id == "$replacement"
+    assert fake_backend.get_option("claude-old", "@wf_owner") is None
+    assert manager.store.load("claude-old") is None
+    assert manager.status()[0].status == "rolled_back"

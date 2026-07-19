@@ -56,19 +56,23 @@ class SessionBackend(Protocol):
         agent_command: Sequence[str] | None,
     ) -> TmuxSession: ...
 
-    def capture_pane(self, name: str, lines: int) -> str: ...
+    def capture_pane(self, name: str, lines: int, expected_id: str | None = None) -> str: ...
 
-    def attach(self, name: str) -> int: ...
+    def attach(self, name: str, expected_id: str | None = None) -> int: ...
 
-    def rename_session(self, old_name: str, new_name: str) -> None: ...
+    def rename_session(
+        self, old_name: str, new_name: str, expected_id: str | None = None
+    ) -> None: ...
 
     def kill_session(self, name: str, expected_id: str | None = None) -> None: ...
 
-    def set_option(self, name: str, option: str, value: str) -> None: ...
+    def set_option(
+        self, name: str, option: str, value: str, expected_id: str | None = None
+    ) -> None: ...
 
-    def get_option(self, name: str, option: str) -> str | None: ...
+    def get_option(self, name: str, option: str, expected_id: str | None = None) -> str | None: ...
 
-    def unset_option(self, name: str, option: str) -> None: ...
+    def unset_option(self, name: str, option: str, expected_id: str | None = None) -> None: ...
 
 
 def slugify_name(value: str) -> str:
@@ -190,7 +194,9 @@ class SessionService:
 
     def inspect(self, name: str) -> SessionDetails:
         session = self.get(name)
-        output = self.backend.capture_pane(name, self.config.preview_lines)
+        output = self.backend.capture_pane(
+            name, self.config.preview_lines, expected_id=session.session_id
+        )
         return SessionDetails(
             session=session,
             preview=bounded_preview(output, self.config.preview_lines),
@@ -260,7 +266,7 @@ class SessionService:
     def _owned_record(self, name: str) -> SessionMetadata:
         session = self.backend.get_session(name)
         record = self.store.load(name)
-        marker = self.backend.get_option(name, "@wf_owner")
+        marker = self.backend.get_option(name, "@wf_owner", expected_id=session.session_id)
         if (
             record is None
             or record.tmux_session_id != session.session_id
@@ -277,7 +283,7 @@ class SessionService:
         self.store.save(
             record.model_copy(update={"last_attached_at": utc_now(), "updated_at": utc_now()})
         )
-        return self.backend.attach(name)
+        return self.backend.attach(name, expected_id=record.tmux_session_id)
 
     def resume_target(self) -> SessionView:
         sessions = self.list_sessions()
@@ -319,12 +325,12 @@ class SessionService:
         new_name = normalized_session_name(record.tool, requested_name)
         if old_name == new_name:
             return self.get(old_name)
-        self.backend.rename_session(old_name, new_name)
+        self.backend.rename_session(old_name, new_name, expected_id=record.tmux_session_id)
         updated = record.model_copy(update={"name": new_name, "updated_at": utc_now()})
         try:
             self.store.replace(old_name, updated)
         except StateError:
-            self.backend.rename_session(new_name, old_name)
+            self.backend.rename_session(new_name, old_name, expected_id=record.tmux_session_id)
             raise
         return self.get(new_name)
 

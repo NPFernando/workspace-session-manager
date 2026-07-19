@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeBackend
-from wf_session_manager.errors import OwnershipError, StateError, ToolUnavailableError
+from wf_session_manager.errors import OwnershipError, StateError, TmuxError, ToolUnavailableError
 from wf_session_manager.models import CreateRequest, SessionMetadata, SessionState, Tool
 from wf_session_manager.service import SessionService
 
@@ -103,3 +103,25 @@ def test_missing_tool_fails_before_tmux_creation(
     with pytest.raises(ToolUnavailableError):
         service.create(CreateRequest(name="missing", tool=Tool.CLAUDE, cwd=tmp_path))
     assert fake_backend.sessions == {}
+
+
+def test_attach_refuses_name_reused_after_ownership_check(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = service.create(CreateRequest(name="race", tool=Tool.SHELL, cwd=tmp_path))
+    original_get_option = fake_backend.get_option
+
+    def replace_after_check(name: str, option: str, expected_id: str | None = None) -> str | None:
+        value = original_get_option(name, option, expected_id=expected_id)
+        fake_backend.sessions[name] = fake_backend.sessions[name].model_copy(
+            update={"session_id": "$replacement"}
+        )
+        return value
+
+    monkeypatch.setattr(fake_backend, "get_option", replace_after_check)
+    with pytest.raises(TmuxError, match="ID mismatch"):
+        service.attach(created.name)
+    assert fake_backend.attached == []
