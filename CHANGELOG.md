@@ -24,6 +24,7 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 - Install and command rollback replace the WF symlink atomically and never overwrite a command backup
 - Classic retirement verifies the archived executable payload before deletion and writes a relocatable
   archive checksum
+- Textual filtering clears hidden selections and renders explicit empty or no-match states
 - Removed the user-facing classic bridge from the Textual application and Typer CLI
 
 ## [0.1.0] - 2026-07-19

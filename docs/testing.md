@@ -39,3 +39,4 @@ Check at least:
 - atomic command-switch failure recovery and command-backup collision refusal
 - retirement archive payload corruption and relocatable checksum verification
 - sanitized pane output containing ANSI, IP, home path, and test token patterns
+- zero-result searches and empty inventories with no hidden actionable selection

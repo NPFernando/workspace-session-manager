@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
 from pathlib import Path
 from typing import ClassVar
 
@@ -191,6 +190,7 @@ class WFApp(App[str | None]):
         super().__init__()
         self.service = service
         self.sessions: list[SessionView] = []
+        self.visible_sessions: list[SessionView] = []
         self.selected_name: str | None = None
 
     def compose(self) -> ComposeResult:
@@ -235,7 +235,7 @@ class WFApp(App[str | None]):
         search = self.query_one("#search", Input).value.casefold().strip()
         current = self.selected_name
         table.clear(columns=False)
-        visible = [
+        self.visible_sessions = [
             session
             for session in self.sessions
             if not search
@@ -244,7 +244,7 @@ class WFApp(App[str | None]):
                 (session.name, session.tool.value, session.state, session.note, *session.tags)
             ).casefold()
         ]
-        for session in visible:
+        for session in self.visible_sessions:
             marker = "*" if session.pinned else " "
             state = "attached" if session.attached else session.state
             table.add_row(
@@ -256,13 +256,30 @@ class WFApp(App[str | None]):
                 key=session.name,
             )
         self.query_one("#status", Static).update(
-            f"{len(visible)} shown  |  {len(self.sessions)} managed"
+            f"{len(self.visible_sessions)} shown  |  {len(self.sessions)} managed"
         )
-        if current and any(session.name == current for session in visible):
-            with suppress(StopIteration):
-                table.move_cursor(
-                    row=next(index for index, item in enumerate(visible) if item.name == current)
-                )
+        if not self.visible_sessions:
+            self.selected_name = None
+            self._render_empty_state(has_search=bool(search))
+            return
+        selected_index = next(
+            (index for index, item in enumerate(self.visible_sessions) if item.name == current),
+            0,
+        )
+        self.selected_name = self.visible_sessions[selected_index].name
+        table.move_cursor(row=selected_index)
+        self._render_details(self.selected_name)
+
+    def _render_empty_state(self, *, has_search: bool) -> None:
+        title = "No matches" if has_search else "No sessions"
+        message = (
+            "No managed sessions match the current search."
+            if has_search
+            else "No managed sessions found."
+        )
+        self.query_one("#detail-title", Static).update(title)
+        self.query_one("#details", Static).update(message)
+        self.query_one("#preview", Static).update("")
 
     @on(Input.Changed, "#search")
     def search_changed(self) -> None:
@@ -272,14 +289,20 @@ class WFApp(App[str | None]):
     def row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.row_key is None or event.row_key.value is None:
             return
-        self.selected_name = str(event.row_key.value)
+        name = str(event.row_key.value)
+        if not any(session.name == name for session in self.visible_sessions):
+            return
+        self.selected_name = name
         self._render_details(self.selected_name)
 
     @on(DataTable.RowSelected, "#sessions")
     def row_selected(self, event: DataTable.RowSelected) -> None:
         if event.row_key is None or event.row_key.value is None:
             return
-        self.selected_name = str(event.row_key.value)
+        name = str(event.row_key.value)
+        if not any(session.name == name for session in self.visible_sessions):
+            return
+        self.selected_name = name
         self.action_attach()
 
     @on(Input.Submitted, "#search")
@@ -289,7 +312,10 @@ class WFApp(App[str | None]):
     def _selected(self) -> SessionView | None:
         if self.selected_name is None:
             return None
-        return next((item for item in self.sessions if item.name == self.selected_name), None)
+        return next(
+            (item for item in self.visible_sessions if item.name == self.selected_name),
+            None,
+        )
 
     def _render_details(self, name: str) -> None:
         try:
