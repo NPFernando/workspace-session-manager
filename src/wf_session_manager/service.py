@@ -11,7 +11,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from wf_session_manager.classic import resolve_classic_command
 from wf_session_manager.config import AppConfig
 from wf_session_manager.errors import (
     OwnershipError,
@@ -65,6 +64,12 @@ class SessionBackend(Protocol):
 
     def kill_session(self, name: str, expected_id: str | None = None) -> None: ...
 
+    def set_option(self, name: str, option: str, value: str) -> None: ...
+
+    def get_option(self, name: str, option: str) -> str | None: ...
+
+    def unset_option(self, name: str, option: str) -> None: ...
+
 
 def slugify_name(value: str) -> str:
     ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
@@ -117,12 +122,14 @@ class SessionService:
         self.paths = paths
         self.legacy = legacy or LegacyMetadataReader(config.legacy_state_dirs)
 
-    def list_sessions(self) -> list[SessionView]:
+    def list_sessions(self, *, include_unmanaged: bool = False) -> list[SessionView]:
         owned_records = self.store.load_all()
         views = [
             self._merge(session, owned_records.get(session.name))
             for session in self.backend.list_sessions()
         ]
+        if not include_unmanaged:
+            views = [view for view in views if view.owned]
         minimum = datetime.min.replace(tzinfo=UTC)
         return sorted(
             views,
@@ -136,7 +143,11 @@ class SessionService:
         )
 
     def _merge(self, session: TmuxSession, record: SessionMetadata | None) -> SessionView:
-        owned = record is not None and record.tmux_session_id == session.session_id
+        owned = (
+            record is not None
+            and record.tmux_session_id == session.session_id
+            and session.wf_owner == "wf-session-manager"
+        )
         legacy = None if owned else self.legacy.read(session.name)
         return SessionView(
             name=session.name,
@@ -171,8 +182,8 @@ class SessionService:
             ),
         )
 
-    def get(self, name: str) -> SessionView:
-        for session in self.list_sessions():
+    def get(self, name: str, *, include_unmanaged: bool = False) -> SessionView:
+        for session in self.list_sessions(include_unmanaged=include_unmanaged):
             if session.name == name:
                 return session
         raise SessionNotFoundError(f"session not found: {name}")
@@ -249,19 +260,23 @@ class SessionService:
     def _owned_record(self, name: str) -> SessionMetadata:
         session = self.backend.get_session(name)
         record = self.store.load(name)
-        if record is None or record.tmux_session_id != session.session_id:
+        marker = self.backend.get_option(name, "@wf_owner")
+        if (
+            record is None
+            or record.tmux_session_id != session.session_id
+            or marker != "wf-session-manager"
+        ):
             raise OwnershipError(
                 f"refusing to modify {name}: it was not created by this WF installation"
             )
         return record
 
     def attach(self, name: str) -> int:
-        record = self.store.load(name)
-        session = self.backend.get_session(name)
-        if record is not None and record.tmux_session_id == session.session_id:
-            self.store.save(
-                record.model_copy(update={"last_attached_at": utc_now(), "updated_at": utc_now()})
-            )
+        self.get(name)
+        record = self._owned_record(name)
+        self.store.save(
+            record.model_copy(update={"last_attached_at": utc_now(), "updated_at": utc_now()})
+        )
         return self.backend.attach(name)
 
     def resume_target(self) -> SessionView:
@@ -341,6 +356,14 @@ class SessionService:
                 detail="; ".join(errors) if errors else str(self.paths.state_dir),
             )
         )
+        unmanaged = sum(not session.owned for session in self.list_sessions(include_unmanaged=True))
+        checks.append(
+            HealthCheck(
+                name="unmanaged-sessions",
+                status=HealthStatus.PASS,
+                detail=f"{unmanaged} hidden from managed views",
+            )
+        )
         readable_legacy = [
             str(path) for path in self.config.legacy_state_dirs if path.expanduser().is_dir()
         ]
@@ -349,14 +372,6 @@ class SessionService:
                 name="legacy-readonly",
                 status=HealthStatus.PASS if readable_legacy else HealthStatus.WARN,
                 detail=", ".join(readable_legacy) or "no legacy state directories found",
-            )
-        )
-        classic = resolve_classic_command(self.config)
-        checks.append(
-            HealthCheck(
-                name="classic-fallback",
-                status=HealthStatus.PASS if classic else HealthStatus.WARN,
-                detail=str(classic) if classic else "classic executable not configured",
             )
         )
         return DoctorReport(checks=checks)

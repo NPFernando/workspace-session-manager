@@ -12,7 +12,7 @@ target="$HOME/.local/bin/WF"
 classic="$HOME/.local/libexec/wf-classic"
 expected="$install_root/venv/bin/WF"
 
-if [[ ! -x "$classic" ]]; then
+if [[ ! -f "$classic" || -L "$classic" || ! -x "$classic" ]]; then
   printf 'Classic executable is unavailable: %s\n' "$classic" >&2
   exit 1
 fi
@@ -25,4 +25,3 @@ fi
 ln -sfn -- "$classic" "$target"
 printf 'Restored classic WF: %s -> %s\n' "$target" "$classic"
 printf '%s\n' 'New metadata and the virtual environment were retained for recovery.'
-

@@ -1,10 +1,6 @@
 schema_version = 1
 refresh_interval = 3.0
 preview_lines = 80
-fallback_to_classic_on_error = false
-
-# Set this during migration to a preserved copy of the classic implementation.
-# classic_command = "~/.local/libexec/wf-classic"
 
 legacy_state_dirs = [
   "~/.local/state/wf/sessions",
@@ -26,4 +22,3 @@ enabled = true
 [tools.shell]
 command = ["/bin/bash", "-l"]
 enabled = true
-

@@ -4,8 +4,9 @@ WF is a terminal application for creating, resuming, inspecting, and organizing 
 Code, Codex CLI, Hermes Agent, and shell sessions on Linux. Textual provides the default interface,
 Typer provides automation-friendly commands, and tmux keeps work alive across SSH disconnects.
 
-The project is currently in parallel-development mode. It does not replace an existing `WF`
-installation, change login hooks, or adopt existing tmux sessions.
+The project is currently in parallel-development mode. Repository setup does not replace an existing
+`WF` installation, change login hooks, or adopt existing tmux sessions. Each cutover action has a
+separate approval gate.
 
 ## Highlights
 
@@ -13,9 +14,10 @@ installation, change login hooks, or adopt existing tmux sessions.
 - Persistent detached sessions through tmux
 - Claude, Codex, Hermes, and shell profiles with strict TOML validation
 - Notes, tags, task state, pinning, rename, resume, and guarded deletion
-- Read-only discovery of classic WF sidecar metadata
-- Ownership checks tied to tmux's unique session ID, not a reusable name
-- Explicit `WF --classic` and `WF classic` bridge for migration and emergency fallback
+- Read-only discovery and preview of legacy WF sidecar metadata
+- Exact-ID, snapshot-validated, reversible session adoption
+- Ownership checks tied to both tmux's unique session ID and a tmux owner marker
+- Managed-only default views with `list --all` for diagnostics
 - JSON output for session discovery, inspection, and diagnostics
 - XDG-compatible, permission-restricted, atomic state storage
 
@@ -25,7 +27,6 @@ installation, change login hooks, or adopt existing tmux sessions.
 - Python 3.11 or newer
 - tmux
 - One or more optional agent commands: `claude`, `codex`, or `hermes`
-- fzf only when using the preserved classic implementation
 
 No command in WF invokes `sudo`.
 
@@ -48,14 +49,16 @@ uv run wf-dev doctor
 uv run wf-dev
 ```
 
-Development data lives under the `wf-session-manager` XDG namespace. The operational classic WF
-paths are read only.
+Development data lives under the `wf-session-manager` XDG namespace. Operational legacy WF paths are
+read only unless a reviewed adoption plan is explicitly applied; adoption does not change those
+paths or restart a tmux session.
 
 ## CLI
 
 ```bash
 wf-dev                         # Open the Textual interface
 wf-dev list
+wf-dev list --all              # Include unmanaged sessions for diagnostics
 wf-dev list --json
 wf-dev inspect claude-api
 wf-dev create --tool claude --name api --cwd ~/projects/api
@@ -67,11 +70,13 @@ wf-dev resume
 wf-dev attach claude-api
 wf-dev delete claude-api       # Exact-name confirmation required
 wf-dev doctor
-wf-dev --classic
+wf-dev migrate preview --all --output adoption-plan.json
+wf-dev migrate status
 ```
 
-`attach` and `resume` may open any live tmux session because attachment is non-destructive. Mutating
-commands accept only sessions created by this application and reject classic or foreign sessions.
+Normal commands and the Textual dashboard operate only on managed sessions. A session is managed only
+when its validated metadata, exact live tmux ID, and tmux owner marker agree. Unmanaged sessions are
+hidden unless `list --all` is requested.
 
 ## Keyboard controls
 
@@ -84,7 +89,6 @@ commands accept only sessions created by this application and reject classic or 
 | `d` | Delete a managed session with exact-name confirmation |
 | `/` | Focus search |
 | `r` | Refresh |
-| `f` | Open classic WF |
 | `q` | Quit |
 
 ## Configuration
@@ -107,7 +111,8 @@ ${XDG_STATE_HOME:-~/.local/state}/wf-session-manager/sessions/
 ```
 
 Each JSON file is owner-only and written atomically. A record includes the tmux session ID that was
-assigned at creation. If a session name is later reused, the stale record does not grant ownership.
+assigned at creation or captured during approved adoption. If a session name is later reused, the
+stale record does not grant ownership.
 
 See [architecture](docs/architecture.md), [security](docs/security.md), and
 [migration](docs/migration.md) for design details.
@@ -120,8 +125,9 @@ make test-integration
 make secret-scan
 ```
 
-The real-tmux integration test creates a random, clearly prefixed session and removes only that exact
-session after verifying its tmux ID and WF ownership marker.
+The real-tmux integration tests create random, clearly prefixed sessions. Cleanup removes only those
+exact test session IDs. Adoption coverage also verifies that rollback does not restart, rename, or
+remove its disposable tmux session.
 
 ## Project status
 
@@ -131,4 +137,3 @@ explicit approval-gated step; see [migration](docs/migration.md).
 ## License
 
 MIT. See [LICENSE](LICENSE).
-

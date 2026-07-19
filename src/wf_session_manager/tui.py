@@ -18,7 +18,6 @@ from wf_session_manager.errors import WFError
 from wf_session_manager.models import CreateRequest, SessionState, SessionView, Tool
 from wf_session_manager.service import SessionService
 
-CLASSIC_RESULT = "__wf_classic__"
 BindingSpec = Binding | tuple[str, str] | tuple[str, str, str]
 
 
@@ -186,7 +185,6 @@ class WFApp(App[str | None]):
         Binding("d", "delete_session", "Delete"),
         Binding("r", "refresh", "Refresh"),
         Binding("/", "search", "Search"),
-        Binding("f", "classic", "Classic"),
     ]
 
     def __init__(self, service: SessionService) -> None:
@@ -249,19 +247,16 @@ class WFApp(App[str | None]):
         for session in visible:
             marker = "*" if session.pinned else " "
             state = "attached" if session.attached else session.state
-            ownership = session.tool.value if session.owned else f"{session.tool.value} (classic)"
             table.add_row(
                 marker,
                 session.name,
-                ownership,
+                session.tool.value,
                 state,
                 display_path(session.cwd),
                 key=session.name,
             )
-        managed = sum(session.owned for session in self.sessions)
-        read_only = len(self.sessions) - managed
         self.query_one("#status", Static).update(
-            f"{len(visible)} shown  |  {managed} managed  |  {read_only} read-only"
+            f"{len(visible)} shown  |  {len(self.sessions)} managed"
         )
         if current and any(session.name == current for session in visible):
             with suppress(StopIteration):
@@ -307,7 +302,7 @@ class WFApp(App[str | None]):
         values = (
             ("Status", "attached" if session.attached else "detached"),
             ("Tool", session.tool.value),
-            ("Ownership", "managed by WF" if session.owned else "classic / read-only"),
+            ("Ownership", "managed by WF"),
             ("Task state", session.state),
             ("Directory", display_path(session.cwd)),
             ("Windows", str(session.windows)),
@@ -346,11 +341,6 @@ class WFApp(App[str | None]):
         session = self._selected()
         if session is None:
             return
-        if not session.owned:
-            self.notify(
-                "Classic sessions are read-only until migration is approved", severity="warning"
-            )
-            return
         self.push_screen(OrganizeSessionScreen(session), self._organize_session)
 
     def _organize_session(self, result: tuple[str, list[str], SessionState, bool] | None) -> None:
@@ -381,9 +371,6 @@ class WFApp(App[str | None]):
         session = self._selected()
         if session is None:
             return
-        if not session.owned:
-            self.notify("WF will not delete a classic session", severity="warning")
-            return
         self.push_screen(DeleteSessionScreen(session.name), self._delete_session)
 
     def _delete_session(self, confirmed: bool | None) -> None:
@@ -404,6 +391,3 @@ class WFApp(App[str | None]):
 
     def action_search(self) -> None:
         self.query_one("#search", Input).focus()
-
-    def action_classic(self) -> None:
-        self.exit(CLASSIC_RESULT)

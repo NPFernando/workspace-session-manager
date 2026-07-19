@@ -6,8 +6,8 @@
 pytest -m "not integration"
 ```
 
-Unit and Textual pilot tests use temporary state and fake tmux backends. They do not access the live
-tmux server or classic metadata.
+Unit and Textual pilot tests use temporary state, temporary legacy sidecars, and fake tmux backends.
+They do not access the live tmux server or operational metadata.
 
 ## Real tmux
 
@@ -15,14 +15,14 @@ tmux server or classic metadata.
 WF_RUN_TMUX_INTEGRATION=1 pytest -m integration -q --no-cov
 ```
 
-The integration test creates a random `wf-it-...` session. Cleanup checks both the generated tmux ID
-and the `@wf_owner` option before deleting it. A pre-existing name collision causes the test to abort,
-not to reuse or delete that session.
+The integration tests create random `wf-it-...` sessions. Cleanup requires the generated name and
+exact tmux ID. One test covers managed creation; the other removes its test owner marker, adopts the
+same exact ID, rolls adoption back, and verifies that the tmux session remained alive throughout.
 
 ## Manual TUI matrix
 
 Run `uv run textual run --dev wf_session_manager.tui:WFApp` only with a suitable service fixture, or
-run `uv run wf-dev` against the live read-only session inventory.
+run `uv run wf-dev` against the managed inventory. Use `wf-dev list --all` for read-only diagnostics.
 
 Check at least:
 
@@ -31,5 +31,6 @@ Check at least:
 - inside-tmux switching and outside-tmux attachment
 - missing Claude, Codex, and Hermes commands
 - exact-name delete mismatch and cancellation
-- classic-session mutation rejection
+- unmanaged-session hiding and mutation rejection
+- stale adoption-plan rejection and exact-batch rollback
 - sanitized pane output containing ANSI, IP, home path, and test token patterns

@@ -31,7 +31,9 @@ class RecordingRunner:
 
 
 def test_list_sessions_parses_machine_format() -> None:
-    line = FIELD_SEPARATOR.join(("$3", "claude-api", "1767225600", "1", "2", "/srv/api", "claude"))
+    line = FIELD_SEPARATOR.join(
+        ("$3", "claude-api", "1767225600", "1", "2", "/srv/api", "claude", "")
+    )
     runner = RecordingRunner(stdout=f"{line}\n")
     sessions = TmuxBackend(runner).list_sessions()
     assert sessions[0].name == "claude-api"
@@ -61,6 +63,20 @@ def test_session_option_uses_exact_pane_target() -> None:
         "tmux",
         "show-options",
         "-qv",
+        "-t",
+        "=claude-api:",
+        "@wf_owner",
+    )
+
+
+def test_unset_session_option_uses_exact_pane_target() -> None:
+    runner = RecordingRunner()
+    TmuxBackend(runner).unset_option("claude-api", "@wf_owner")
+    assert runner.calls[0] == (
+        "tmux",
+        "set-option",
+        "-q",
+        "-u",
         "-t",
         "=claude-api:",
         "@wf_owner",

@@ -24,6 +24,7 @@ TMUX_FORMAT = "\x1f".join(
         "#{session_windows}",
         "#{pane_current_path}",
         "#{pane_current_command}",
+        "#{@wf_owner}",
     )
 )
 
@@ -97,9 +98,9 @@ class TmuxBackend:
             if not line:
                 continue
             fields = line.split(FIELD_SEPARATOR)
-            if len(fields) != 7:
+            if len(fields) != 8:
                 raise TmuxError("tmux returned an unexpected session record")
-            session_id, name, created, attached, windows, cwd, command = fields
+            session_id, name, created, attached, windows, cwd, command, owner = fields
             try:
                 sessions.append(
                     TmuxSession(
@@ -110,6 +111,7 @@ class TmuxBackend:
                         windows=int(windows),
                         cwd=Path(cwd or "/"),
                         current_command=command,
+                        wf_owner=owner or None,
                     )
                 )
             except (ValueError, TypeError) as error:
@@ -175,6 +177,9 @@ class TmuxBackend:
         if result.returncode != 0:
             return None
         return result.stdout.strip() or None
+
+    def unset_option(self, name: str, option: str) -> None:
+        self._run("set-option", "-q", "-u", "-t", f"={name}:", option)
 
     def capture_pane(self, name: str, lines: int) -> str:
         session = self.get_session(name)

@@ -1,9 +1,16 @@
+from pathlib import Path
+
 import pytest
 from textual.widgets import DataTable, Input
 
 from conftest import FakeBackend
+from wf_session_manager.models import CreateRequest, Tool
 from wf_session_manager.service import SessionService
 from wf_session_manager.tui import CreateSessionScreen, WFApp
+
+
+def create_managed(service: SessionService, name: str, tool: Tool) -> None:
+    service.create(CreateRequest(name=name, tool=tool, cwd=Path("/tmp")))
 
 
 @pytest.mark.asyncio
@@ -11,8 +18,8 @@ async def test_tui_loads_and_filters_sessions(
     service: SessionService,
     fake_backend: FakeBackend,
 ) -> None:
-    fake_backend.add("claude-first")
-    fake_backend.add("codex-second")
+    create_managed(service, "first", Tool.CLAUDE)
+    create_managed(service, "second", Tool.CODEX)
     app = WFApp(service)
     async with app.run_test(size=(120, 36)) as pilot:
         table = app.query_one("#sessions", DataTable)
@@ -28,7 +35,7 @@ async def test_tui_enter_attaches_highlighted_table_row(
     service: SessionService,
     fake_backend: FakeBackend,
 ) -> None:
-    fake_backend.add("claude-first")
+    create_managed(service, "first", Tool.CLAUDE)
     app = WFApp(service)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -42,8 +49,8 @@ async def test_tui_enter_attaches_filtered_search_result(
     service: SessionService,
     fake_backend: FakeBackend,
 ) -> None:
-    fake_backend.add("claude-first")
-    fake_backend.add("codex-second")
+    create_managed(service, "first", Tool.CLAUDE)
+    create_managed(service, "second", Tool.CODEX)
     app = WFApp(service)
     async with app.run_test() as pilot:
         search = app.query_one("#search", Input)

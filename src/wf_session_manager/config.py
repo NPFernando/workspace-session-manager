@@ -43,8 +43,6 @@ class AppConfig(BaseModel):
     schema_version: int = Field(default=1, ge=1, le=1)
     refresh_interval: float = Field(default=3.0, ge=1.0, le=60.0)
     preview_lines: int = Field(default=80, ge=10, le=500)
-    fallback_to_classic_on_error: bool = False
-    classic_command: Path | None = None
     legacy_state_dirs: tuple[Path, ...] = Field(
         default_factory=lambda: (
             Path.home() / ".local" / "state" / "wf" / "sessions",
@@ -52,11 +50,6 @@ class AppConfig(BaseModel):
         )
     )
     tools: dict[Tool, ToolProfile] = Field(default_factory=default_tools)
-
-    @field_validator("classic_command")
-    @classmethod
-    def expand_classic_command(cls, value: Path | None) -> Path | None:
-        return value.expanduser() if value else None
 
     @field_validator("legacy_state_dirs")
     @classmethod

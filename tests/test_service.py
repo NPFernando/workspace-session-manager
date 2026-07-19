@@ -8,11 +8,12 @@ from wf_session_manager.models import CreateRequest, SessionMetadata, SessionSta
 from wf_session_manager.service import SessionService
 
 
-def test_foreign_session_is_visible_but_not_mutable(
+def test_foreign_session_is_hidden_but_available_for_diagnostics(
     service: SessionService, fake_backend: FakeBackend
 ) -> None:
     fake_backend.add("claude-existing")
-    session = service.get("claude-existing")
+    assert service.list_sessions() == []
+    session = service.get("claude-existing", include_unmanaged=True)
     assert not session.owned
     with pytest.raises(OwnershipError, match="not created"):
         service.delete(session.name)
@@ -63,7 +64,7 @@ def test_stale_record_does_not_grant_ownership(
             cwd=Path("/tmp"),
         )
     )
-    assert not service.get(session.name).owned
+    assert not service.get(session.name, include_unmanaged=True).owned
     with pytest.raises(OwnershipError):
         service.update_note(session.name, "should fail")
 

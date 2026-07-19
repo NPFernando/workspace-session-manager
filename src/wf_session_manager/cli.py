@@ -6,22 +6,23 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
+from uuid import UUID
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from wf_session_manager import __version__
-from wf_session_manager.classic import exec_classic
 from wf_session_manager.config import AppConfig, load_config
 from wf_session_manager.errors import WFError
 from wf_session_manager.legacy import LegacyMetadataReader
+from wf_session_manager.migration import MigrationManager, MigrationPlan
 from wf_session_manager.models import CreateRequest, SessionState, Tool
 from wf_session_manager.paths import AppPaths
 from wf_session_manager.service import SessionService
 from wf_session_manager.store import MetadataStore
 from wf_session_manager.tmux import TmuxBackend
-from wf_session_manager.tui import CLASSIC_RESULT, WFApp
+from wf_session_manager.tui import WFApp
 
 app = typer.Typer(
     name="WF",
@@ -32,6 +33,8 @@ app = typer.Typer(
 )
 console = Console()
 error_console = Console(stderr=True)
+migration_app = typer.Typer(help="Preview, apply, inspect, and roll back session adoption.")
+app.add_typer(migration_app, name="migrate")
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +49,14 @@ class Runtime:
             config=self.config,
             paths=self.paths,
             legacy=LegacyMetadataReader(self.config.legacy_state_dirs),
+        )
+
+    def migration(self) -> MigrationManager:
+        return MigrationManager(
+            backend=TmuxBackend(),
+            store=MetadataStore(self.paths),
+            legacy=LegacyMetadataReader(self.config.legacy_state_dirs),
+            paths=self.paths,
         )
 
 
@@ -69,23 +80,15 @@ def abort(error: Exception) -> None:
 def run_tui(runtime: Runtime) -> None:
     try:
         result = WFApp(runtime.service()).run()
-        if result == CLASSIC_RESULT:
-            exec_classic(runtime.config)
-        elif result:
+        if result:
             runtime.service().attach(result)
     except WFError as error:
-        if runtime.config.fallback_to_classic_on_error:
-            exec_classic(runtime.config)
         abort(error)
 
 
 @app.callback()
 def root(
     context: typer.Context,
-    classic: Annotated[
-        bool,
-        typer.Option("--classic", help="Open the preserved fzf implementation."),
-    ] = False,
     version: Annotated[
         bool,
         typer.Option("--version", "-V", help="Show the WF version."),
@@ -104,11 +107,6 @@ def root(
     if version:
         typer.echo(f"WF {__version__}")
         raise typer.Exit()
-    if classic:
-        try:
-            exec_classic(runtime.config)
-        except WFError as error:
-            abort(error)
     if context.invoked_subcommand is None:
         run_tui(runtime)
 
@@ -117,10 +115,18 @@ def root(
 def list_command(
     context: typer.Context,
     as_json: Annotated[bool, typer.Option("--json", help="Emit machine-readable JSON.")] = False,
+    include_unmanaged: Annotated[
+        bool,
+        typer.Option("--all", help="Include unmanaged tmux sessions for diagnostics."),
+    ] = False,
 ) -> None:
-    """List live tmux sessions without changing them."""
+    """List managed sessions without changing them."""
     try:
-        sessions = runtime_from_context(context).service().list_sessions()
+        sessions = (
+            runtime_from_context(context)
+            .service()
+            .list_sessions(include_unmanaged=include_unmanaged)
+        )
     except WFError as error:
         abort(error)
     if as_json:
@@ -140,7 +146,7 @@ def list_command(
             session.tool.value,
             session.state,
             str(session.cwd),
-            "WF" if session.owned else "classic/read-only",
+            "managed" if session.owned else "unmanaged",
         )
     console.print(table)
 
@@ -163,7 +169,7 @@ def inspect(
     console.print(f"[bold cyan]{session.name}[/bold cyan]")
     console.print(f"Tool: {session.tool.value}")
     console.print(f"Status: {'attached' if session.attached else 'detached'}")
-    console.print(f"Ownership: {'managed' if session.owned else 'classic / read-only'}")
+    console.print("Ownership: managed")
     console.print(f"Directory: {session.cwd}")
     console.print(f"Note: {session.note or '-'}")
     console.rule("Sanitized preview")
@@ -258,7 +264,7 @@ def delete(
     name: str,
     yes: Annotated[bool, typer.Option("--yes", help="Skip typed confirmation.")] = False,
 ) -> None:
-    """Delete a WF-owned session; classic sessions are always rejected."""
+    """Delete a WF-owned session."""
     if not yes:
         confirmation = typer.prompt(f'Type "{name}" to confirm deletion')
         if confirmation != name:
@@ -276,7 +282,7 @@ def doctor(
     context: typer.Context,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Check tmux, agent commands, state, and classic fallback availability."""
+    """Check tmux, agent commands, state, and migration readiness."""
     report = runtime_from_context(context).service().doctor()
     if as_json:
         typer.echo(report.model_dump_json(indent=2))
@@ -292,13 +298,135 @@ def doctor(
         raise typer.Exit(1)
 
 
-@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-def classic(context: typer.Context) -> None:
-    """Run the preserved classic implementation with optional arguments."""
+def _migration_manager(context: typer.Context) -> MigrationManager:
+    return runtime_from_context(context).migration()
+
+
+def _print_migration_plan(plan: MigrationPlan) -> None:
+    table = Table(show_header=True, header_style="bold cyan", box=None)
+    table.add_column("Session")
+    table.add_column("Tmux ID")
+    table.add_column("Tool")
+    table.add_column("Directory")
+    table.add_column("Sources")
+    table.add_column("Warnings")
+    for item in plan.items:
+        table.add_row(
+            item.name,
+            item.tmux_session_id,
+            item.tool.value,
+            str(item.cwd),
+            str(len(item.sources)),
+            "; ".join(item.warnings) or "-",
+        )
+    console.print(table)
+    console.print(f"Plan ID: {plan.plan_id}")
+    console.print(f"Snapshot: {plan.snapshot_digest}")
+    console.print("Notes are included in the private plan file but redacted from this view.")
+
+
+@migration_app.command("preview")
+def migration_preview(
+    context: typer.Context,
+    sessions: Annotated[
+        list[str] | None,
+        typer.Option("--session", "-s", help="Exact tmux session name; repeat as needed."),
+    ] = None,
+    all_sessions: Annotated[
+        bool,
+        typer.Option("--all", help="Select every eligible unmanaged session."),
+    ] = False,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Write an approval plan with mode 0600."),
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Build a read-only, exact-ID adoption plan."""
+    if all_sessions == bool(sessions):
+        error_console.print("[red]Error:[/red] choose --all or at least one --session")
+        raise typer.Exit(2)
     try:
-        exec_classic(runtime_from_context(context).config, list(context.args))
+        manager = _migration_manager(context)
+        plan = manager.preview(None if all_sessions else sessions)
+        if output is not None:
+            manager.write_plan(plan, output.expanduser())
     except WFError as error:
         abort(error)
+    if as_json:
+        typer.echo(plan.model_dump_json(indent=2))
+    else:
+        _print_migration_plan(plan)
+    if output is not None:
+        console.print(f"Plan written: {output.expanduser()}")
+
+
+@migration_app.command("apply")
+def migration_apply(
+    context: typer.Context,
+    plan_path: Annotated[Path, typer.Argument(help="Reviewed migration plan JSON file.")],
+    approve: Annotated[
+        bool,
+        typer.Option("--approve", help="Approve adoption of every exact session in the plan."),
+    ] = False,
+) -> None:
+    """Adopt sessions only when the reviewed snapshot is unchanged."""
+    if not approve:
+        error_console.print("[red]Error:[/red] refusing migration without --approve")
+        raise typer.Exit(2)
+    try:
+        journal = _migration_manager(context).apply(plan_path.expanduser())
+    except WFError as error:
+        abort(error)
+    console.print(f"Applied migration {journal.migration_id}: {len(journal.items)} sessions")
+
+
+@migration_app.command("status")
+def migration_status(
+    context: typer.Context,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Show migration journals without changing sessions."""
+    try:
+        journals = _migration_manager(context).status()
+    except WFError as error:
+        abort(error)
+    if as_json:
+        typer.echo(json.dumps([item.model_dump(mode="json") for item in journals], indent=2))
+        return
+    table = Table(show_header=True, header_style="bold cyan", box=None)
+    table.add_column("Migration")
+    table.add_column("Status")
+    table.add_column("Sessions")
+    table.add_column("Updated")
+    for journal in journals:
+        table.add_row(
+            str(journal.migration_id),
+            journal.status,
+            str(len(journal.items)),
+            journal.updated_at.isoformat(),
+        )
+    console.print(table)
+
+
+@migration_app.command("rollback")
+def migration_rollback(
+    context: typer.Context,
+    migration_id: Annotated[UUID, typer.Argument(help="Applied migration ID.")],
+    approve: Annotated[
+        bool,
+        typer.Option("--approve", help="Approve removal of this migration's ownership records."),
+    ] = False,
+) -> None:
+    """Return an unchanged migration batch to unmanaged status."""
+    if not approve:
+        error_console.print("[red]Error:[/red] refusing rollback without --approve")
+        raise typer.Exit(2)
+    try:
+        journal = _migration_manager(context).rollback(migration_id)
+    except WFError as error:
+        abort(error)
+    console.print(f"Rolled back migration {journal.migration_id}: {len(journal.items)} sessions")
 
 
 def main() -> None:

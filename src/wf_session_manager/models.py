@@ -62,6 +62,7 @@ class TmuxSession(BaseModel):
     windows: int = Field(ge=1)
     cwd: Path
     current_command: str
+    wf_owner: str | None = None
 
     @property
     def attached(self) -> bool:
@@ -113,13 +114,14 @@ class SessionMetadata(BaseModel):
 
 
 class LegacyMetadata(BaseModel):
-    """Read-only data discovered from the classic launcher."""
+    """Read-only data discovered from the legacy launcher."""
 
     model_config = ConfigDict(frozen=True)
     tool: Tool | None = None
     cwd: Path | None = None
     project: Path | None = None
     note: str = ""
+    tags: list[str] = Field(default_factory=list)
     state: str = ""
     last_used: datetime | None = None
     pinned: bool = False

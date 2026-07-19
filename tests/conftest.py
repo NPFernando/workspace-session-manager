@@ -18,6 +18,7 @@ from wf_session_manager.store import MetadataStore
 class FakeBackend:
     def __init__(self) -> None:
         self.sessions: dict[str, TmuxSession] = {}
+        self.options: dict[tuple[str, str], str] = {}
         self.previews: dict[str, str] = {}
         self.attached: list[str] = []
         self.created_commands: list[tuple[tuple[str, ...], tuple[str, ...] | None]] = []
@@ -72,7 +73,9 @@ class FakeBackend:
         self.created_commands.append(
             (tuple(shell_command), tuple(agent_command) if agent_command else None)
         )
-        return self.add(name, cwd=cwd, command=Path((agent_command or shell_command)[0]).name)
+        session = self.add(name, cwd=cwd, command=Path((agent_command or shell_command)[0]).name)
+        self.set_option(name, "@wf_owner", "wf-session-manager")
+        return session
 
     def capture_pane(self, name: str, lines: int) -> str:
         self.get_session(name)
@@ -89,12 +92,34 @@ class FakeBackend:
         session = self.get_session(old_name)
         del self.sessions[old_name]
         self.sessions[new_name] = session.model_copy(update={"name": new_name})
+        for (session_name, option), value in list(self.options.items()):
+            if session_name == old_name:
+                del self.options[(session_name, option)]
+                self.options[(new_name, option)] = value
 
     def kill_session(self, name: str, expected_id: str | None = None) -> None:
         session = self.get_session(name)
         if expected_id is not None and session.session_id != expected_id:
             raise TmuxError("tmux ID mismatch")
         del self.sessions[name]
+        for key in [key for key in self.options if key[0] == name]:
+            del self.options[key]
+
+    def set_option(self, name: str, option: str, value: str) -> None:
+        session = self.get_session(name)
+        self.options[(name, option)] = value
+        if option == "@wf_owner":
+            self.sessions[name] = session.model_copy(update={"wf_owner": value})
+
+    def get_option(self, name: str, option: str) -> str | None:
+        self.get_session(name)
+        return self.options.get((name, option))
+
+    def unset_option(self, name: str, option: str) -> None:
+        session = self.get_session(name)
+        self.options.pop((name, option), None)
+        if option == "@wf_owner":
+            self.sessions[name] = session.model_copy(update={"wf_owner": None})
 
 
 @pytest.fixture

@@ -27,6 +27,14 @@ class AppPaths:
     def lock_file(self) -> Path:
         return self.state_dir / ".state.lock"
 
+    @property
+    def migrations_dir(self) -> Path:
+        return self.state_dir / "migrations"
+
+    @property
+    def migration_lock_file(self) -> Path:
+        return self.state_dir / ".migration.lock"
+
     @classmethod
     def discover(cls, namespace: str = "wf-session-manager") -> AppPaths:
         """Use an isolated namespace; WF_DEV_ROOT makes tests fully hermetic."""
