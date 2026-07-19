@@ -75,7 +75,9 @@ class TmuxBackend:
         if result.returncode != 0:
             stderr = (result.stderr or "").strip()
             if allow_no_server and (
-                "no server running" in stderr.lower() or "failed to connect" in stderr.lower()
+                "no server running" in stderr.lower()
+                or "failed to connect" in stderr.lower()
+                or "error connecting to" in stderr.lower()
             ):
                 return result
             detail = stderr or f"tmux exited with status {result.returncode}"

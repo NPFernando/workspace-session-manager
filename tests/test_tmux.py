@@ -1,6 +1,8 @@
 import subprocess
 from collections.abc import Sequence
 
+import pytest
+
 from wf_session_manager.tmux import FIELD_SEPARATOR, TmuxBackend
 
 
@@ -38,8 +40,16 @@ def test_list_sessions_parses_machine_format() -> None:
     assert runner.calls[0][:2] == ("tmux", "list-sessions")
 
 
-def test_no_server_is_an_empty_inventory() -> None:
-    runner = RecordingRunner(returncode=1, stderr="no server running on /tmp/tmux")
+@pytest.mark.parametrize(
+    "message",
+    (
+        "no server running on /tmp/tmux",
+        "failed to connect to server",
+        "error connecting to /tmp/tmux-1001/default (No such file or directory)",
+    ),
+)
+def test_no_server_is_an_empty_inventory(message: str) -> None:
+    runner = RecordingRunner(returncode=1, stderr=message)
     assert TmuxBackend(runner).list_sessions() == []
 
 
