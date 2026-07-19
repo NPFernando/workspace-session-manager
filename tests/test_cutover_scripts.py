@@ -5,6 +5,7 @@ import hashlib
 import os
 import runpy
 import shlex
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -151,6 +152,8 @@ def make_install_simulation(
     *,
     unmanaged: bool,
     rollback_fails: bool = False,
+    switch_fails: bool = False,
+    backup_stamp: str = "",
 ) -> tuple[dict[str, str], Path, Path, Path, Path]:
     home = tmp_path / "home"
     data = tmp_path / "data"
@@ -230,6 +233,43 @@ def make_install_simulation(
         encoding="utf-8",
     )
     python3.chmod(0o700)
+    real_mv = shutil.which("mv")
+    real_date = shutil.which("date")
+    assert real_mv is not None
+    assert real_date is not None
+    mv = fake_bin / "mv"
+    mv.write_text(
+        textwrap.dedent(
+            r"""
+            #!/usr/bin/env bash
+            if [[ "${WF_TEST_SWITCH_FAIL:-0}" == '1' && "${1:-}" == '-Tf' ]]; then
+              exit 73
+            fi
+            exec __REAL_MV__ "$@"
+            """
+        )
+        .lstrip()
+        .replace("__REAL_MV__", shlex.quote(real_mv)),
+        encoding="utf-8",
+    )
+    mv.chmod(0o700)
+    date = fake_bin / "date"
+    date.write_text(
+        textwrap.dedent(
+            r"""
+            #!/usr/bin/env bash
+            if [[ "${1:-}" == '+%Y%m%d-%H%M%S' && -n "${WF_TEST_BACKUP_STAMP:-}" ]]; then
+              printf '%s\n' "$WF_TEST_BACKUP_STAMP"
+              exit 0
+            fi
+            exec __REAL_DATE__ "$@"
+            """
+        )
+        .lstrip()
+        .replace("__REAL_DATE__", shlex.quote(real_date)),
+        encoding="utf-8",
+    )
+    date.chmod(0o700)
     env = {
         **os.environ,
         "HOME": str(home),
@@ -238,6 +278,8 @@ def make_install_simulation(
         "WF_TEST_LOG": str(log),
         "WF_TEST_UNMANAGED": "1" if unmanaged else "0",
         "WF_TEST_ROLLBACK_FAIL": "1" if rollback_fails else "0",
+        "WF_TEST_SWITCH_FAIL": "1" if switch_fails else "0",
+        "WF_TEST_BACKUP_STAMP": backup_stamp,
     }
     return env, current, target, log, plan
 
@@ -270,6 +312,11 @@ def test_install_completes_simulated_transaction(tmp_path: Path) -> None:
     assert f"migrate apply {plan} --approve" in log.read_text(encoding="utf-8")
     assert "migrate rollback" not in log.read_text(encoding="utf-8")
     assert "tmux processes were not restarted, renamed, or terminated" in result.stdout
+    backups = list(install_root.glob("WF.pre-cutover.*"))
+    assert len(backups) == 1
+    assert backups[0].is_symlink()
+    assert backups[0].resolve() == current
+    assert not list(target.parent.glob(".WF.switch.*"))
 
 
 def test_install_rolls_back_adoption_on_pre_cutover_failure(tmp_path: Path) -> None:
@@ -381,6 +428,66 @@ def test_install_reports_failed_automatic_rollback(tmp_path: Path) -> None:
     assert f"migrate rollback {TEST_MIGRATION_ID} --approve" in log.read_text(encoding="utf-8")
 
 
+def test_install_rolls_back_when_atomic_command_switch_fails(tmp_path: Path) -> None:
+    env, current, target, log, plan = make_install_simulation(
+        tmp_path,
+        unmanaged=False,
+        switch_fails=True,
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(INSTALL_SCRIPT),
+            "--approve-cutover",
+            "--migration-plan",
+            str(plan),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "Rolled back migration" in result.stderr
+    assert target.resolve() == current
+    assert f"migrate rollback {TEST_MIGRATION_ID} --approve" in log.read_text(encoding="utf-8")
+    assert not list(target.parent.glob(".WF.switch.*"))
+
+
+def test_install_refuses_backup_collision_and_rolls_back(tmp_path: Path) -> None:
+    stamp = "20260719-130000"
+    env, current, target, log, plan = make_install_simulation(
+        tmp_path,
+        unmanaged=False,
+        backup_stamp=stamp,
+    )
+    install_root = Path(env["XDG_DATA_HOME"]) / "wf-session-manager"
+    install_root.mkdir(parents=True)
+    backup = install_root / f"WF.pre-cutover.{stamp}"
+    backup.write_text("keep existing backup\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(INSTALL_SCRIPT),
+            "--approve-cutover",
+            "--migration-plan",
+            str(plan),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "existing command backup" in result.stderr
+    assert "Rolled back migration" in result.stderr
+    assert backup.read_text(encoding="utf-8") == "keep existing backup\n"
+    assert target.resolve() == current
+    assert f"migrate rollback {TEST_MIGRATION_ID} --approve" in log.read_text(encoding="utf-8")
+
+
 def test_uninstall_restores_only_checksum_verified_classic(tmp_path: Path) -> None:
     env, classic = make_retirement_fixture(tmp_path, age_days=1)
     target = Path(env["HOME"]) / ".local" / "bin" / "WF"
@@ -394,6 +501,7 @@ def test_uninstall_restores_only_checksum_verified_classic(tmp_path: Path) -> No
 
     assert restored.returncode == 0, restored.stderr
     assert target.resolve() == classic
+    assert not list(target.parent.glob(".WF.switch.*"))
 
 
 def test_uninstall_refuses_modified_classic(tmp_path: Path) -> None:

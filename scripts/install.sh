@@ -9,6 +9,29 @@ owner_only_regular_file() {
   (( (8#$mode & 8#077) == 0 ))
 }
 
+replace_with_symlink() {
+  local destination="$1"
+  local target_path="$2"
+  local target_dir
+  local temporary_dir
+  local temporary_link
+  target_dir="$(dirname -- "$target_path")"
+  temporary_dir="$(mktemp -d --tmpdir="$target_dir" ".${target_path##*/}.switch.XXXXXX")"
+  temporary_link="$temporary_dir/${target_path##*/}"
+  if ! ln -s -- "$destination" "$temporary_link"; then
+    rmdir -- "$temporary_dir" || true
+    return 1
+  fi
+  if ! mv -Tf -- "$temporary_link" "$target_path"; then
+    rm -f -- "$temporary_link"
+    rmdir -- "$temporary_dir" || true
+    return 1
+  fi
+  if ! rmdir -- "$temporary_dir"; then
+    printf 'Warning: unable to remove temporary link directory: %s\n' "$temporary_dir" >&2
+  fi
+}
+
 rollback_migration_on_failure() {
   local status=$?
   local rollback_status
@@ -165,7 +188,11 @@ if (( legacy_unmanaged > 0 )); then
 fi
 
 backup="$install_root/WF.pre-cutover.$(date +%Y%m%d-%H%M%S)"
-cp -a -- "$current" "$backup"
+if [[ -e "$backup" || -L "$backup" ]]; then
+  printf 'Refusing to overwrite an existing command backup: %s\n' "$backup" >&2
+  exit 1
+fi
+cp -aT -- "$current" "$backup"
 marker_temporary="$(mktemp --tmpdir="$install_root" '.classic-owner.XXXXXX')"
 umask 077
 {
@@ -175,7 +202,7 @@ umask 077
 } > "$marker_temporary"
 chmod 600 "$marker_temporary"
 mv -- "$marker_temporary" "$owner_marker"
-ln -sfn -- "$venv_dir/bin/WF" "$target"
+replace_with_symlink "$venv_dir/bin/WF" "$target"
 cutover_complete=1
 trap - EXIT
 

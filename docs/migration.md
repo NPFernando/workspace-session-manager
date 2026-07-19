@@ -82,6 +82,8 @@ If automatic rollback cannot complete because migration state changed concurrent
 retains its failing exit status and prints the migration ID and recovery command path for inspection.
 The complete installer transaction is protected by a nonblocking user-owned lock; a concurrent
 cutover attempt exits before preserving a command, replacing the environment, or applying a plan.
+The final command switch is an atomic rename of a private temporary symlink. Existing timestamped
+command backups are never overwritten; a collision aborts cutover and rolls back adoption.
 
 Adoption writes new WF metadata and a tmux user option. It does not attach, rename, restart, kill, or
 send input to a session, and it never changes a legacy sidecar. Unrelated unmanaged tmux sessions may
@@ -115,6 +117,8 @@ scripts/uninstall.sh --restore-classic
 
 Command rollback requires the installer ownership marker and refuses a preservation copy whose
 ownership, permissions, or checksum changed after cutover.
+It atomically replaces the installed command symlink, so `WF` never passes through an intentionally
+missing intermediate state.
 
 Then use the retained installed command path to inspect journals and roll back adoption if the adopted
 records have not changed:

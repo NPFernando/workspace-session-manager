@@ -36,4 +36,5 @@ Check at least:
 - preservation checksum enforcement and refusal to retire an active classic command
 - simulated installer success, pre-cutover adoption rollback, and rollback-failure reporting
 - real advisory-lock contention between isolated installer processes
+- atomic command-switch failure recovery and command-backup collision refusal
 - sanitized pane output containing ANSI, IP, home path, and test token patterns

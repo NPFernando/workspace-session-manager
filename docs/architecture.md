@@ -57,6 +57,11 @@ hidden by the original installer error. A separate owner-only, nonblocking `floc
 installer transaction so preservation, environment installation, adoption, and command switching
 cannot race another cutover invocation.
 
+Install and command rollback create a private temporary symlink beside `~/.local/bin/WF` and use a
+same-filesystem rename for the final replacement. The old command therefore remains available until
+the new link is complete. Timestamped pre-cutover backups use no-replace semantics; a collision aborts
+and enters the same adoption-recovery path.
+
 ## Persistence
 
 State directories use mode `0700`; files and locks use `0600`. Writes occur through a temporary file

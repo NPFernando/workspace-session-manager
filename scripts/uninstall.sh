@@ -9,6 +9,29 @@ owner_only_regular_file() {
   (( (8#$mode & 8#077) == 0 ))
 }
 
+replace_with_symlink() {
+  local destination="$1"
+  local target_path="$2"
+  local target_dir
+  local temporary_dir
+  local temporary_link
+  target_dir="$(dirname -- "$target_path")"
+  temporary_dir="$(mktemp -d --tmpdir="$target_dir" ".${target_path##*/}.switch.XXXXXX")"
+  temporary_link="$temporary_dir/${target_path##*/}"
+  if ! ln -s -- "$destination" "$temporary_link"; then
+    rmdir -- "$temporary_dir" || true
+    return 1
+  fi
+  if ! mv -Tf -- "$temporary_link" "$target_path"; then
+    rm -f -- "$temporary_link"
+    rmdir -- "$temporary_dir" || true
+    return 1
+  fi
+  if ! rmdir -- "$temporary_dir"; then
+    printf 'Warning: unable to remove temporary link directory: %s\n' "$temporary_dir" >&2
+  fi
+}
+
 if [[ "${1:-}" != "--restore-classic" ]]; then
   printf '%s\n' 'Refusing rollback without explicit approval.' >&2
   printf '%s\n' 'Run: scripts/uninstall.sh --restore-classic' >&2
@@ -53,6 +76,6 @@ if [[ ! -L "$target" || "$(readlink -f -- "$target")" != "$expected" ]]; then
   exit 1
 fi
 
-ln -sfn -- "$classic" "$target"
+replace_with_symlink "$classic" "$target"
 printf 'Restored classic WF: %s -> %s\n' "$target" "$classic"
 printf '%s\n' 'New metadata and the virtual environment were retained for recovery.'

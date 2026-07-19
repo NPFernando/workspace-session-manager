@@ -38,6 +38,8 @@ command remains active so it cannot remove a classic executable currently servin
 Before that command switch, installer failures roll back only the exact migration applied by the same
 installer invocation. A private process lock prevents concurrent installer invocations from racing
 over the preserved command, virtual environment, ownership marker, or command symlink.
+Command switches use same-directory temporary symlinks and atomic rename, while pre-cutover backups
+refuse existing destinations instead of replacing them.
 
 ## Reporting
 
