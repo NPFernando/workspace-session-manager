@@ -24,6 +24,38 @@ async def test_tui_loads_and_filters_sessions(
 
 
 @pytest.mark.asyncio
+async def test_tui_enter_attaches_highlighted_table_row(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    fake_backend.add("claude-first")
+    app = WFApp(service)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+
+    assert app.return_value == "claude-first"
+
+
+@pytest.mark.asyncio
+async def test_tui_enter_attaches_filtered_search_result(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    fake_backend.add("claude-first")
+    fake_backend.add("codex-second")
+    app = WFApp(service)
+    async with app.run_test() as pilot:
+        search = app.query_one("#search", Input)
+        search.value = "codex"
+        search.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+
+    assert app.return_value == "codex-second"
+
+
+@pytest.mark.asyncio
 async def test_tui_create_dialog_is_keyboard_accessible(service: SessionService) -> None:
     app = WFApp(service)
     async with app.run_test(size=(100, 30)) as pilot:

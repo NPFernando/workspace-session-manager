@@ -280,6 +280,17 @@ class WFApp(App[str | None]):
         self.selected_name = str(event.row_key.value)
         self._render_details(self.selected_name)
 
+    @on(DataTable.RowSelected, "#sessions")
+    def row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.row_key is None or event.row_key.value is None:
+            return
+        self.selected_name = str(event.row_key.value)
+        self.action_attach()
+
+    @on(Input.Submitted, "#search")
+    def search_submitted(self) -> None:
+        self.action_attach()
+
     def _selected(self) -> SessionView | None:
         if self.selected_name is None:
             return None
