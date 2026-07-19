@@ -82,6 +82,13 @@ class MetadataStore:
         with self._locked():
             self._write_unlocked(self._path(record.name), record)
 
+    def save_new(self, record: SessionMetadata) -> None:
+        path = self._path(record.name)
+        with self._locked():
+            if path.exists():
+                raise StateError(f"metadata already exists: {record.name}")
+            self._write_unlocked(path, record)
+
     def replace(self, old_name: str, record: SessionMetadata) -> None:
         old_path = self._path(old_name)
         new_path = self._path(record.name)

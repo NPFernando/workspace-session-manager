@@ -6,6 +6,10 @@ from uuid import uuid4
 
 import pytest
 
+from wf_session_manager.legacy import LegacyMetadataReader
+from wf_session_manager.migration import MigrationManager
+from wf_session_manager.paths import AppPaths
+from wf_session_manager.store import MetadataStore
 from wf_session_manager.tmux import TmuxBackend
 
 
@@ -18,6 +22,51 @@ def test_real_tmux_create_capture_and_guarded_delete(tmp_path: Path) -> None:
     backend = TmuxBackend()
     name = f"wf-it-{uuid4().hex[:12]}"
     assert not backend.session_exists(name)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.environ.get("WF_RUN_TMUX_INTEGRATION") != "1",
+    reason="set WF_RUN_TMUX_INTEGRATION=1 to create one disposable tmux session",
+)
+def test_real_tmux_exact_id_adoption_and_rollback(tmp_path: Path) -> None:
+    backend = TmuxBackend()
+    name = f"wf-it-adopt-{uuid4().hex[:8]}"
+    created = backend.create_session(
+        name=name,
+        cwd=tmp_path,
+        shell_command=("/bin/bash", "--noprofile", "--norc"),
+        agent_command=None,
+    )
+    backend.unset_option(name, "@wf_owner", expected_id=created.session_id)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / f"{name}.tool").write_text("shell\n", encoding="utf-8")
+    (legacy / f"{name}.cwd").write_text(f"{tmp_path}\n", encoding="utf-8")
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    manager = MigrationManager(
+        backend=backend,
+        store=MetadataStore(paths),
+        legacy=LegacyMetadataReader((legacy,)),
+        paths=paths,
+    )
+    plan_path = tmp_path / "adoption-plan.json"
+    try:
+        manager.write_plan(manager.preview([name]), plan_path)
+        journal = manager.apply(plan_path)
+        assert backend.get_session(name).session_id == created.session_id
+        assert (
+            backend.get_option(name, "@wf_owner", expected_id=created.session_id)
+            == "wf-session-manager"
+        )
+        manager.rollback(journal.migration_id)
+        assert backend.get_session(name).session_id == created.session_id
+        assert backend.get_option(name, "@wf_owner", expected_id=created.session_id) is None
+    finally:
+        live = next((item for item in backend.list_sessions() if item.name == name), None)
+        if live is not None and live.session_id == created.session_id and name.startswith("wf-it-"):
+            backend.kill_session(name, expected_id=created.session_id)
+    assert not backend.session_exists(name)
     created = backend.create_session(
         name=name,
         cwd=tmp_path,
@@ -26,15 +75,19 @@ def test_real_tmux_create_capture_and_guarded_delete(tmp_path: Path) -> None:
     )
     try:
         assert created.name == name
-        assert backend.get_option(name, "@wf_owner") == "wf-session-manager"
+        assert (
+            backend.get_option(name, "@wf_owner", expected_id=created.session_id)
+            == "wf-session-manager"
+        )
         assert backend.get_session(name).session_id == created.session_id
-        backend.capture_pane(name, 10)
+        backend.capture_pane(name, 10, expected_id=created.session_id)
     finally:
         live = next((item for item in backend.list_sessions() if item.name == name), None)
         if (
             live is not None
             and live.session_id == created.session_id
-            and backend.get_option(name, "@wf_owner") == "wf-session-manager"
+            and backend.get_option(name, "@wf_owner", expected_id=created.session_id)
+            == "wf-session-manager"
         ):
             backend.kill_session(name, expected_id=created.session_id)
     assert not backend.session_exists(name)

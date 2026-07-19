@@ -86,9 +86,10 @@ published.
 
 ## Migration constraints
 
-Development uses the `wf-session-manager` XDG namespace and the `wf-dev` command. Existing sessions
-are visible for inspection, but a tmux session is mutable only when both a new WF metadata record and
-the original tmux session ID prove ownership. Name matching alone never grants ownership.
+Development uses the `wf-session-manager` XDG namespace and the `wf-dev` command. Existing unmanaged
+sessions are hidden by default and available through `wf-dev list --all` for diagnostics. A tmux
+session is mutable only when a new WF metadata record, the original tmux session ID, and the tmux
+owner marker prove ownership. Name matching alone never grants ownership.
 
 Cutover requires explicit approval, a fresh backup, a preserved classic executable, and a manual
 change to the SSH login hook. Until then, the operational launcher remains authoritative.

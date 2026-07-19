@@ -31,3 +31,7 @@ class ToolUnavailableError(WFError):
 
 class StateError(WFError):
     """Persisted application state is corrupt or unavailable."""
+
+
+class MigrationError(WFError):
+    """A session adoption plan is invalid, stale, or unsafe to apply."""

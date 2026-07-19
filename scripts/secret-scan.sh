@@ -17,6 +17,7 @@ fi
 secret_files=()
 privacy_files=()
 for file in "${files[@]}"; do
+  [[ -f "$file" && ! -L "$file" ]] || continue
   case "$file" in
     tests/test_models.py|scripts/secret-scan.sh) ;;
     *) secret_files+=("$file") ;;
@@ -38,12 +39,14 @@ patterns=(
 
 failed=0
 for pattern in "${patterns[@]}"; do
-  if rg --line-number --no-heading --color never --regexp "$pattern" -- "${secret_files[@]}"; then
+  if (( ${#secret_files[@]} > 0 )) \
+    && rg --line-number --no-heading --color never --regexp "$pattern" -- "${secret_files[@]}"; then
     failed=1
   fi
 done
 
-if rg --line-number --no-heading --color never \
+if (( ${#privacy_files[@]} > 0 )) \
+  && rg --line-number --no-heading --color never \
   --regexp '/home/[A-Za-z0-9._-]+/' -- "${privacy_files[@]}"; then
   printf '%s\n' 'Absolute home path found; replace it with a portable path.' >&2
   failed=1
