@@ -1,0 +1,181 @@
+Screen {
+    background: #111417;
+    color: #e8ecef;
+}
+
+#brand {
+    dock: top;
+    height: 2;
+    padding: 0 2;
+    background: #161c20;
+    color: #7fd1b9;
+    text-style: bold;
+}
+
+#subtitle {
+    dock: top;
+    height: 1;
+    padding: 0 2;
+    background: #161c20;
+    color: #a9b4bc;
+}
+
+#search {
+    dock: top;
+    height: 3;
+    margin: 1 2 0 2;
+    border: tall #34424b;
+    background: #171c20;
+}
+
+#search:focus {
+    border: tall #7fd1b9;
+}
+
+#workspace {
+    height: 1fr;
+    margin: 1 2;
+}
+
+#session-pane {
+    width: 62%;
+    min-width: 48;
+    border-right: solid #34424b;
+    padding-right: 1;
+}
+
+#detail-pane {
+    width: 38%;
+    min-width: 32;
+    padding-left: 2;
+}
+
+#sessions {
+    height: 1fr;
+    background: #111417;
+}
+
+DataTable > .datatable--header {
+    background: #20282e;
+    color: #d6e2e8;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #28433e;
+    color: #ffffff;
+}
+
+#status {
+    height: 2;
+    padding: 0 1;
+    color: #9aa8b0;
+}
+
+#detail-title {
+    height: 2;
+    color: #7fd1b9;
+    text-style: bold;
+}
+
+#details {
+    height: auto;
+    min-height: 10;
+    padding-bottom: 1;
+}
+
+#preview {
+    height: 1fr;
+    min-height: 8;
+    padding: 1;
+    border: solid #34424b;
+    background: #0c0f11;
+    color: #c6d0d5;
+    overflow-y: auto;
+}
+
+Footer {
+    background: #161c20;
+}
+
+.dialog {
+    width: 64;
+    max-width: 92%;
+    height: auto;
+    max-height: 92%;
+    align: center middle;
+    padding: 1 2;
+    border: round #59717d;
+    background: #181e22;
+}
+
+.dialog-title {
+    height: 2;
+    color: #7fd1b9;
+    text-style: bold;
+}
+
+.field-label {
+    height: 1;
+    margin-top: 1;
+    color: #b9c4ca;
+}
+
+.dialog Input,
+.dialog Select {
+    width: 100%;
+}
+
+.dialog-actions {
+    height: 3;
+    align-horizontal: right;
+    margin-top: 1;
+}
+
+.dialog-actions Button {
+    margin-left: 1;
+}
+
+.danger-dialog {
+    border: round #b85c5c;
+}
+
+.confirm-copy {
+    margin-bottom: 1;
+}
+
+.compact #workspace {
+    layout: vertical;
+}
+
+.compact #session-pane,
+.compact #detail-pane {
+    width: 100%;
+    min-width: 0;
+}
+
+.compact #session-pane {
+    height: 58%;
+    border-right: none;
+    border-bottom: solid #34424b;
+    padding-right: 0;
+    padding-bottom: 1;
+}
+
+.compact #detail-pane {
+    height: 42%;
+    padding-left: 0;
+    padding-top: 1;
+}
+
+.short #subtitle {
+    display: none;
+}
+
+.short #search {
+    margin-top: 0;
+}
+
+.short #details {
+    min-height: 7;
+}

@@ -1,0 +1,11 @@
+title = "WF Session Manager gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic redaction fixtures and scanner rule definitions"
+paths = [
+  '''tests/test_models\.py''',
+  '''scripts/secret-scan\.sh''',
+]

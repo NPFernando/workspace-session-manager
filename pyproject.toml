@@ -1,0 +1,86 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wf-session-manager"
+version = "0.1.0"
+description = "A safe Textual interface for persistent tmux-based AI and shell sessions"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "WF contributors" }]
+keywords = ["tmux", "textual", "tui", "claude", "codex", "workflow"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Environment :: Console :: Curses",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development",
+  "Typing :: Typed",
+]
+dependencies = [
+  "platformdirs>=4.4,<5",
+  "pydantic>=2.12,<3",
+  "textual>=8.0,<9",
+  "typer>=0.26,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.3,<2",
+  "mypy>=2.0,<3",
+  "pytest>=8.4,<10",
+  "pytest-asyncio>=1.2,<2",
+  "pytest-cov>=7,<8",
+  "ruff>=0.15,<1",
+]
+
+[project.scripts]
+WF = "wf_session_manager.cli:main"
+wf-dev = "wf_session_manager.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/NPFernando/wf-session-manager"
+Issues = "https://github.com/NPFernando/wf-session-manager/issues"
+Source = "https://github.com/NPFernando/wf-session-manager"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+wf_session_manager = ["*.tcss", "py.typed"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "S", "RUF"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S108", "S603", "S607"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+pretty = true
+files = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers --cov=wf_session_manager --cov-report=term-missing --cov-fail-under=65"
+testpaths = ["tests"]
+markers = [
+  "integration: uses an isolated, uniquely named real tmux session",
+]
