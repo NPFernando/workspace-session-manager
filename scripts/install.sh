@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+owner_only_regular_file() {
+  local path="$1"
+  local mode
+  [[ -f "$path" && ! -L "$path" && -O "$path" ]] || return 1
+  mode="$(stat -c '%a' -- "$path")" || return 1
+  (( (8#$mode & 8#077) == 0 ))
+}
+
 approve=0
 migration_plan=''
 while (( $# > 0 )); do
@@ -38,6 +46,7 @@ bin_dir="$HOME/.local/bin"
 libexec_dir="$HOME/.local/libexec"
 target="$bin_dir/WF"
 classic="$libexec_dir/wf-classic"
+owner_marker="$install_root/classic-owner"
 if [[ -d "$target" && ! -L "$target" ]]; then
   printf 'Refusing directory at command target: %s\n' "$target" >&2
   exit 1
@@ -58,17 +67,30 @@ if [[ "$current_resolved" == "$venv_dir/bin/WF" ]]; then
   printf '%s\n' 'WF Session Manager is already installed.'
   exit 0
 fi
+if [[ ! -f "$current_resolved" || ! -x "$current_resolved" ]]; then
+  printf 'Cannot preserve unsafe or non-executable WF command: %s\n' "$current_resolved" >&2
+  exit 1
+fi
 
 mkdir -p "$install_root" "$bin_dir" "$libexec_dir"
 chmod 700 "$install_root" "$libexec_dir"
+if [[ ( -e "$owner_marker" || -L "$owner_marker" ) ]] \
+  && ! owner_only_regular_file "$owner_marker"; then
+  printf 'Refusing unsafe ownership marker: %s\n' "$owner_marker" >&2
+  exit 1
+fi
 
-classic_created=0
-if [[ ! -e "$classic" ]]; then
+current_sha256="$(sha256sum -- "$current_resolved" | awk '{print $1}')"
+if [[ ! -e "$classic" && ! -L "$classic" ]]; then
   cp -p -- "$current_resolved" "$classic"
   chmod 700 "$classic"
-  classic_created=1
-elif [[ -L "$classic" || ! -f "$classic" || ! -x "$classic" ]]; then
+elif ! owner_only_regular_file "$classic" || [[ ! -x "$classic" ]]; then
   printf 'Refusing unsafe preservation target: %s\n' "$classic" >&2
+  exit 1
+fi
+classic_sha256="$(sha256sum -- "$classic" | awk '{print $1}')"
+if [[ "$classic_sha256" != "$current_sha256" ]]; then
+  printf '%s\n' 'Refusing cutover because the preserved executable does not match current WF.' >&2
   exit 1
 fi
 
@@ -96,19 +118,16 @@ fi
 
 backup="$install_root/WF.pre-cutover.$(date +%Y%m%d-%H%M%S)"
 cp -a -- "$current" "$backup"
+marker_temporary="$(mktemp --tmpdir="$install_root" '.classic-owner.XXXXXX')"
+umask 077
+{
+  printf '%s\n' 'schema=1'
+  printf 'cutover_epoch=%s\n' "$(date -u +%s)"
+  printf 'sha256=%s\n' "$classic_sha256"
+} > "$marker_temporary"
+chmod 600 "$marker_temporary"
+mv -- "$marker_temporary" "$owner_marker"
 ln -sfn -- "$venv_dir/bin/WF" "$target"
-
-if (( classic_created == 1 )); then
-  owner_marker="$install_root/classic-owner"
-  marker_temporary="$owner_marker.tmp"
-  umask 077
-  {
-    printf '%s\n' 'schema=1'
-    printf 'cutover_epoch=%s\n' "$(date -u +%s)"
-    printf 'sha256=%s\n' "$(sha256sum -- "$classic" | awk '{print $1}')"
-  } > "$marker_temporary"
-  mv -- "$marker_temporary" "$owner_marker"
-fi
 
 printf 'Installed: %s\n' "$target"
 printf 'Preserved pre-cutover executable: %s\n' "$classic"

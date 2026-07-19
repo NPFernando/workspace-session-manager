@@ -72,6 +72,10 @@ scripts/install.sh \
   --migration-plan adoption-plan.json
 ```
 
+An existing preservation copy is reused only when it is a user-owned, owner-only executable whose
+SHA-256 matches the current `WF` command. The installer records that checksum in a private ownership
+marker before switching the command symlink.
+
 Adoption writes new WF metadata and a tmux user option. It does not attach, rename, restart, kill, or
 send input to a session, and it never changes a legacy sidecar. Unrelated unmanaged tmux sessions may
 remain; normal WF views hide them.
@@ -102,6 +106,9 @@ First restore the pre-cutover command:
 scripts/uninstall.sh --restore-classic
 ```
 
+Command rollback requires the installer ownership marker and refuses a preservation copy whose
+ownership, permissions, or checksum changed after cutover.
+
 Then use the retained installed command path to inspect journals and roll back adoption if the adopted
 records have not changed:
 
@@ -127,7 +134,9 @@ scripts/retire-classic.sh
 scripts/retire-classic.sh --approve-retirement
 ```
 
-The script requires the installer's ownership marker, verifies the original executable checksum,
-enforces the soak period, creates an owner-only compressed archive and checksum, and then removes only
-that preservation copy and marker. It does not remove the original launcher source, metadata, logs,
-profiles, aliases, or any tmux session.
+The script requires the new virtual-environment command to still be the active `WF`, requires the
+installer's private ownership marker, verifies the original executable checksum, enforces the soak
+period, creates an owner-only compressed archive and checksum, and then removes only that preservation
+copy and marker. If rollback has made the classic command active again, retirement is refused. The
+script does not remove the original launcher source, metadata, logs, profiles, aliases, or any tmux
+session.

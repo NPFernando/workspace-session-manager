@@ -32,6 +32,10 @@ WF never sends `sudo` and has no system-wide install path. The standalone SSH-ho
 defaults to a dry run, requires a literal match with the assessed hook, creates a backup, and changes
 the profile only with its separate approval flag.
 
+The classic preservation copy and its ownership marker are user-owned and owner-only. Restore and
+retirement verify the recorded SHA-256 before acting, and retirement also proves that the new WF
+command remains active so it cannot remove a classic executable currently serving as the rollback.
+
 ## Reporting
 
 Do not open a public issue for a vulnerability. Follow [SECURITY.md](../SECURITY.md) to report it

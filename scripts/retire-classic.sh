@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+owner_only_regular_file() {
+  local path="$1"
+  local mode
+  [[ -f "$path" && ! -L "$path" && -O "$path" ]] || return 1
+  mode="$(stat -c '%a' -- "$path")" || return 1
+  (( (8#$mode & 8#077) == 0 ))
+}
+
 install_root="${XDG_DATA_HOME:-$HOME/.local/share}/wf-session-manager"
 classic="$HOME/.local/libexec/wf-classic"
 owner_marker="$install_root/classic-owner"
 archive_dir="$install_root/classic-archive"
+target="$HOME/.local/bin/WF"
+expected="$install_root/venv/bin/WF"
 approve=0
 
 if [[ "${1:-}" == "--approve-retirement" && -z "${2:-}" ]]; then
@@ -14,11 +24,16 @@ elif [[ -n "${1:-}" ]]; then
   exit 2
 fi
 
-if [[ ! -f "$owner_marker" || -L "$owner_marker" ]]; then
+if [[ ! -L "$target" || "$(readlink -f -- "$target")" != "$expected" \
+  || ! -f "$expected" || -L "$expected" || ! -x "$expected" || ! -O "$expected" ]]; then
+  printf '%s\n' 'Refusing retirement because the new WF installation is not active.' >&2
+  exit 1
+fi
+if ! owner_only_regular_file "$owner_marker"; then
   printf 'Refusing retirement without an installer ownership marker: %s\n' "$owner_marker" >&2
   exit 1
 fi
-if [[ ! -f "$classic" || -L "$classic" ]]; then
+if ! owner_only_regular_file "$classic" || [[ ! -x "$classic" ]]; then
   printf 'Refusing retirement of an unsafe or missing file: %s\n' "$classic" >&2
   exit 1
 fi
@@ -65,12 +80,22 @@ chmod 700 "$archive_dir"
 timestamp="$(date -u +%Y%m%d-%H%M%S)"
 archive="$archive_dir/wf-classic.$timestamp.tar.gz"
 temporary="$archive.tmp"
+if [[ -e "$archive" || -L "$archive" || -e "$archive.sha256" || -L "$archive.sha256" ]]; then
+  printf 'Refusing to overwrite an existing retirement archive: %s\n' "$archive" >&2
+  exit 1
+fi
 tar -czf "$temporary" -C "$(dirname -- "$classic")" "$(basename -- "$classic")"
 chmod 600 "$temporary"
 mv -- "$temporary" "$archive"
 sha256sum -- "$archive" > "$archive.sha256"
 chmod 600 "$archive.sha256"
 
+if [[ ! -L "$target" || "$(readlink -f -- "$target")" != "$expected" ]] \
+  || ! owner_only_regular_file "$classic" \
+  || [[ "$(sha256sum -- "$classic" | awk '{print $1}')" != "$expected_sha256" ]]; then
+  printf '%s\n' 'Refusing retirement because cutover state changed during archival.' >&2
+  exit 1
+fi
 rm -- "$classic"
 rm -- "$owner_marker"
 printf 'Archived installer-owned classic executable: %s\n' "$archive"

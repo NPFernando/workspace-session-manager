@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+owner_only_regular_file() {
+  local path="$1"
+  local mode
+  [[ -f "$path" && ! -L "$path" && -O "$path" ]] || return 1
+  mode="$(stat -c '%a' -- "$path")" || return 1
+  (( (8#$mode & 8#077) == 0 ))
+}
+
 if [[ "${1:-}" != "--restore-classic" ]]; then
   printf '%s\n' 'Refusing rollback without explicit approval.' >&2
   printf '%s\n' 'Run: scripts/uninstall.sh --restore-classic' >&2
@@ -11,9 +19,32 @@ install_root="${XDG_DATA_HOME:-$HOME/.local/share}/wf-session-manager"
 target="$HOME/.local/bin/WF"
 classic="$HOME/.local/libexec/wf-classic"
 expected="$install_root/venv/bin/WF"
+owner_marker="$install_root/classic-owner"
 
-if [[ ! -f "$classic" || -L "$classic" || ! -x "$classic" ]]; then
+if ! owner_only_regular_file "$classic" || [[ ! -x "$classic" ]]; then
   printf 'Classic executable is unavailable: %s\n' "$classic" >&2
+  exit 1
+fi
+if ! owner_only_regular_file "$owner_marker"; then
+  printf 'Classic ownership marker is unavailable or unsafe: %s\n' "$owner_marker" >&2
+  exit 1
+fi
+
+schema=''
+expected_sha256=''
+while IFS='=' read -r key value; do
+  case "$key" in
+    schema) schema="$value" ;;
+    sha256) expected_sha256="$value" ;;
+  esac
+done < "$owner_marker"
+if [[ "$schema" != '1' || ! "$expected_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+  printf 'Invalid ownership marker: %s\n' "$owner_marker" >&2
+  exit 1
+fi
+actual_sha256="$(sha256sum -- "$classic" | awk '{print $1}')"
+if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+  printf '%s\n' 'Refusing rollback because the preserved executable changed.' >&2
   exit 1
 fi
 

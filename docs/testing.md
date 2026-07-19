@@ -33,4 +33,5 @@ Check at least:
 - exact-name delete mismatch and cancellation
 - unmanaged-session hiding and mutation rejection
 - private-file and stale adoption-plan rejection, read-only validation, and exact-batch rollback
+- preservation checksum enforcement and refusal to retire an active classic command
 - sanitized pane output containing ANSI, IP, home path, and test token patterns
