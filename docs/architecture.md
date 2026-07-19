@@ -50,6 +50,11 @@ the session. A private journal supports batch rollback while records remain unch
 repeats validation while holding the migration lock, so a successful preflight is informative rather
 than an authority that can become stale.
 
+The cutover installer records the validated plan ID before apply. An EXIT handler rolls back that
+exact migration if any later pre-cutover gate fails; the handler is disabled only after the command
+symlink switches successfully. A failed automatic rollback is reported for manual recovery and never
+hidden by the original installer error.
+
 ## Persistence
 
 State directories use mode `0700`; files and locks use `0600`. Writes occur through a temporary file

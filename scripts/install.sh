@@ -9,6 +9,26 @@ owner_only_regular_file() {
   (( (8#$mode & 8#077) == 0 ))
 }
 
+rollback_migration_on_failure() {
+  local status=$?
+  local rollback_status
+  trap - EXIT
+  if (( status != 0 && migration_applied == 1 && cutover_complete == 0 )); then
+    set +e
+    printf 'Pre-cutover failure; rolling back migration %s.\n' "$migration_id" >&2
+    "$venv_dir/bin/wf-dev" migrate rollback "$migration_id" --approve
+    rollback_status=$?
+    if (( rollback_status == 0 )); then
+      printf 'Rolled back migration %s; the WF command was not switched.\n' \
+        "$migration_id" >&2
+    else
+      printf 'Automatic rollback failed for migration %s; inspect it with %s migrate status.\n' \
+        "$migration_id" "$venv_dir/bin/wf-dev" >&2
+    fi
+  fi
+  exit "$status"
+}
+
 approve=0
 migration_plan=''
 while (( $# > 0 )); do
@@ -47,6 +67,10 @@ libexec_dir="$HOME/.local/libexec"
 target="$bin_dir/WF"
 classic="$libexec_dir/wf-classic"
 owner_marker="$install_root/classic-owner"
+migration_id=''
+migration_applied=0
+cutover_complete=0
+trap rollback_migration_on_failure EXIT
 if [[ -d "$target" && ! -L "$target" ]]; then
   printf 'Refusing directory at command target: %s\n' "$target" >&2
   exit 1
@@ -100,8 +124,15 @@ python3 -m venv "$venv_dir"
 "$venv_dir/bin/wf-dev" doctor
 
 if [[ -n "$migration_plan" ]]; then
-  "$venv_dir/bin/wf-dev" migrate validate "$migration_plan"
+  validation_json="$("$venv_dir/bin/wf-dev" migrate validate "$migration_plan" --json)"
+  migration_id="$(
+    printf '%s\n' "$validation_json" \
+      | "$venv_dir/bin/python" -c \
+        'import json,sys,uuid; print(uuid.UUID(json.load(sys.stdin)["plan_id"]))'
+  )"
+  printf 'Validated migration plan: %s\n' "$migration_id"
   "$venv_dir/bin/wf-dev" migrate apply "$migration_plan" --approve
+  migration_applied=1
 fi
 
 legacy_unmanaged="$(
@@ -128,8 +159,11 @@ umask 077
 chmod 600 "$marker_temporary"
 mv -- "$marker_temporary" "$owner_marker"
 ln -sfn -- "$venv_dir/bin/WF" "$target"
+cutover_complete=1
+trap - EXIT
 
 printf 'Installed: %s\n' "$target"
 printf 'Preserved pre-cutover executable: %s\n' "$classic"
 printf 'Previous command backup: %s\n' "$backup"
-printf '%s\n' 'Shell profiles and tmux sessions were not changed.'
+printf '%s\n' \
+  'Shell profiles were not changed; tmux processes were not restarted, renamed, or terminated.'

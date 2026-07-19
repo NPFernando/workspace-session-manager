@@ -35,6 +35,8 @@ the profile only with its separate approval flag.
 The classic preservation copy and its ownership marker are user-owned and owner-only. Restore and
 retirement verify the recorded SHA-256 before acting, and retirement also proves that the new WF
 command remains active so it cannot remove a classic executable currently serving as the rollback.
+Before that command switch, installer failures roll back only the exact migration applied by the same
+installer invocation.
 
 ## Reporting
 

@@ -76,6 +76,11 @@ An existing preservation copy is reused only when it is a user-owned, owner-only
 SHA-256 matches the current `WF` command. The installer records that checksum in a private ownership
 marker before switching the command symlink.
 
+After adoption, any failure before the command symlink switches triggers rollback of that exact
+migration. This includes the final check for legacy-managed sessions omitted from the reviewed plan.
+If automatic rollback cannot complete because migration state changed concurrently, the installer
+retains its failing exit status and prints the migration ID and recovery command path for inspection.
+
 Adoption writes new WF metadata and a tmux user option. It does not attach, rename, restart, kill, or
 send input to a session, and it never changes a legacy sidecar. Unrelated unmanaged tmux sessions may
 remain; normal WF views hide them.
