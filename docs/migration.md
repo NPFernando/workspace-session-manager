@@ -38,6 +38,16 @@ chmod 600 adoption-plan.json
 The terminal table redacts notes. The private JSON plan includes imported values, exact tmux IDs,
 source locations, and SHA-256 hashes for every sidecar. Review it locally and do not commit it.
 
+Immediately before cutover, validate the reviewed file without changing tmux or WF state:
+
+```bash
+wf-dev migrate validate adoption-plan.json
+```
+
+Validation rejects non-owner-only permissions, stale tmux IDs or sidecars, unsafe paths, malformed
+content, and a plan ID that already has a migration journal. Its JSON mode reports IDs and warnings
+but excludes imported notes. Apply repeats these checks under the migration lock.
+
 To select sessions individually, repeat the exact-name option:
 
 ```bash
@@ -53,8 +63,8 @@ marker changed after preview.
 ## Approved install
 
 The installer preserves the resolved pre-cutover command, installs the application in a user-local
-virtual environment, applies the reviewed plan, verifies that no legacy-managed sessions remain
-unadopted, and then updates only `~/.local/bin/WF`:
+virtual environment, validates and applies the reviewed plan, verifies that no legacy-managed
+sessions remain unadopted, and then updates only `~/.local/bin/WF`:
 
 ```bash
 scripts/install.sh \

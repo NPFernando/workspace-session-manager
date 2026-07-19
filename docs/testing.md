@@ -32,5 +32,5 @@ Check at least:
 - missing Claude, Codex, and Hermes commands
 - exact-name delete mismatch and cancellation
 - unmanaged-session hiding and mutation rejection
-- stale adoption-plan rejection and exact-batch rollback
+- private-file and stale adoption-plan rejection, read-only validation, and exact-batch rollback
 - sanitized pane output containing ANSI, IP, home path, and test token patterns

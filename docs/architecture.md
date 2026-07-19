@@ -46,6 +46,10 @@ the source sidecars. Apply rereads the live inventory and sidecars and rejects a
 then adds ownership metadata and the tmux marker without attaching, renaming, restarting, or killing
 the session. A private journal supports batch rollback while records remain unchanged.
 
+`migrate validate` exposes the same snapshot and prior-journal checks without writing state. Apply
+repeats validation while holding the migration lock, so a successful preflight is informative rather
+than an authority that can become stale.
+
 ## Persistence
 
 State directories use mode `0700`; files and locks use `0600`. Writes occur through a temporary file

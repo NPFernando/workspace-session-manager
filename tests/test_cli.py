@@ -81,6 +81,7 @@ def test_migration_cli_preview_apply_status_and_rollback(
     name = "claude-import"
     (legacy / f"{name}.tool").write_text("claude\n", encoding="utf-8")
     (legacy / f"{name}.cwd").write_text(f"{tmp_path}\n", encoding="utf-8")
+    (legacy / f"{name}.note").write_text("private migration note\n", encoding="utf-8")
     fake_backend.add(name, session_id="$cli-import")
     paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
     manager = MigrationManager(
@@ -100,6 +101,13 @@ def test_migration_cli_preview_apply_status_and_rollback(
     assert preview.exit_code == 0, preview.output
     assert "Notes are included" in preview.stdout
     assert plan_path.is_file()
+
+    validation = runner.invoke(cli.app, ["migrate", "validate", str(plan_path), "--json"])
+    assert validation.exit_code == 0, validation.output
+    validation_payload = json.loads(validation.stdout)
+    assert validation_payload["valid"] is True
+    assert validation_payload["sessions"][0]["tmux_session_id"] == "$cli-import"
+    assert "private migration note" not in validation.stdout
 
     gate = runner.invoke(cli.app, ["migrate", "apply", str(plan_path)])
     assert gate.exit_code == 2

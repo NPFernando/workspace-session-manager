@@ -78,6 +78,7 @@ python3 -m venv "$venv_dir"
 "$venv_dir/bin/wf-dev" doctor
 
 if [[ -n "$migration_plan" ]]; then
+  "$venv_dir/bin/wf-dev" migrate validate "$migration_plan"
   "$venv_dir/bin/wf-dev" migrate apply "$migration_plan" --approve
 fi
 

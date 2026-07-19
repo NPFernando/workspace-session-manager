@@ -71,6 +71,7 @@ wf-dev attach claude-api
 wf-dev delete claude-api       # Exact-name confirmation required
 wf-dev doctor
 wf-dev migrate preview --all --output adoption-plan.json
+wf-dev migrate validate adoption-plan.json
 wf-dev migrate status
 ```
 

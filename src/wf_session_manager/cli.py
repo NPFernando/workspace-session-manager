@@ -361,6 +361,41 @@ def migration_preview(
         console.print(f"Plan written: {output.expanduser()}")
 
 
+@migration_app.command("validate")
+def migration_validate(
+    context: typer.Context,
+    plan_path: Annotated[Path, typer.Argument(help="Reviewed migration plan JSON file.")],
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Verify that a plan is private, unused, and matches live state."""
+    try:
+        plan = _migration_manager(context).validate_plan(plan_path.expanduser())
+    except WFError as error:
+        abort(error)
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "valid": True,
+                    "plan_id": str(plan.plan_id),
+                    "snapshot_digest": plan.snapshot_digest,
+                    "sessions": [
+                        {
+                            "name": item.name,
+                            "tmux_session_id": item.tmux_session_id,
+                            "warnings": item.warnings,
+                        }
+                        for item in plan.items
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return
+    _print_migration_plan(plan)
+    console.print(f"Plan is current and ready for explicit apply: {len(plan.items)} sessions")
+
+
 @migration_app.command("apply")
 def migration_apply(
     context: typer.Context,

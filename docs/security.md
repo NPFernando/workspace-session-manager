@@ -21,7 +21,8 @@ their pane output may be untrusted. Pane output is sanitized before Textual or R
 
 Legacy metadata is read only and limited to small regular non-symlink files. Adoption is never
 automatic: preview snapshots source hashes and exact tmux IDs, while apply requires an unchanged plan
-and explicit approval.
+and explicit approval. Plans and journals may contain imported notes and are accepted only from
+owner-only files with no symlink path component.
 
 ## Destructive operations
 

@@ -82,7 +82,10 @@ def _read_private_json(path: Path) -> str:
         _reject_symlink_components(path)
         if path.is_symlink() or not path.is_file():
             raise MigrationError(f"refusing unsafe migration file: {path}")
-        if path.stat().st_size > MAX_PLAN_BYTES:
+        details = path.stat()
+        if details.st_mode & 0o077:
+            raise MigrationError(f"migration file must have owner-only permissions: {path}")
+        if details.st_size > MAX_PLAN_BYTES:
             raise MigrationError(f"migration file is too large: {path}")
         return path.read_text(encoding="utf-8")
     except OSError as error:
@@ -324,6 +327,16 @@ class MigrationManager:
         except ValueError as error:
             raise MigrationError(f"invalid migration plan {path}: {error}") from error
 
+    def validate_plan(self, path: Path) -> MigrationPlan:
+        plan = self.load_plan(path)
+        current = self.preview([item.name for item in plan.items])
+        if current.snapshot_digest != plan.snapshot_digest:
+            raise MigrationError("migration snapshot changed; generate and review a new plan")
+        journal_path = self._journal_path(plan.plan_id)
+        if journal_path.exists() or journal_path.is_symlink():
+            raise MigrationError(f"migration journal already exists: {plan.plan_id}")
+        return plan
+
     def _journal_path(self, migration_id: UUID) -> Path:
         return self.paths.migrations_dir / f"{migration_id}.json"
 
@@ -375,10 +388,7 @@ class MigrationManager:
         return recovery_errors
 
     def _apply(self, path: Path) -> MigrationJournal:
-        plan = self.load_plan(path)
-        current = self.preview([item.name for item in plan.items])
-        if current.snapshot_digest != plan.snapshot_digest:
-            raise MigrationError("migration snapshot changed; generate and review a new plan")
+        plan = self.validate_plan(path)
 
         now = utc_now()
         entries: list[MigrationJournalItem] = []
@@ -409,9 +419,6 @@ class MigrationManager:
             status="applying",
             items=entries,
         )
-        journal_path = self._journal_path(journal.migration_id)
-        if journal_path.exists() or journal_path.is_symlink():
-            raise MigrationError(f"migration journal already exists: {journal.migration_id}")
         self._write_journal(journal)
 
         claimed: list[MigrationJournalItem] = []

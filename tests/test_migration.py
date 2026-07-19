@@ -75,6 +75,42 @@ def test_preview_writes_private_exact_id_plan(tmp_path: Path, fake_backend: Fake
     manager.write_plan(plan, plan_path)
     assert stat.S_IMODE(plan_path.stat().st_mode) == 0o600
     assert manager.load_plan(plan_path) == plan
+    assert manager.validate_plan(plan_path) == plan
+    assert not manager.paths.migrations_dir.exists()
+    assert fake_backend.get_option("claude-old", "@wf_owner") is None
+
+
+def test_plan_reader_rejects_non_private_permissions(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    legacy = tmp_path / "legacy"
+    write_legacy(legacy, "claude-old")
+    fake_backend.add("claude-old")
+    manager = make_manager(tmp_path, fake_backend, (legacy,))
+    plan_path = tmp_path / "plan.json"
+    manager.write_plan(manager.preview(), plan_path)
+    plan_path.chmod(0o640)
+
+    with pytest.raises(MigrationError, match="owner-only permissions"):
+        manager.validate_plan(plan_path)
+
+
+def test_journal_reader_rejects_non_private_permissions(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    legacy = tmp_path / "legacy"
+    write_legacy(legacy, "claude-old")
+    fake_backend.add("claude-old")
+    manager = make_manager(tmp_path, fake_backend, (legacy,))
+    plan_path = tmp_path / "plan.json"
+    manager.write_plan(manager.preview(), plan_path)
+    journal = manager.apply(plan_path)
+    manager._journal_path(journal.migration_id).chmod(0o644)
+
+    with pytest.raises(MigrationError, match="owner-only permissions"):
+        manager.load_journal(journal.migration_id)
+    with pytest.raises(MigrationError, match="owner-only permissions"):
+        manager.status()
 
 
 def test_apply_and_rollback_never_remove_tmux_session(
@@ -111,6 +147,8 @@ def test_apply_rejects_changed_sidecar_snapshot(tmp_path: Path, fake_backend: Fa
     manager.write_plan(manager.preview(["claude-old"]), plan_path)
     (legacy / "claude-old.note").write_text("changed\n", encoding="utf-8")
 
+    with pytest.raises(MigrationError, match="snapshot changed"):
+        manager.validate_plan(plan_path)
     with pytest.raises(MigrationError, match="snapshot changed"):
         manager.apply(plan_path)
     assert manager.store.load("claude-old") is None
@@ -251,6 +289,8 @@ def test_plan_id_cannot_overwrite_an_existing_journal(
     journal = manager.apply(plan_path)
     manager.rollback(journal.migration_id)
 
+    with pytest.raises(MigrationError, match="journal already exists"):
+        manager.validate_plan(plan_path)
     with pytest.raises(MigrationError, match="journal already exists"):
         manager.apply(plan_path)
     assert manager.store.load("claude-old") is None
