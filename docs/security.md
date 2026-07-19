@@ -36,7 +36,8 @@ The classic preservation copy and its ownership marker are user-owned and owner-
 retirement verify the recorded SHA-256 before acting, and retirement also proves that the new WF
 command remains active so it cannot remove a classic executable currently serving as the rollback.
 Before that command switch, installer failures roll back only the exact migration applied by the same
-installer invocation.
+installer invocation. A private process lock prevents concurrent installer invocations from racing
+over the preserved command, virtual environment, ownership marker, or command symlink.
 
 ## Reporting
 

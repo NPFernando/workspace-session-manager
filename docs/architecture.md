@@ -53,7 +53,9 @@ than an authority that can become stale.
 The cutover installer records the validated plan ID before apply. An EXIT handler rolls back that
 exact migration if any later pre-cutover gate fails; the handler is disabled only after the command
 symlink switches successfully. A failed automatic rollback is reported for manual recovery and never
-hidden by the original installer error.
+hidden by the original installer error. A separate owner-only, nonblocking `flock` covers the complete
+installer transaction so preservation, environment installation, adoption, and command switching
+cannot race another cutover invocation.
 
 ## Persistence
 

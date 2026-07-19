@@ -67,6 +67,7 @@ libexec_dir="$HOME/.local/libexec"
 target="$bin_dir/WF"
 classic="$libexec_dir/wf-classic"
 owner_marker="$install_root/classic-owner"
+cutover_lock="$install_root/cutover.lock"
 migration_id=''
 migration_applied=0
 cutover_complete=0
@@ -98,6 +99,22 @@ fi
 
 mkdir -p "$install_root" "$bin_dir" "$libexec_dir"
 chmod 700 "$install_root" "$libexec_dir"
+if ! command -v flock >/dev/null 2>&1; then
+  printf '%s\n' 'Cannot serialize cutover: required command flock was not found.' >&2
+  exit 1
+fi
+if [[ ( -e "$cutover_lock" || -L "$cutover_lock" ) ]] \
+  && ! owner_only_regular_file "$cutover_lock"; then
+  printf 'Refusing unsafe cutover lock: %s\n' "$cutover_lock" >&2
+  exit 1
+fi
+umask 077
+exec 9> "$cutover_lock"
+chmod 600 "$cutover_lock"
+if ! flock -n 9; then
+  printf '%s\n' 'Refusing concurrent cutover: another installer holds the cutover lock.' >&2
+  exit 1
+fi
 if [[ ( -e "$owner_marker" || -L "$owner_marker" ) ]] \
   && ! owner_only_regular_file "$owner_marker"; then
   printf 'Refusing unsafe ownership marker: %s\n' "$owner_marker" >&2

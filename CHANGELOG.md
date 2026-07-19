@@ -20,6 +20,7 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
   retirement also requires the new WF command to remain active
 - Installer failures after adoption automatically roll back that exact migration until the WF command
   switch succeeds
+- Cutover installation is serialized with an owner-only nonblocking process lock
 - Removed the user-facing classic bridge from the Textual application and Typer CLI
 
 ## [0.1.0] - 2026-07-19

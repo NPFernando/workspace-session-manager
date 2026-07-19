@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import os
 import runpy
@@ -264,6 +265,7 @@ def test_install_completes_simulated_transaction(tmp_path: Path) -> None:
     assert classic.read_bytes() == current.read_bytes()
     marker = install_root / "classic-owner"
     assert marker.stat().st_mode & 0o777 == 0o600
+    assert (install_root / "cutover.lock").stat().st_mode & 0o777 == 0o600
     assert hashlib.sha256(classic.read_bytes()).hexdigest() in marker.read_text(encoding="utf-8")
     assert f"migrate apply {plan} --approve" in log.read_text(encoding="utf-8")
     assert "migrate rollback" not in log.read_text(encoding="utf-8")
@@ -292,6 +294,65 @@ def test_install_rolls_back_adoption_on_pre_cutover_failure(tmp_path: Path) -> N
     assert f"migrate rollback {TEST_MIGRATION_ID} --approve" in log.read_text(encoding="utf-8")
     marker = Path(env["XDG_DATA_HOME"]) / "wf-session-manager" / "classic-owner"
     assert not marker.exists()
+
+
+def test_install_refuses_concurrent_cutover(tmp_path: Path) -> None:
+    env, current, target, log, plan = make_install_simulation(tmp_path, unmanaged=False)
+    install_root = Path(env["XDG_DATA_HOME"]) / "wf-session-manager"
+    install_root.mkdir(parents=True)
+    install_root.chmod(0o700)
+    lock_path = install_root / "cutover.lock"
+    lock_path.touch(mode=0o600)
+
+    with lock_path.open("r+", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = subprocess.run(
+            [
+                "bash",
+                str(INSTALL_SCRIPT),
+                "--approve-cutover",
+                "--migration-plan",
+                str(plan),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    assert result.returncode != 0
+    assert "another installer holds the cutover lock" in result.stderr
+    assert target.resolve() == current
+    assert not log.exists()
+    marker = Path(env["XDG_DATA_HOME"]) / "wf-session-manager" / "classic-owner"
+    assert not marker.exists()
+
+
+def test_install_refuses_symlinked_cutover_lock(tmp_path: Path) -> None:
+    env, current, target, log, plan = make_install_simulation(tmp_path, unmanaged=False)
+    install_root = Path(env["XDG_DATA_HOME"]) / "wf-session-manager"
+    install_root.mkdir(parents=True)
+    outside = tmp_path / "outside-lock-target"
+    outside.write_text("unchanged\n", encoding="utf-8")
+    (install_root / "cutover.lock").symlink_to(outside)
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(INSTALL_SCRIPT),
+            "--approve-cutover",
+            "--migration-plan",
+            str(plan),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "unsafe cutover lock" in result.stderr
+    assert outside.read_text(encoding="utf-8") == "unchanged\n"
+    assert target.resolve() == current
+    assert not log.exists()
 
 
 def test_install_reports_failed_automatic_rollback(tmp_path: Path) -> None:

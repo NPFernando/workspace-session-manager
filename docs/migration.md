@@ -80,6 +80,8 @@ After adoption, any failure before the command symlink switches triggers rollbac
 migration. This includes the final check for legacy-managed sessions omitted from the reviewed plan.
 If automatic rollback cannot complete because migration state changed concurrently, the installer
 retains its failing exit status and prints the migration ID and recovery command path for inspection.
+The complete installer transaction is protected by a nonblocking user-owned lock; a concurrent
+cutover attempt exits before preserving a command, replacing the environment, or applying a plan.
 
 Adoption writes new WF metadata and a tmux user option. It does not attach, rename, restart, kill, or
 send input to a session, and it never changes a legacy sidecar. Unrelated unmanaged tmux sessions may
