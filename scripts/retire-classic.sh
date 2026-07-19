@@ -80,14 +80,33 @@ chmod 700 "$archive_dir"
 timestamp="$(date -u +%Y%m%d-%H%M%S)"
 archive="$archive_dir/wf-classic.$timestamp.tar.gz"
 temporary="$archive.tmp"
+classic_name="$(basename -- "$classic")"
 if [[ -e "$archive" || -L "$archive" || -e "$archive.sha256" || -L "$archive.sha256" ]]; then
   printf 'Refusing to overwrite an existing retirement archive: %s\n' "$archive" >&2
   exit 1
 fi
-tar -czf "$temporary" -C "$(dirname -- "$classic")" "$(basename -- "$classic")"
+tar -czf "$temporary" -C "$(dirname -- "$classic")" "$classic_name"
 chmod 600 "$temporary"
 mv -- "$temporary" "$archive"
-sha256sum -- "$archive" > "$archive.sha256"
+if [[ "$(tar -tzf "$archive")" != "$classic_name" ]]; then
+  printf '%s\n' 'Refusing retirement because the archive has unexpected contents.' >&2
+  exit 1
+fi
+if ! archived_sha256="$(tar -xOzf "$archive" -- "$classic_name" | sha256sum | awk '{print $1}')"; then
+  printf '%s\n' 'Refusing retirement because the archived executable cannot be verified.' >&2
+  exit 1
+fi
+if [[ "$archived_sha256" != "$expected_sha256" ]]; then
+  printf '%s\n' 'Refusing retirement because the archived executable does not match.' >&2
+  exit 1
+fi
+archive_name="$(basename -- "$archive")"
+checksum_name="$archive_name.sha256"
+(
+  cd -- "$archive_dir"
+  sha256sum -- "$archive_name" > "$checksum_name"
+  sha256sum -c -- "$checksum_name" >/dev/null
+)
 chmod 600 "$archive.sha256"
 
 if [[ ! -L "$target" || "$(readlink -f -- "$target")" != "$expected" ]] \

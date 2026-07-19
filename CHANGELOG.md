@@ -22,6 +22,8 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
   switch succeeds
 - Cutover installation is serialized with an owner-only nonblocking process lock
 - Install and command rollback replace the WF symlink atomically and never overwrite a command backup
+- Classic retirement verifies the archived executable payload before deletion and writes a relocatable
+  archive checksum
 - Removed the user-facing classic bridge from the Textual application and Typer CLI
 
 ## [0.1.0] - 2026-07-19

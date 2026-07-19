@@ -8,6 +8,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 import textwrap
 import time
 from pathlib import Path
@@ -542,6 +543,7 @@ def test_uninstall_refuses_non_private_classic(tmp_path: Path) -> None:
 
 def test_classic_retirement_archives_only_installer_owned_copy(tmp_path: Path) -> None:
     env, classic = make_retirement_fixture(tmp_path, age_days=8)
+    expected_digest = hashlib.sha256(classic.read_bytes()).hexdigest()
     preview = subprocess.run(["bash", str(RETIRE_SCRIPT)], capture_output=True, text=True, env=env)
     assert preview.returncode == 0, preview.stderr
     assert "Dry run" in preview.stdout
@@ -556,8 +558,74 @@ def test_classic_retirement_archives_only_installer_owned_copy(tmp_path: Path) -
     assert applied.returncode == 0, applied.stderr
     assert not classic.exists()
     archive_dir = Path(env["XDG_DATA_HOME"]) / "wf-session-manager" / "classic-archive"
+    archives = list(archive_dir.glob("*.tar.gz"))
+    checksums = list(archive_dir.glob("*.tar.gz.sha256"))
+    assert len(archives) == 1
+    assert len(checksums) == 1
+    with tarfile.open(archives[0], "r:gz") as bundle:
+        assert bundle.getnames() == ["wf-classic"]
+        archived = bundle.extractfile("wf-classic")
+        assert archived is not None
+        assert hashlib.sha256(archived.read()).hexdigest() == expected_digest
+    checksum_text = checksums[0].read_text(encoding="utf-8")
+    assert archives[0].name in checksum_text
+    assert str(archive_dir) not in checksum_text
+    verified = subprocess.run(
+        ["sha256sum", "-c", checksums[0].name],
+        cwd=archive_dir,
+        capture_output=True,
+        text=True,
+    )
+    assert verified.returncode == 0, verified.stderr
+
+
+def test_classic_retirement_refuses_corrupt_archive_payload(tmp_path: Path) -> None:
+    env, classic = make_retirement_fixture(tmp_path, age_days=8)
+    original = classic.read_bytes()
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    real_tar = shutil.which("tar")
+    assert real_tar is not None
+    fake_tar = fake_bin / "tar"
+    fake_tar.write_text(
+        textwrap.dedent(
+            r"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            if [[ "${1:-}" == '-czf' ]]; then
+              scratch="$(mktemp -d)"
+              printf '#!/bin/sh\nexit 99\n' > "$scratch/wf-classic"
+              chmod 700 "$scratch/wf-classic"
+              __REAL_TAR__ -czf "$2" -C "$scratch" wf-classic
+              rm -f -- "$scratch/wf-classic"
+              rmdir -- "$scratch"
+              exit 0
+            fi
+            exec __REAL_TAR__ "$@"
+            """
+        )
+        .lstrip()
+        .replace("__REAL_TAR__", shlex.quote(real_tar)),
+        encoding="utf-8",
+    )
+    fake_tar.chmod(0o700)
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+    result = subprocess.run(
+        ["bash", str(RETIRE_SCRIPT), "--approve-retirement"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "archived executable does not match" in result.stderr
+    assert classic.read_bytes() == original
+    marker = Path(env["XDG_DATA_HOME"]) / "wf-session-manager" / "classic-owner"
+    assert marker.exists()
+    archive_dir = marker.parent / "classic-archive"
     assert len(list(archive_dir.glob("*.tar.gz"))) == 1
-    assert len(list(archive_dir.glob("*.tar.gz.sha256"))) == 1
+    assert not list(archive_dir.glob("*.sha256"))
 
 
 def test_classic_retirement_enforces_soak_period(tmp_path: Path) -> None:

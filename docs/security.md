@@ -41,6 +41,10 @@ over the preserved command, virtual environment, ownership marker, or command sy
 Command switches use same-directory temporary symlinks and atomic rename, while pre-cutover backups
 refuse existing destinations instead of replacing them.
 
+Classic retirement verifies both the archive topology and the extracted executable hash before
+deleting the preservation copy. The archive checksum references only its basename and is verified at
+creation time; archive corruption never authorizes deletion.
+
 ## Reporting
 
 Do not open a public issue for a vulnerability. Follow [SECURITY.md](../SECURITY.md) to report it

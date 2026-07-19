@@ -147,7 +147,9 @@ scripts/retire-classic.sh --approve-retirement
 
 The script requires the new virtual-environment command to still be the active `WF`, requires the
 installer's private ownership marker, verifies the original executable checksum, enforces the soak
-period, creates an owner-only compressed archive and checksum, and then removes only that preservation
-copy and marker. If rollback has made the classic command active again, retirement is refused. The
-script does not remove the original launcher source, metadata, logs, profiles, aliases, or any tmux
-session.
+period, and creates an owner-only compressed archive. Before deletion, it requires the archive to
+contain only `wf-classic`, hashes the extracted payload against the installer marker, and self-checks a
+basename-only archive checksum that remains valid if the archive directory is moved. A corrupt or
+unexpected archive leaves the live preservation copy and marker intact. If rollback has made the
+classic command active again, retirement is refused. The script does not remove the original launcher
+source, metadata, logs, profiles, aliases, or any tmux session.
