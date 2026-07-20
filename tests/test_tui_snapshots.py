@@ -281,6 +281,48 @@ def test_diagnostics_running_snapshot(
     assert snap_compare(app, terminal_size=(120, 35), run_before=open_running_diagnostics)
 
 
+def test_filter_mode_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def open_filter(pilot: Pilot) -> None:
+        await pilot.press("f")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(160, 45), run_before=open_filter)
+
+
+def test_palette_mode_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def open_palette(pilot: Pilot) -> None:
+        await pilot.press("p")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=open_palette)
+
+
+def test_manage_mode_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def open_manage(pilot: Pilot) -> None:
+        await pilot.press("d")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(100, 30), run_before=open_manage)
+
+
 def test_create_form_snapshot(
     snap_compare: SnapCompare,
     service: SessionService,
@@ -370,6 +412,8 @@ def test_destructive_confirmation_snapshot(
 
     async def open_confirmation(pilot: Pilot) -> None:
         await pilot.press("d")
+        app.screen.query_one("#manage-stop", Button).scroll_visible()
+        await pilot.pause()
         await pilot.click("#manage-stop")
         await pilot.pause()
 

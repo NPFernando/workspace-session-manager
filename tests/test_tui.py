@@ -5,6 +5,7 @@ from pathlib import Path
 from threading import Event
 
 import pytest
+from textual.command import CommandPalette
 from textual.containers import VerticalScroll
 from textual.widgets import Button, Input, OptionList, Select, Static, Switch, TextArea
 
@@ -173,6 +174,8 @@ async def test_delete_requires_more_menu_and_exact_confirmation(
         assert isinstance(app.screen, MoreActionsScreen)
         assert app.focused is app.screen.query_one("#more-cancel", Button)
 
+        app.screen.query_one("#more-delete", Button).scroll_visible()
+        await pilot.pause()
         await pilot.click("#more-delete")
         await pilot.pause()
         assert isinstance(app.screen, DeleteSessionScreen)
@@ -400,6 +403,91 @@ async def test_create_suspends_and_restores_search_mode(service: SessionService)
 
 
 @pytest.mark.asyncio
+async def test_filter_suspends_and_restores_search_mode(service: SessionService) -> None:
+    create_managed(service, "first", Tool.CLAUDE)
+    create_managed(service, "second", Tool.CODEX)
+    app = WFApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("/", "c", "o", "d", "e", "x")
+        visible_before = [session.name for session in app.visible_sessions]
+        app.action_filter()
+        await pilot.pause()
+
+        assert isinstance(app.screen, FilterScreen)
+        assert app.interaction_mode is InteractionMode.FILTER
+        assert not app.has_class("searching")
+        assert app.query_one("#search-mode").display is False
+        assert app.query_one("#action-bar").display is False
+        assert len(app.screen.query(".mode-help")) == 1
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.interaction_mode is InteractionMode.SEARCH
+        assert app.has_class("searching")
+        assert app.filter_query == "codex"
+        assert [session.name for session in app.visible_sessions] == visible_before
+        assert app.focused is app.query_one("#search", Input)
+
+
+@pytest.mark.asyncio
+async def test_palette_has_exclusive_mode_and_restores_search(service: SessionService) -> None:
+    create_managed(service, "first", Tool.CLAUDE)
+    app = WFApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("/", "f", "i", "r", "s", "t")
+        app.action_command_palette()
+        await pilot.pause()
+
+        assert isinstance(app.screen, CommandPalette)
+        assert app.interaction_mode is InteractionMode.PALETTE
+        assert not app.has_class("searching")
+        assert app.query_one("#search-mode").display is False
+        assert app.query_one("#action-bar").display is False
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.interaction_mode is InteractionMode.SEARCH
+        assert app.has_class("searching")
+        assert app.filter_query == "first"
+        assert app.focused is app.query_one("#search", Input)
+
+
+@pytest.mark.asyncio
+async def test_palette_restores_dashboard_before_dispatching_command(
+    service: SessionService,
+) -> None:
+    create_managed(service, "first", Tool.CLAUDE)
+    app = WFApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("p")
+        app.screen.query_one(Input).value = "filter sessions"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert isinstance(app.screen, FilterScreen)
+        assert app.interaction_mode is InteractionMode.FILTER
+        assert app._mode_context is not None
+        assert app._mode_context.mode is InteractionMode.NORMAL
+
+
+@pytest.mark.asyncio
+async def test_global_shortcuts_do_not_stack_over_filter(service: SessionService) -> None:
+    create_managed(service, "protected", Tool.SHELL)
+    app = WFApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("f")
+        screen = app.screen
+        stack_depth = len(app.screen_stack)
+
+        await pilot.press("c", "/", "d", "p")
+        await pilot.pause()
+        assert app.screen is screen
+        assert len(app.screen_stack) == stack_depth
+        assert app.interaction_mode is InteractionMode.FILTER
+
+
+@pytest.mark.asyncio
 async def test_basic_create_form_fits_without_scrolling(
     service: SessionService,
     tmp_path: Path,
@@ -434,7 +522,7 @@ async def test_advanced_options_preserve_values_and_focus(
         assert app.screen.query_one("#create-advanced").display is False
         assert tags.value == "backend, urgent"
 
-        await pilot.click("#create-advanced-toggle")
+        await pilot.press("enter")
         await pilot.pause()
         assert app.screen.query_one("#create-advanced").display is True
         assert app.focused is tags
@@ -671,12 +759,47 @@ async def test_manage_requires_cancel_focused_confirmation_for_stop(
         assert isinstance(app.screen, ManageSessionScreen)
         assert isinstance(app.screen, MoreActionsScreen)
         assert app.focused is app.screen.query_one("#more-cancel", Button)
+        app.screen.query_one("#manage-stop", Button).scroll_visible()
+        await pilot.pause()
         await pilot.click("#manage-stop")
         await pilot.pause()
         assert isinstance(app.screen, ConfirmActionScreen)
         assert app.focused is app.screen.query_one("#confirm-cancel", Button)
         await pilot.press("escape")
+        await pilot.pause()
         assert fake_backend.session_exists(name)
+        assert isinstance(app.screen, ManageSessionScreen)
+        assert app.interaction_mode is InteractionMode.MANAGE
+        assert app.focused is app.screen.query_one("#manage-stop", Button)
+
+
+@pytest.mark.asyncio
+async def test_manage_confirmation_keeps_original_session_target(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    original_name = create_managed(service, "original", Tool.SHELL)
+    other_name = create_managed(service, "other", Tool.SHELL)
+    app = WFApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        original = next(session for session in app.sessions if session.name == original_name)
+        other = next(session for session in app.sessions if session.name == other_name)
+        app.selected_name = original.name
+        app.selected_session_id = original.session_id
+        app.action_manage()
+        await pilot.pause()
+
+        app.selected_name = other.name
+        app.selected_session_id = other.session_id
+        app.screen.query_one("#manage-stop", Button).scroll_visible()
+        await pilot.pause()
+        await pilot.click("#manage-stop")
+        await pilot.pause()
+        await pilot.click("#confirm-submit")
+        await pilot.pause()
+
+        assert not fake_backend.session_exists(original_name)
+        assert fake_backend.session_exists(other_name)
 
 
 @pytest.mark.asyncio

@@ -29,8 +29,8 @@ Screen {
     display: block;
 }
 
-.form-active #search-mode,
-.form-active #action-bar {
+.overlay-active #search-mode,
+.overlay-active #action-bar {
     display: none;
 }
 
@@ -494,6 +494,19 @@ ModalScreen {
     height: 88%;
 }
 
+#manage-actions {
+    height: 1fr;
+    scrollbar-color: #47545c;
+    scrollbar-background: #181d21;
+}
+
+#manage-actions Button {
+    height: 2;
+    min-height: 2;
+    margin-top: 0;
+    content-align: left middle;
+}
+
 .diagnostics-dialog {
     width: 78;
     height: 78%;
@@ -525,6 +538,13 @@ ModalScreen {
     height: auto;
     margin-bottom: 1;
     color: #9eabb3;
+}
+
+.mode-help {
+    height: auto;
+    min-height: 1;
+    margin-top: 1;
+    color: #82919a;
 }
 
 .field-label {

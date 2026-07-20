@@ -19,6 +19,7 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 - Dark, light, monochrome, `NO_COLOR`, and ASCII presentation modes
 - Snapshot coverage for dialogs, validation failures, usage warnings, destructive confirmation, light
   mode, and inventories of 50 and 200 sessions
+- A session-aware command palette with categorized WF actions, shortcuts, and availability details
 
 ### Changed
 
@@ -29,6 +30,10 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 - Renamed `d More` to `d Manage` and separated ordinary operations from protected operations
 - Refined 160, 120, 100, and 80-column layouts, fixed-width tool badges, activity times, and headers
 - Expanded first-run guidance to a dismissible three-step safety and persistence walkthrough
+- Unified Search, Filter, Form, Palette, Manage, and Confirmation modes so overlays suspend and
+  restore dashboard query, selection, focus, and scroll state without shortcut leakage
+- Bound protected Manage actions to the exact session identity that opened the workflow and return
+  canceled confirmations to the originating action
 - Restored `--classic` only as a guarded compatibility bridge to an owner-only preserved executable
 
 ## [0.2.0] - 2026-07-20

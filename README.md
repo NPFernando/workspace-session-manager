@@ -9,13 +9,14 @@ tmux sessions. Release installation and cutover remain separate approval-gated o
 
 ## Highlights
 
-- Grouped Textual dashboard with on-demand search, structured filters, and responsive layouts
+- Grouped Textual dashboard with exclusive interaction modes, structured filters, and responsive layouts
 - Distinct Overview, Status, Activity, Recent Output, and protected Manage panels
 - Persistent detached sessions through tmux
 - Claude, Codex, Hermes, and shell profiles with strict TOML validation
 - Separate runtime, task, agent, input, and alert states with notes, projects, tags, and pinning
 - ANSI/OSC sanitization, secret redaction, and byte-and-line bounded pane and log views
 - Optional owner-only sanitized logging, usage-limit warnings, diagnostics export, and onboarding
+- Session-aware command palette with categorized commands, shortcuts, and availability details
 - Dark, light, monochrome, `NO_COLOR`, and ASCII-compatible presentation modes
 - Subtle SSH-friendly motion with config, `--no-animation`, and `WF_MOTION=off` overrides
 - Read-only discovery and preview of legacy WF sidecar metadata
@@ -109,7 +110,9 @@ hidden unless `list --all` is requested.
 The create dialog validates names and directories, detects duplicate sessions and Git projects,
 shows the exact command, and keeps Create disabled until required fields are valid. `d` opens Manage;
 stop, metadata removal, log deletion, and complete deletion always require a separate confirmation
-with Cancel focused by default.
+with Cancel focused by default. Canceling a protected confirmation returns to the originating Manage
+action. Modal workflows suspend Search and restore its query, selection, focus, and scroll state when
+they close.
 
 ## Configuration
 

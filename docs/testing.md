@@ -23,8 +23,8 @@ verifies that the tmux session remained alive throughout.
 ## Visual regression
 
 `pytest-textual-snapshot` records deterministic SVG frames for wide, medium, narrow, empty, warning,
-failure, usage-limit, diagnostics, create, create-advanced, validation-error,
-destructive-confirmation, dark, light, monochrome, reduced-motion, diagnostics-running,
+failure, usage-limit, diagnostics, create, create-advanced, validation-error, filter, palette,
+manage, destructive-confirmation, dark, light, monochrome, reduced-motion, diagnostics-running,
 long-content, 50-session, and 200-session states.
 Reviewed before/after frames at
 `160x45`, `120x35`, `100x30`, and `80x24` are stored under `docs/screenshots/`.
@@ -55,6 +55,9 @@ Check at least:
 - create validation failure with values preserved and Create disabled
 - latest-value validation after rapid invalid-to-valid name changes
 - Search suspension and exact focus/query/scroll restoration around the Create form
+- exclusive Search, Filter, Palette, Manage, Form, and Confirmation mode transitions
+- shortcut suppression while overlays are active and command dispatch after palette restoration
+- identity-bound Manage operations and confirmation cancellation back to the originating action
 - final session-ID normalization, collision checks, prefix opt-out, and no duplicate tool prefix
 - multiline task entry, advanced-option focus restoration, and incremental new-row insertion
 - actionable startup failure with rollback verification, retry, details, and metadata cleanup states

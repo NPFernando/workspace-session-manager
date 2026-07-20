@@ -13,6 +13,18 @@ WF separates five concerns:
 The legacy sidecar adapter has no write methods. Unmanaged sessions are hidden from normal views.
 `list --all` exposes them for diagnostics, while `migrate preview` can build a private adoption plan.
 
+## Interaction modes
+
+The Textual dashboard allows one active interaction mode: Normal, Search, Filter, Form, Command
+Palette, Manage, or Confirmation. Entering an overlay captures the current query, filters, selected
+session identity, highlighted option, focus, and scroll position. Cancel restores that context before
+another command may run. App-level bindings are unavailable while a modal or full-screen workflow is
+active, so keystrokes cannot open conflicting screens or leak into the dashboard.
+
+Manage callbacks retain the exact name and tmux session ID captured when the workflow opened. A
+background refresh or selection change cannot redirect a protected action. Canceling a nested
+confirmation reopens Manage with the originating action focused.
+
 ## Session creation
 
 WF validates the name, directory, tool profile, and executable before calling tmux. tmux starts an

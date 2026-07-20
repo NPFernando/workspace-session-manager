@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import socket
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -18,9 +19,11 @@ from rich.text import Text
 from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.command import CommandPalette, DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.timer import Timer
+from textual.widget import Widget
 from textual.widgets import (
     Button,
     Checkbox,
@@ -960,6 +963,10 @@ class EditSessionScreen(ModalScreen[EditResult | None]):
             yield Label("Tags", classes="field-label")
             yield Input(value=" ".join(self.session.tags), id="edit-tags")
             yield Checkbox("Pinned", value=self.session.pinned, id="edit-pinned")
+            yield Static(
+                "FORM  Tab Next   Shift+Tab Previous   Enter Select   Esc Cancel",
+                classes="mode-help",
+            )
             with Horizontal(classes="dialog-actions"):
                 yield Button("Cancel", id="edit-cancel")
                 yield Button("Save", variant="primary", id="edit-submit")
@@ -999,6 +1006,10 @@ class NoteScreen(ModalScreen[str | None]):
             yield Label("Edit task", classes="dialog-title")
             yield Static(self.session.name, classes="dialog-context")
             yield Input(value=self.session.note, id="note-value")
+            yield Static(
+                "FORM  Tab Next   Shift+Tab Previous   Esc Cancel",
+                classes="mode-help",
+            )
             with Horizontal(classes="dialog-actions"):
                 yield Button("Cancel", id="note-cancel")
                 yield Button("Save", variant="primary", id="note-submit")
@@ -1020,39 +1031,78 @@ class NoteScreen(ModalScreen[str | None]):
 class ManageSessionScreen(ModalScreen[str | None]):
     BINDINGS: ClassVar[list[BindingSpec]] = [Binding("escape", "cancel", "Cancel")]
 
-    def __init__(self, session: SessionView) -> None:
+    def __init__(self, session: SessionView, *, initial_focus_id: str | None = None) -> None:
         super().__init__()
         self.session = session
+        self.initial_focus_id = initial_focus_id
 
     def compose(self) -> ComposeResult:
         stopped = self.session.runtime is RuntimeState.STOPPED
-        with VerticalScroll(id="more-dialog", classes="dialog manage-dialog"):
+        with Vertical(id="more-dialog", classes="dialog manage-dialog"):
             yield Label("Manage Session", classes="dialog-title")
             yield Static(self.session.name, classes="dialog-context")
-            yield Static("General", classes="manage-section")
-            yield Button("Rename or edit organization", id="manage-edit")
-            yield Button("Edit task note", id="manage-note")
-            yield Button("Set task and input status", id="manage-status")
-            yield Button(
-                "Disable logging" if self.session.logging_enabled else "Enable logging",
-                id="manage-logging",
-                disabled=stopped,
+            with VerticalScroll(id="manage-actions"):
+                yield Static("General", classes="manage-section")
+                yield Button("Rename or edit organization", id="manage-edit", compact=True)
+                yield Button("Edit task note", id="manage-note", compact=True)
+                yield Button("Set task and input status", id="manage-status", compact=True)
+                yield Button(
+                    "Disable logging" if self.session.logging_enabled else "Enable logging",
+                    id="manage-logging",
+                    disabled=stopped,
+                    compact=True,
+                )
+                yield Button(
+                    "Unpin" if self.session.pinned else "Pin", id="manage-pin", compact=True
+                )
+                yield Button("Advanced details", id="manage-advanced", compact=True)
+                yield Static("Runtime", classes="manage-section")
+                yield Button("Restart tool", id="manage-restart", compact=True)
+                yield Button(
+                    "Stop command", id="manage-stop-command", disabled=stopped, compact=True
+                )
+                yield Static("Danger zone", classes="manage-section danger-title")
+                yield Button(
+                    "Stop tmux session",
+                    variant="error",
+                    id="manage-stop",
+                    disabled=stopped,
+                    compact=True,
+                )
+                yield Button(
+                    "Remove WF metadata",
+                    variant="error",
+                    id="manage-remove-metadata",
+                    compact=True,
+                )
+                yield Button(
+                    "Delete logs",
+                    variant="error",
+                    id="manage-delete-logs",
+                    compact=True,
+                )
+                yield Button(
+                    "Delete session and metadata",
+                    variant="error",
+                    id="more-delete",
+                    compact=True,
+                )
+            yield Static(
+                "MANAGE  Tab Move   Enter Select   Esc Close",
+                classes="mode-help",
             )
-            yield Button("Unpin" if self.session.pinned else "Pin", id="manage-pin")
-            yield Button("Advanced details", id="manage-advanced")
-            yield Static("Runtime", classes="manage-section")
-            yield Button("Restart tool", id="manage-restart")
-            yield Button("Stop command", id="manage-stop-command", disabled=stopped)
-            yield Static("Danger zone", classes="manage-section danger-title")
-            yield Button("Stop tmux session", variant="error", id="manage-stop", disabled=stopped)
-            yield Button("Remove WF metadata", variant="error", id="manage-remove-metadata")
-            yield Button("Delete logs", variant="error", id="manage-delete-logs")
-            yield Button("Delete session and metadata", variant="error", id="more-delete")
             yield Button("Cancel", id="more-cancel")
 
     def on_mount(self) -> None:
         animate_modal_open(self)
-        self.query_one("#more-cancel", Button).focus()
+        focus = self.query_one("#more-cancel", Button)
+        if self.initial_focus_id:
+            matches = self.query(f"#{self.initial_focus_id}")
+            if matches:
+                candidate = matches.first(Button)
+                if not candidate.disabled:
+                    focus = candidate
+        focus.focus()
 
     @on(Button.Pressed)
     def button_pressed(self, event: Button.Pressed) -> None:
@@ -1100,6 +1150,10 @@ class DeleteSessionScreen(ModalScreen[bool]):
             )
             yield Static(self.session_name, classes="confirm-name")
             yield Input(id="delete-confirm")
+            yield Static(
+                "CONFIRMATION  Type the session name   Esc Back",
+                classes="mode-help",
+            )
             with Horizontal(classes="dialog-actions"):
                 yield Button("Cancel", id="delete-cancel")
                 yield Button("Delete", variant="error", id="delete-submit")
@@ -1136,6 +1190,10 @@ class ConfirmActionScreen(ModalScreen[bool]):
             yield Label(self.confirm_title, classes="dialog-title danger-title")
             yield Static(self.session_name, classes="confirm-name")
             yield Static(self.consequence, classes="confirm-copy")
+            yield Static(
+                "CONFIRMATION  Tab Switch   Enter Activate   Esc Back",
+                classes="mode-help",
+            )
             with Horizontal(classes="dialog-actions"):
                 yield Button("Cancel", id="confirm-cancel")
                 yield Button("Confirm", variant="error", id="confirm-submit")
@@ -1258,6 +1316,10 @@ class FilterScreen(ModalScreen[FilterState | None]):
                 self.current.recent_only,
                 id="filter-recent",
             )
+            yield Static(
+                "FILTER  Tab Next   Shift+Tab Previous   Enter Select   Esc Cancel",
+                classes="mode-help",
+            )
             with Horizontal(classes="dialog-actions"):
                 yield Button("Cancel", id="filter-cancel")
                 yield Button("Clear", id="filter-clear")
@@ -1342,6 +1404,10 @@ class DiagnosticsScreen(ModalScreen[None]):
             yield LoadingIndicator(id="diagnostics-loading")
             with VerticalScroll(id="diagnostics-list"):
                 yield Static("", id="diagnostics-content")
+            yield Static(
+                "DIAGNOSTICS  r Run again   e Export   Tab Navigate   Esc Close",
+                classes="mode-help",
+            )
             with Horizontal(classes="dialog-actions diagnostics-actions"):
                 yield Button("Run Again", id="diagnostics-run")
                 yield Button("Export Report", id="diagnostics-export")
@@ -1729,9 +1795,11 @@ class InteractionMode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class CreateModeContext:
+class DashboardModeContext:
     mode: InteractionMode
     searching: bool
+    filter_query: str
+    filters: FilterState
     search_value: str
     selected_name: str | None
     selected_session_id: str | None
@@ -1740,12 +1808,121 @@ class CreateModeContext:
     focused_id: str | None
 
 
+class WFCommandProvider(Provider):
+    """Session-aware commands for Textual's built-in fuzzy palette."""
+
+    def _commands(self) -> list[tuple[str, str, Callable[[], object]]]:
+        app = self.app
+        if not isinstance(app, WFApp):
+            return []
+        selected = app._selected()
+
+        def unavailable() -> None:
+            app.notify("Select a session before using this command.", severity="warning")
+
+        selected_command = unavailable if selected is None else app.action_open
+        edit_command = unavailable if selected is None else app.action_edit
+        note_command = unavailable if selected is None else app.action_note
+        logs_command = unavailable if selected is None else app.action_logs
+        pin_command = unavailable if selected is None else app.action_toggle_pin
+        manage_command = unavailable if selected is None else app.action_manage
+        availability = "Unavailable: no selected session" if selected is None else "Available"
+        return [
+            (
+                "Create · Claude Code session                       c",
+                "Create a persistent Claude Code session",
+                app.action_create,
+            ),
+            (
+                "Create · Codex session",
+                "Create a persistent Codex session",
+                lambda: app.action_create(Tool.CODEX),
+            ),
+            (
+                "Create · Shell session",
+                "Create a persistent Linux shell session",
+                app.action_shell,
+            ),
+            (
+                "Selected · Attach session                    Enter",
+                availability,
+                selected_command,
+            ),
+            (
+                "Selected · Edit session                          e",
+                availability,
+                edit_command,
+            ),
+            (
+                "Selected · Edit task                             n",
+                availability,
+                note_command,
+            ),
+            (
+                "Selected · Open logs                             l",
+                availability,
+                logs_command,
+            ),
+            (
+                "Selected · Toggle pin                            *",
+                availability,
+                pin_command,
+            ),
+            (
+                "Selected · Manage session                        d",
+                availability,
+                manage_command,
+            ),
+            (
+                "Dashboard · Search sessions                      /",
+                "Search names, tasks, projects, tools, and tags",
+                app.action_search,
+            ),
+            (
+                "Dashboard · Filter sessions                      f",
+                "Filter by tool, runtime, task, warning, or activity",
+                app.action_filter,
+            ),
+            (
+                "Dashboard · Refresh sessions                     r",
+                "Refresh tmux and metadata state",
+                app.action_refresh,
+            ),
+            (
+                "System · Run diagnostics",
+                "Check tmux, tools, state, and storage",
+                app.action_diagnostics,
+            ),
+            (
+                "Interface · Switch theme                         t",
+                "Cycle dark, light, and monochrome themes",
+                app.action_cycle_theme,
+            ),
+            (
+                "Help · Keyboard reference                        ?",
+                "Open contextual keyboard help",
+                app.action_help,
+            ),
+        ]
+
+    async def discover(self) -> Hits:
+        for display, help_text, command in self._commands():
+            yield DiscoveryHit(display, command, help=help_text)
+
+    async def search(self, query: str) -> Hits:
+        matcher = self.matcher(query)
+        for display, help_text, command in self._commands():
+            if (score := matcher.match(display)) > 0:
+                yield Hit(score, matcher.highlight(display), command, help=help_text)
+
+
 class WFApp(App[str | None]):
     """Operational session dashboard; it returns the selected attach target."""
 
     CSS_PATH = "wf.tcss"
     TITLE = "WF - Workflow Session Manager"
     ENABLE_COMMAND_PALETTE = True
+    COMMANDS: ClassVar[set[type[Provider] | Callable[[], type[Provider]]]] = {WFCommandProvider}
     BINDINGS: ClassVar[list[BindingSpec]] = [
         Binding("q", "quit", "Quit"),
         Binding("enter", "open", "Open"),
@@ -1793,7 +1970,7 @@ class WFApp(App[str | None]):
         self._option_actions: dict[str, str] = {}
         self._alerts: dict[tuple[str, str], ActivityNotice] = {}
         self.interaction_mode = InteractionMode.NORMAL
-        self._create_mode_context: CreateModeContext | None = None
+        self._mode_context: DashboardModeContext | None = None
         self._failed_create_result: CreateFormResult | None = None
         self.output_mode = "summary"
         self.tmux_connected = True
@@ -1820,6 +1997,101 @@ class WFApp(App[str | None]):
             or self.monochrome
             else configured_motion
         )
+
+    def _capture_dashboard_context(self) -> DashboardModeContext:
+        options = self.query_one("#sessions", OptionList)
+        highlighted_option_id: str | None = None
+        if options.highlighted is not None:
+            highlighted_option_id = options.get_option_at_index(options.highlighted).id
+        focused = self.focused
+        return DashboardModeContext(
+            mode=self.interaction_mode,
+            searching=self.has_class("searching"),
+            filter_query=self.filter_query,
+            filters=self.filters,
+            search_value=self.query_one("#search", Input).value,
+            selected_name=self.selected_name,
+            selected_session_id=self.selected_session_id,
+            highlighted_option_id=highlighted_option_id,
+            scroll_y=options.scroll_offset.y,
+            focused_id=focused.id if focused is not None else None,
+        )
+
+    def _set_interaction_mode(self, mode: InteractionMode) -> None:
+        self.interaction_mode = mode
+        for candidate in InteractionMode:
+            self.set_class(candidate is mode, f"mode-{candidate.value}")
+        overlay_active = mode not in {InteractionMode.NORMAL, InteractionMode.SEARCH}
+        self.set_class(overlay_active, "overlay-active")
+        if mode is not InteractionMode.SEARCH:
+            self.remove_class("searching")
+        self._render_action_bar()
+
+    def _begin_overlay(self, mode: InteractionMode) -> None:
+        if self._mode_context is None:
+            self._mode_context = self._capture_dashboard_context()
+        self._set_interaction_mode(mode)
+
+    def _restore_dashboard_mode(self, *, filters: FilterState | None = None) -> None:
+        context = self._mode_context
+        self._mode_context = None
+        if context is None:
+            self._set_interaction_mode(InteractionMode.NORMAL)
+            return
+
+        self.filter_query = context.filter_query
+        self.filters = context.filters if filters is None else filters
+        self.selected_name = context.selected_name
+        self.selected_session_id = context.selected_session_id
+        search = self.query_one("#search", Input)
+        with self.prevent(Input.Changed):
+            search.value = context.search_value
+        self._set_interaction_mode(
+            InteractionMode.SEARCH if context.searching else InteractionMode.NORMAL
+        )
+        if context.searching:
+            self.add_class("searching")
+
+        options = self.query_one("#sessions", OptionList)
+        option_ids = {
+            options.get_option_at_index(index).id for index in range(options.option_count)
+        }
+        if (
+            context.highlighted_option_id is not None
+            and context.highlighted_option_id in option_ids
+        ):
+            options.highlighted = options.get_option_index(context.highlighted_option_id)
+        self.call_after_refresh(options.scroll_to, y=context.scroll_y, animate=False, force=True)
+        focus_target: Widget = options
+        if context.focused_id:
+            matches = self.query(f"#{context.focused_id}")
+            if matches:
+                focus_target = matches.first()
+        self.call_after_refresh(focus_target.focus)
+        self._render_header()
+        self._render_action_bar()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Expose only actions that belong to the current interaction mode."""
+        del parameters
+        if len(self.screen_stack) > 1:
+            return False
+        if self.interaction_mode is InteractionMode.SEARCH:
+            return action == "escape"
+        if self.interaction_mode is not InteractionMode.NORMAL:
+            return False
+        selection_actions = {
+            "open",
+            "edit",
+            "note",
+            "logs",
+            "toggle_pin",
+            "manage",
+            "advanced_details",
+        }
+        if action in selection_actions and self._selected() is None:
+            return None
+        return True
 
     def compose(self) -> ComposeResult:
         yield Static("", id="app-header")
@@ -1861,6 +2133,7 @@ class WFApp(App[str | None]):
 
     def on_mount(self) -> None:
         self.set_class(self.motion == "off", "motion-off")
+        self._set_interaction_mode(InteractionMode.NORMAL)
         self._set_layout_classes(self.size.width, self.size.height)
         self.refresh_sessions()
         self.query_one("#sessions", OptionList).focus()
@@ -1911,17 +2184,19 @@ class WFApp(App[str | None]):
             return
         self._onboarding_checked = True
         if self._onboarding_enabled and not self.sessions and not self.service.onboarding_seen():
+            self._begin_overlay(InteractionMode.FORM)
             self.push_screen(OnboardingScreen(), self._finish_onboarding)
 
     def _finish_onboarding(self, action: str | None) -> None:
+        self._restore_dashboard_mode()
         try:
             self.service.mark_onboarding_seen()
         except (OSError, WFError) as error:
             self.notify(str(error), title="Unable to save onboarding state", severity="warning")
         if action == "create":
-            self.action_create()
+            self.call_after_refresh(self.action_create)
         elif action == "help":
-            self.action_help()
+            self.call_after_refresh(self.action_help)
 
     def _notify_success(self, message: str, *, title: str = "Completed") -> None:
         marker = "OK" if self.ascii_only else "✓"
@@ -1935,6 +2210,8 @@ class WFApp(App[str | None]):
         return max(28, self.size.width - 5)
 
     def refresh_sessions(self) -> None:
+        if not self.query("#app-header"):
+            return
         self.add_class("refreshing")
         self._render_header()
         try:
@@ -2368,28 +2645,47 @@ class WFApp(App[str | None]):
 
     def _finish_search(self) -> None:
         self.remove_class("searching")
-        self.interaction_mode = InteractionMode.NORMAL
+        self._set_interaction_mode(InteractionMode.NORMAL)
         self.query_one("#sessions", OptionList).focus()
         self._render_header()
         self._render_action_bar()
 
     def action_search(self) -> None:
+        if self.interaction_mode is not InteractionMode.NORMAL:
+            return
         self._search_before = self.filter_query
         self.add_class("searching")
-        self.interaction_mode = InteractionMode.SEARCH
+        self._set_interaction_mode(InteractionMode.SEARCH)
+        self.add_class("searching")
         search = self.query_one("#search", Input)
         search.value = self.filter_query
         search.focus()
         self._render_action_bar()
 
     def action_filter(self) -> None:
+        if self.interaction_mode not in {InteractionMode.NORMAL, InteractionMode.SEARCH}:
+            return
+        self._begin_overlay(InteractionMode.FILTER)
         self.push_screen(FilterScreen(self.filters), self._apply_filter)
 
     def _apply_filter(self, filters: FilterState | None) -> None:
-        if filters is None:
+        self._restore_dashboard_mode(filters=filters)
+        if filters is not None:
+            self._render_options()
+
+    def action_command_palette(self) -> None:
+        if self.interaction_mode not in {InteractionMode.NORMAL, InteractionMode.SEARCH}:
             return
-        self.filters = filters
-        self._render_options()
+        self._begin_overlay(InteractionMode.PALETTE)
+        super().action_command_palette()
+
+    @on(CommandPalette.Opened)
+    def command_palette_opened(self) -> None:
+        self._set_interaction_mode(InteractionMode.PALETTE)
+
+    @on(CommandPalette.Closed)
+    def command_palette_closed(self) -> None:
+        self._restore_dashboard_mode()
 
     def action_recent(self) -> None:
         self.filters = FilterState(recent_only=True)
@@ -2420,7 +2716,8 @@ class WFApp(App[str | None]):
             self.action_manage()
             return
         if self.has_class("narrow"):
-            self.push_screen(DetailScreen(self.service, session), self._detail_result)
+            self._begin_overlay(InteractionMode.FORM)
+            self.push_screen(DetailScreen(self.service, session), self._overlay_detail_result)
         else:
             self.exit(session.name)
 
@@ -2428,29 +2725,17 @@ class WFApp(App[str | None]):
         if target:
             self.exit(target)
 
+    def _overlay_detail_result(self, target: str | None) -> None:
+        self._restore_dashboard_mode()
+        self._detail_result(target)
+
     def action_attach(self) -> None:
         self.action_open()
 
     def action_create(self, tool: Tool = Tool.CLAUDE) -> None:
-        options = self.query_one("#sessions", OptionList)
-        highlighted_option_id: str | None = None
-        if options.highlighted is not None:
-            highlighted_option_id = options.get_option_at_index(options.highlighted).id
-        focused = self.focused
-        self._create_mode_context = CreateModeContext(
-            mode=self.interaction_mode,
-            searching=self.has_class("searching"),
-            search_value=self.query_one("#search", Input).value,
-            selected_name=self.selected_name,
-            selected_session_id=self.selected_session_id,
-            highlighted_option_id=highlighted_option_id,
-            scroll_y=options.scroll_offset.y,
-            focused_id=focused.id if focused is not None else None,
-        )
-        self.remove_class("searching")
-        self.add_class("form-active")
-        self.interaction_mode = InteractionMode.FORM
-        self._render_action_bar()
+        if self.interaction_mode not in {InteractionMode.NORMAL, InteractionMode.SEARCH}:
+            return
+        self._begin_overlay(InteractionMode.FORM)
         self.push_screen(
             CreateSessionScreen(self.default_cwd, self.service, tool), self._create_session
         )
@@ -2470,34 +2755,7 @@ class WFApp(App[str | None]):
         self.exit(target.name)
 
     def _restore_create_mode(self) -> None:
-        context = self._create_mode_context
-        self._create_mode_context = None
-        self.remove_class("form-active")
-        if context is None:
-            self.interaction_mode = InteractionMode.NORMAL
-            self._render_action_bar()
-            return
-        self.selected_name = context.selected_name
-        self.selected_session_id = context.selected_session_id
-        search = self.query_one("#search", Input)
-        search.value = context.search_value
-        if context.searching:
-            self.add_class("searching")
-            self.interaction_mode = InteractionMode.SEARCH
-        else:
-            self.interaction_mode = context.mode
-        options = self.query_one("#sessions", OptionList)
-        option_ids = {
-            options.get_option_at_index(index).id for index in range(options.option_count)
-        }
-        highlighted_option_id = context.highlighted_option_id
-        if highlighted_option_id is not None and highlighted_option_id in option_ids:
-            options.highlighted = options.get_option_index(highlighted_option_id)
-        self.call_after_refresh(options.scroll_to, y=context.scroll_y, animate=False, force=True)
-        focus_target = self.query_one(f"#{context.focused_id}") if context.focused_id else options
-        self.call_after_refresh(focus_target.focus)
-        self._render_header()
-        self._render_action_bar()
+        self._restore_dashboard_mode()
 
     def _insert_created_session(self, session: SessionView) -> None:
         self.sessions.insert(0, session)
@@ -2579,7 +2837,7 @@ class WFApp(App[str | None]):
             except WFError:
                 session_name = result.request.name
                 metadata_exists = False
-            self.interaction_mode = InteractionMode.CONFIRMATION
+            self._set_interaction_mode(InteractionMode.CONFIRMATION)
             self.notify(
                 f"{error}\nRetry, open details, or remove partial metadata if present.",
                 title="Session startup failed",
@@ -2605,7 +2863,7 @@ class WFApp(App[str | None]):
     def _creation_failure_action(self, action: str | None) -> None:
         result = self._failed_create_result
         if action == "retry" and result is not None:
-            self.interaction_mode = InteractionMode.FORM
+            self._set_interaction_mode(InteractionMode.FORM)
             self._attempt_create(result)
             return
         if action == "remove" and result is not None:
@@ -2620,23 +2878,33 @@ class WFApp(App[str | None]):
             except WFError as error:
                 self.notify(str(error), title="Metadata removal failed", severity="error")
         self._failed_create_result = None
-        self._restore_create_mode()
         if action == "details" and result is not None:
-            self.push_screen(
-                MessageScreen(
-                    "Startup Failure Details",
-                    "The tool process did not start. No active session was adopted or renamed.\n\n"
-                    "Run System Diagnostics, verify the configured executable, and retry creation.",
-                )
-            )
+            self._set_interaction_mode(InteractionMode.FORM)
+            self.call_after_refresh(self._open_startup_failure_details)
+        else:
+            self._restore_create_mode()
+
+    def _open_startup_failure_details(self) -> None:
+        self.push_screen(
+            MessageScreen(
+                "Startup Failure Details",
+                "The tool process did not start. No active session was adopted or renamed.\n\n"
+                "Run System Diagnostics, verify the configured executable, and retry creation.",
+            ),
+            lambda _result: self._restore_dashboard_mode(),
+        )
 
     def action_edit(self) -> None:
         session = self._selected()
         if session:
-            self.push_screen(EditSessionScreen(session), self._edit_session)
+            self._begin_overlay(InteractionMode.FORM)
+            self.push_screen(
+                EditSessionScreen(session),
+                lambda result, target=session: self._edit_session(result, target),
+            )
 
-    def _edit_session(self, result: EditResult | None) -> None:
-        session = self._selected()
+    def _edit_session(self, result: EditResult | None, session: SessionView) -> None:
+        self._restore_dashboard_mode()
         if result is None or session is None:
             return
         try:
@@ -2662,10 +2930,14 @@ class WFApp(App[str | None]):
     def action_note(self) -> None:
         session = self._selected()
         if session:
-            self.push_screen(NoteScreen(session), self._save_note)
+            self._begin_overlay(InteractionMode.FORM)
+            self.push_screen(
+                NoteScreen(session),
+                lambda note, target=session: self._save_note(note, target),
+            )
 
-    def _save_note(self, note: str | None) -> None:
-        session = self._selected()
+    def _save_note(self, note: str | None, session: SessionView) -> None:
+        self._restore_dashboard_mode()
         if note is None or session is None:
             return
         try:
@@ -2679,12 +2951,16 @@ class WFApp(App[str | None]):
     def action_logs(self) -> None:
         session = self._selected()
         if session:
-            self.push_screen(LogScreen(self.service, session), self._detail_result)
+            self._begin_overlay(InteractionMode.FORM)
+            self.push_screen(LogScreen(self.service, session), self._overlay_detail_result)
 
     def action_toggle_pin(self) -> None:
         session = self._selected()
         if session is None:
             return
+        self._toggle_pin(session)
+
+    def _toggle_pin(self, session: SessionView) -> None:
         try:
             updated = self.service.organize(session.name, pinned=not session.pinned)
         except WFError as error:
@@ -2698,7 +2974,29 @@ class WFApp(App[str | None]):
     def action_manage(self) -> None:
         session = self._selected()
         if session:
-            self.push_screen(ManageSessionScreen(session), self._manage_action)
+            self._begin_overlay(InteractionMode.MANAGE)
+            self._open_manage_screen(session)
+
+    def _open_manage_screen(
+        self,
+        session: SessionView,
+        *,
+        initial_focus_id: str | None = None,
+    ) -> None:
+        current = self._current_session(session)
+        if current is None:
+            self._restore_dashboard_mode()
+            self.notify(
+                "The selected session changed or disappeared during the operation.",
+                title="Session unavailable",
+                severity="warning",
+            )
+            return
+        self._set_interaction_mode(InteractionMode.MANAGE)
+        self.push_screen(
+            ManageSessionScreen(current, initial_focus_id=initial_focus_id),
+            lambda action, target=current: self._manage_action(target, action),
+        )
 
     def action_more_actions(self) -> None:
         self.action_manage()
@@ -2706,19 +3004,34 @@ class WFApp(App[str | None]):
     def action_delete_session(self) -> None:
         self.action_manage()
 
-    def _manage_action(self, action: str | None) -> None:
-        session = self._selected()
-        if action is None or session is None:
+    def _current_session(self, target: SessionView) -> SessionView | None:
+        return next(
+            (
+                session
+                for session in self.sessions
+                if session.name == target.name and session.session_id == target.session_id
+            ),
+            None,
+        )
+
+    def _manage_action(self, session: SessionView, action: str | None) -> None:
+        if action is None:
+            self._restore_dashboard_mode()
             return
         if action == "edit" or action == "status":
-            self.action_edit()
+            self._set_interaction_mode(InteractionMode.FORM)
+            self.call_after_refresh(self._open_edit_screen, session)
         elif action == "note":
-            self.action_note()
+            self._set_interaction_mode(InteractionMode.FORM)
+            self.call_after_refresh(self._open_note_screen, session)
         elif action == "pin":
-            self.action_toggle_pin()
+            self._restore_dashboard_mode()
+            self._toggle_pin(session)
         elif action == "advanced":
-            self.action_advanced_details()
+            self._set_interaction_mode(InteractionMode.FORM)
+            self.call_after_refresh(self._open_advanced_screen, session)
         elif action == "logging":
+            self._restore_dashboard_mode()
             try:
                 updated = self.service.set_logging(session.name, not session.logging_enabled)
             except (WFError, OSError) as error:
@@ -2730,8 +3043,47 @@ class WFApp(App[str | None]):
                 "Logging enabled" if updated.logging_enabled else "Logging disabled"
             )
             self.refresh_sessions()
-        elif action == "delete":
-            self.push_screen(DeleteSessionScreen(session.name), self._delete_session)
+        else:
+            self._set_interaction_mode(InteractionMode.CONFIRMATION)
+            self.call_after_refresh(self._open_manage_confirmation, session, action)
+
+    def _open_edit_screen(self, session: SessionView) -> None:
+        current = self._current_session(session)
+        if current is None:
+            self._restore_dashboard_mode()
+            return
+        self.push_screen(
+            EditSessionScreen(current),
+            lambda result, target=current: self._edit_session(result, target),
+        )
+
+    def _open_note_screen(self, session: SessionView) -> None:
+        current = self._current_session(session)
+        if current is None:
+            self._restore_dashboard_mode()
+            return
+        self.push_screen(
+            NoteScreen(current),
+            lambda note, target=current: self._save_note(note, target),
+        )
+
+    def _open_advanced_screen(self, session: SessionView) -> None:
+        current = self._current_session(session)
+        if current is None:
+            self._restore_dashboard_mode()
+            return
+        self.push_screen(
+            MessageScreen("Advanced Details", advanced_document(current)),
+            lambda _result: self._restore_dashboard_mode(),
+        )
+
+    def _open_manage_confirmation(self, session: SessionView, action: str) -> None:
+        current = self._current_session(session)
+        if current is None:
+            self._restore_dashboard_mode()
+            return
+        if action == "delete":
+            screen: ModalScreen[bool] = DeleteSessionScreen(current.name)
         else:
             confirmations = {
                 "restart": (
@@ -2756,16 +3108,43 @@ class WFApp(App[str | None]):
                 ),
             }
             title, consequence = confirmations[action]
-            self.push_screen(
-                ConfirmActionScreen(title, session.name, consequence),
-                lambda confirmed, selected=action, name=session.name: self._confirmed_manage(
-                    selected, name, confirmed
-                ),
-            )
+            screen = ConfirmActionScreen(title, current.name, consequence)
+        self.push_screen(
+            screen,
+            lambda confirmed, selected=action, target=current: self._manage_confirmation_result(
+                target, selected, confirmed
+            ),
+        )
 
-    def _confirmed_manage(self, action: str, name: str, confirmed: bool) -> None:
+    def _manage_confirmation_result(
+        self,
+        session: SessionView,
+        action: str,
+        confirmed: bool,
+    ) -> None:
         if not confirmed:
+            focus_ids = {
+                "restart": "manage-restart",
+                "stop-command": "manage-stop-command",
+                "stop-session": "manage-stop",
+                "remove-metadata": "manage-remove-metadata",
+                "delete-logs": "manage-delete-logs",
+                "delete": "more-delete",
+            }
+            self._set_interaction_mode(InteractionMode.MANAGE)
+            self.call_after_refresh(
+                self._open_manage_screen,
+                session,
+                initial_focus_id=focus_ids[action],
+            )
             return
+        self._restore_dashboard_mode()
+        if action == "delete":
+            self._delete_session(session)
+        else:
+            self._confirmed_manage(action, session.name)
+
+    def _confirmed_manage(self, action: str, name: str) -> None:
         try:
             if action == "restart":
                 updated = self.service.restart(name)
@@ -2799,12 +3178,10 @@ class WFApp(App[str | None]):
     def action_advanced_details(self) -> None:
         session = self._selected()
         if session:
-            self.push_screen(MessageScreen("Advanced Details", advanced_document(session)))
+            self._begin_overlay(InteractionMode.FORM)
+            self._open_advanced_screen(session)
 
-    def _delete_session(self, confirmed: bool | None) -> None:
-        session = self._selected()
-        if not confirmed or session is None:
-            return
+    def _delete_session(self, session: SessionView) -> None:
         try:
             self.service.delete(session.name)
         except (WFError, OSError) as error:
@@ -2816,9 +3193,14 @@ class WFApp(App[str | None]):
         self.refresh_sessions()
 
     def action_diagnostics(self) -> None:
-        self.push_screen(DiagnosticsScreen(self.service))
+        self._begin_overlay(InteractionMode.FORM)
+        self.push_screen(
+            DiagnosticsScreen(self.service),
+            lambda _result: self._restore_dashboard_mode(),
+        )
 
     def action_help(self) -> None:
+        self._begin_overlay(InteractionMode.FORM)
         self.push_screen(
             MessageScreen(
                 "Keyboard help",
@@ -2836,7 +3218,8 @@ class WFApp(App[str | None]):
                 "p        Command palette\n"
                 "t        Cycle color theme\n"
                 "q        Quit",
-            )
+            ),
+            lambda _result: self._restore_dashboard_mode(),
         )
 
     def action_refresh(self) -> None:
