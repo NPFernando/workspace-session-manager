@@ -21,6 +21,12 @@ session identity, highlighted option, focus, and scroll position. Cancel restore
 another command may run. App-level bindings are unavailable while a modal or full-screen workflow is
 active, so keystrokes cannot open conflicting screens or leak into the dashboard.
 
+At 80-99 columns, the session list and inspector are two views of Normal mode rather than separate
+screens. The dashboard reuses one inspector tree, records inspector and output scroll positions by
+exact session identity, and restores them after modal and Logs workflows. Search and Filter return to
+the list before activation. A missing, replaced, or newly filtered session closes the detail view with
+an actionable warning instead of retaining a stale target.
+
 Manage is a searchable action browser with separate General, Runtime, and Danger categories.
 Identity and organization, task text, and task/input status are edited in separate forms. Manage
 callbacks retain the exact name and tmux session ID captured when the workflow opened, so a

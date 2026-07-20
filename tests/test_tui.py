@@ -28,7 +28,6 @@ from wf_session_manager.tui import (
     CreateFailureScreen,
     CreateSessionScreen,
     DeleteSessionScreen,
-    DetailScreen,
     DiagnosticsScreen,
     FilterScreen,
     IdentityOrganizationScreen,
@@ -146,15 +145,165 @@ async def test_wide_enter_attaches_selected_session(service: SessionService) -> 
 
 
 @pytest.mark.asyncio
-async def test_narrow_enter_opens_detail_then_attaches(service: SessionService) -> None:
+async def test_narrow_enter_opens_in_place_detail_then_attaches(service: SessionService) -> None:
     create_managed(service, "first", Tool.CLAUDE)
     app = WFApp(service, monochrome=False)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.press("enter")
         await pilot.pause()
-        assert isinstance(app.screen, DetailScreen)
+        assert app.narrow_detail_open
+        assert app.has_class("narrow-detail")
+        assert app.query_one("#detail-pane").display
+        assert not app.query_one("#session-pane").display
+        assert "Enter Attach" in str(app.query_one("#action-bar", Static).content)
         await pilot.press("enter")
     assert app.return_value == "claude-first"
+
+
+@pytest.mark.asyncio
+async def test_narrow_detail_restores_viewports_after_forms_logs_and_back(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    name = create_managed(service, "narrow-workspace", Tool.CLAUDE)
+    service.update_note(name, "\n".join(f"Task detail {index}" for index in range(24)))
+    fake_backend.previews[name] = "\n".join(f"output line {index}" for index in range(40))
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("enter")
+        assert app.narrow_detail_open
+        app.output_mode = "raw"
+        app._render_details(name)
+        await pilot.pause()
+        inspector = app.query_one("#inspector-scroll", VerticalScroll)
+        output = app.query_one("#recent-output-scroll", VerticalScroll)
+        await pilot.press("j")
+        await pilot.pause()
+        assert inspector.scroll_offset.y > 0
+        inspector.scroll_to(y=5, animate=False, force=True)
+        output.scroll_to(y=7, animate=False, force=True)
+        await pilot.pause()
+        expected_inspector_y = inspector.scroll_offset.y
+        expected_output_y = output.scroll_offset.y
+        assert expected_inspector_y > 0
+        assert expected_output_y > 0
+
+        app.refresh_sessions()
+        await pilot.pause()
+        assert app.narrow_detail_open
+        assert app.output_mode == "raw"
+        assert inspector.scroll_offset.y == expected_inspector_y
+        assert output.scroll_offset.y == expected_output_y
+
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, IdentityOrganizationScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.narrow_detail_open
+        assert inspector.scroll_offset.y == expected_inspector_y
+        assert output.scroll_offset.y == expected_output_y
+
+        await pilot.press("l")
+        assert isinstance(app.screen, LogScreen)
+        await wait_for_log_refresh(pilot, app.screen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.narrow_detail_open
+        assert inspector.scroll_offset.y == expected_inspector_y
+        assert output.scroll_offset.y == expected_output_y
+
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert "Scroll details" in str(app.screen.query_one("#message-content", Static).content)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.narrow_detail_open
+
+        await pilot.press("escape")
+        assert not app.narrow_detail_open
+        assert app.query_one("#session-pane").display
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.narrow_detail_open
+        assert app.output_mode == "raw"
+        assert inspector.scroll_offset.y == expected_inspector_y
+        assert output.scroll_offset.y == expected_output_y
+
+
+@pytest.mark.asyncio
+async def test_narrow_detail_search_and_filter_return_to_list(service: SessionService) -> None:
+    create_managed(service, "narrow-modes", Tool.SHELL)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("enter", "/")
+        assert not app.narrow_detail_open
+        assert app.interaction_mode is InteractionMode.SEARCH
+        assert app.has_class("searching")
+        await pilot.press("escape", "enter", "f")
+        await pilot.pause()
+        assert isinstance(app.screen, FilterScreen)
+        assert not app.narrow_detail_open
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.interaction_mode is InteractionMode.NORMAL
+        assert not app.narrow_detail_open
+        assert app.query_one("#session-pane").display
+
+
+@pytest.mark.asyncio
+async def test_narrow_stopped_detail_opens_manage_and_restores_detail(
+    service: SessionService,
+) -> None:
+    name = create_managed(service, "stopped-narrow", Tool.SHELL)
+    service.stop_session(name)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("enter")
+        assert app.narrow_detail_open
+        assert "Enter Manage" in str(app.query_one("#action-bar", Static).content)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, ManageSessionScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.narrow_detail_open
+
+
+@pytest.mark.asyncio
+async def test_narrow_detail_closes_on_identity_loss_and_wide_resize(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    name = create_managed(service, "resize-detail", Tool.SHELL)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("enter")
+        assert app.narrow_detail_open
+        await pilot.resize_terminal(100, 30)
+        await pilot.pause()
+        assert not app.narrow_detail_open
+        assert app.query_one("#session-pane").display
+        assert app.query_one("#detail-pane").display
+        await pilot.resize_terminal(80, 24)
+        await pilot.pause()
+        assert not app.narrow_detail_open
+        assert app.query_one("#session-pane").display
+        assert not app.query_one("#detail-pane").display
+
+        await pilot.press("enter")
+        assert app.narrow_detail_open
+        fake_backend.sessions[name] = fake_backend.sessions[name].model_copy(
+            update={"session_id": "$replacement"}
+        )
+        app.refresh_sessions()
+        await pilot.pause()
+        assert not app.narrow_detail_open
+        assert app.query_one("#session-pane").display
 
 
 @pytest.mark.asyncio

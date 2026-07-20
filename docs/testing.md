@@ -26,8 +26,9 @@ verifies that the tmux session remained alive throughout.
 failure, usage-limit, diagnostics, create, create-advanced, validation-error, filter, palette,
 responsive Manage, filtered Manage, disabled Manage actions, identity and status forms,
 destructive-confirmation, responsive Logs, Live and Saved sources, Logs find/pause/warning/error/empty
-states, dark, light, monochrome, ASCII, reduced-motion, diagnostics-running, long-content, 50-session,
-and 200-session states.
+states, in-place narrow details at 80 and 99 columns, narrow detail warning/failure/long-content,
+dark, light, monochrome, ASCII, reduced-motion, diagnostics-running, long-content, 50-session, and
+200-session states.
 Reviewed before/after frames at
 `160x45`, `120x35`, `100x30`, and `80x24` are stored under `docs/screenshots/`.
 Fake-backend terminal recordings and replay instructions are stored under `docs/recordings/`; they
@@ -71,4 +72,7 @@ Check at least:
 - output and session-list scroll position preservation across background refresh
 - Live/Saved log switching, source-local selection restoration, follow/pause, manual retry, and find
 - log-read failure recovery, stale worker rejection, exact-ID attach blocking, and timer cleanup
+- narrow list/detail transitions, inspector scrolling, contextual Help, and stopped-session Manage
+- narrow detail viewport restoration across Edit, Task, Logs, Manage, Help, refresh, and reopen
+- safe narrow-detail exit after filter exclusion, identity replacement, session loss, or wide resize
 - `--no-animation`, `WF_MOTION=off`, reduced motion, and focus restoration after modal cancellation

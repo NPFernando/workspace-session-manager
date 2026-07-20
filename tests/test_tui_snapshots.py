@@ -624,6 +624,133 @@ def test_logs_ascii_snapshot(
     assert snap_compare(app, terminal_size=(120, 35), run_before=show_logs)
 
 
+@pytest.mark.parametrize(
+    "terminal_size",
+    [(80, 24), (99, 30)],
+    ids=["80x24", "99x30"],
+)
+def test_narrow_detail_responsive_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    terminal_size: tuple[int, int],
+) -> None:
+    app, _name = logs_app(
+        service,
+        fake_backend,
+        output="Validated API configuration\nReady for the next workflow action",
+    )
+
+    async def show_detail(pilot: Pilot) -> None:
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.narrow_detail_open
+
+    assert snap_compare(app, terminal_size=terminal_size, run_before=show_detail)
+
+
+def test_narrow_detail_warning_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app, _name = logs_app(
+        service,
+        fake_backend,
+        tool=Tool.CODEX,
+        output="Warning: Codex usage limit reached\nRetry available: tomorrow at 10:00",
+    )
+
+    async def show_detail(pilot: Pilot) -> None:
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(80, 24), run_before=show_detail)
+
+
+def test_narrow_detail_failure_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    name = add_session(
+        service,
+        fake_backend,
+        "failed-worker",
+        Tool.SHELL,
+        note="Inspect the failed background worker",
+        failed=True,
+    )
+    fake_backend.previews[name] = "Worker exited with status 1"
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async def show_detail(pilot: Pilot) -> None:
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(80, 24), run_before=show_detail)
+
+
+def test_narrow_detail_long_content_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    name = add_session(
+        service,
+        fake_backend,
+        "api-authentication-and-authorization-refactor-with-a-long-name",
+        Tool.CLAUDE,
+        note=(
+            "Refactor API authentication, authorization, token rotation, audit logging, "
+            "and failure recovery across all public endpoints."
+        ),
+        project="enterprise-api-platform-with-shared-services",
+    )
+    fake_backend.previews[name] = "Reviewing authentication boundaries\nAudit remains in progress"
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async def show_detail(pilot: Pilot) -> None:
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(99, 30), run_before=show_detail)
+
+
+@pytest.mark.parametrize("theme", ["light", "monochrome"])
+def test_narrow_detail_theme_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    theme: str,
+) -> None:
+    app, _name = logs_app(service, fake_backend, output="Sanitized output\nReady")
+    app.ui_theme = theme
+    app.monochrome = theme == "monochrome"
+
+    async def show_detail(pilot: Pilot) -> None:
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(80, 24), run_before=show_detail)
+
+
+def test_narrow_detail_ascii_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WF_ASCII", "1")
+    app, _name = logs_app(service, fake_backend, output="Sanitized output\nReady")
+
+    async def show_detail(pilot: Pilot) -> None:
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(80, 24), run_before=show_detail)
+
+
 def test_identity_form_snapshot(
     snap_compare: SnapCompare,
     service: SessionService,

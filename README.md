@@ -91,8 +91,8 @@ hidden unless `list --all` is requested.
 
 | Key | Action |
 | --- | --- |
-| `Enter` | Attach, or open details at 80-99 columns |
-| `Up`/`Down`, `j`/`k` | Navigate sessions and quick actions |
+| `Enter` | Attach, or open the in-place inspector at 80-99 columns |
+| `Up`/`Down`, `j`/`k` | Navigate sessions; scroll an open narrow inspector |
 | `c` | Create a session |
 | `e` | Edit identity and organization |
 | `n` | Edit the task description |
@@ -107,6 +107,11 @@ hidden unless `list --all` is requested.
 | `t` | Cycle dark, light, and monochrome themes |
 | `Esc` | Cancel search or return from a narrow detail screen |
 | `q` | Quit |
+
+At 80-99 columns, the first `Enter` opens the selected session's existing inspector at full width;
+the next `Enter` attaches. `Esc` returns to the session list. Opening Edit, Task, Logs, Manage, or Help
+from that view preserves its inspector position, output position, Summary/Raw mode, selection, and
+filters. Starting Search or Filter intentionally returns to the list first.
 
 Inside Logs, `f` pauses or resumes polling, `r` performs a manual read, and `/` opens literal,
 case-insensitive find. `Enter` and `Shift+Enter` move between matches, `Ctrl+U` clears the query,

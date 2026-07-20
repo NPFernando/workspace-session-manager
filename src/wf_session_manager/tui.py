@@ -2513,109 +2513,6 @@ class LogScreen(Screen[str | None]):
         self.dismiss(None)
 
 
-class DetailScreen(Screen[str | None]):
-    CSS_PATH = "wf.tcss"
-    BINDINGS: ClassVar[list[BindingSpec]] = [
-        Binding("escape", "close", "Back"),
-        Binding("q", "close", "Back"),
-        Binding("enter", "attach", "Attach"),
-        Binding("l", "logs", "Logs"),
-    ]
-
-    def __init__(self, service: SessionService, session: SessionView) -> None:
-        super().__init__()
-        self.service = service
-        self.session = session
-
-    def compose(self) -> ComposeResult:
-        yield Static(f"WF  Session  {self.session.name}", id="log-header")
-        with VerticalScroll(id="detail-screen-scroll"):
-            yield Static("", id="detail-screen-content")
-        yield Static("Esc Back   Enter Attach   l Logs", id="action-bar")
-
-    def on_mount(self) -> None:
-        try:
-            details = self.service.inspect(self.session.name)
-        except WFError as error:
-            self.query_one("#detail-screen-content", Static).update(str(error))
-            return
-        self.query_one("#detail-screen-content", Static).update(
-            inspector_document(details.session, details.preview, details.preview_truncated)
-        )
-
-    def action_attach(self) -> None:
-        self.dismiss(self.session.name)
-
-    def action_logs(self) -> None:
-        self.app.push_screen(LogScreen(self.service, self.session), self._log_result)
-
-    def _log_result(self, target: str | None) -> None:
-        if target:
-            self.dismiss(target)
-
-    def action_close(self) -> None:
-        self.dismiss(None)
-
-
-def inspector_document(session: SessionView, output: str, truncated: bool) -> Text:
-    """Build the narrow-screen inspector as one wrapping document."""
-    text = Text()
-    notice = detect_activity(session, output)
-    text.append(session.name, style="bold")
-    text.append(f"\n{session.tool.value.upper()}\n\n", style=TOOL_STYLES[session.tool])
-    text.append(section_title("OVERVIEW"))
-    text.append("\n")
-    text.append(
-        labeled_values(
-            [
-                ("Project", session.project),
-                ("Directory", display_path(session.cwd)),
-                ("Task", humanize_task(session.note)),
-                ("Ownership", "Managed by WF" if session.owned else "Read only"),
-                ("Tags", ", ".join(session.tags)),
-            ]
-        )
-    )
-    text.append("\n")
-    text.append(section_title("STATUS"))
-    text.append("\n")
-    text.append(
-        labeled_values(
-            [
-                ("Runtime", display_state(session.runtime.value)),
-                ("Task", display_state(session.task_state.value)),
-                ("Agent", display_state(notice.agent_state.value)),
-                ("Input", display_input(session.input_state)),
-                ("Windows", str(session.windows)),
-                ("Last active", relative_activity(session.last_active_at)),
-                ("Logging", "Enabled" if session.logging_enabled else "Disabled"),
-            ]
-        )
-    )
-    text.append("\n")
-    text.append(section_title("ACTIVITY"))
-    text.append("\n")
-    style = (
-        "bold yellow"
-        if notice.level == "warning"
-        else "bold red"
-        if notice.level == "error"
-        else "bold"
-    )
-    text.append(notice.title, style)
-    text.append(f"\n{notice.detail}")
-    text.append("\n\n")
-    text.append(section_title("RECENT OUTPUT"))
-    text.append("\n")
-    if truncated:
-        text.append("[summary from truncated output]\n", "dim")
-    text.append(summarize_output(output, notice))
-    text.append("\n\n")
-    text.append(section_title("ACTIONS"))
-    text.append("\nEnter Attach   l Logs   Esc Back")
-    return text
-
-
 class InteractionMode(StrEnum):
     NORMAL = "normal"
     SEARCH = "search"
@@ -2637,6 +2534,9 @@ class DashboardModeContext:
     selected_session_id: str | None
     highlighted_option_id: str | None
     scroll_y: int
+    narrow_detail_open: bool
+    inspector_scroll_y: int
+    output_scroll_y: int
     focused_id: str | None
 
 
@@ -2803,6 +2703,8 @@ class WFApp(App[str | None]):
         self._alerts: dict[tuple[str, str], ActivityNotice] = {}
         self.interaction_mode = InteractionMode.NORMAL
         self._mode_context: DashboardModeContext | None = None
+        self.narrow_detail_open = False
+        self._detail_viewports: dict[tuple[str, str], tuple[int, int]] = {}
         self._failed_create_result: CreateFormResult | None = None
         self.output_mode = "summary"
         self.tmux_connected = True
@@ -2834,6 +2736,8 @@ class WFApp(App[str | None]):
 
     def _capture_dashboard_context(self) -> DashboardModeContext:
         options = self.query_one("#sessions", OptionList)
+        inspector = self.query_one("#inspector-scroll", VerticalScroll)
+        output = self.query_one("#recent-output-scroll", VerticalScroll)
         highlighted_option_id: str | None = None
         if options.highlighted is not None:
             highlighted_option_id = options.get_option_at_index(options.highlighted).id
@@ -2848,8 +2752,54 @@ class WFApp(App[str | None]):
             selected_session_id=self.selected_session_id,
             highlighted_option_id=highlighted_option_id,
             scroll_y=options.scroll_offset.y,
+            narrow_detail_open=self.narrow_detail_open,
+            inspector_scroll_y=inspector.scroll_offset.y,
+            output_scroll_y=output.scroll_offset.y,
             focused_id=focused.id if focused is not None else None,
         )
+
+    def _set_narrow_detail_state(self, visible: bool) -> None:
+        self.narrow_detail_open = visible
+        self.set_class(visible, "narrow-detail")
+
+    def _remember_detail_viewport(self) -> None:
+        if not self.narrow_detail_open or self.selected_name is None:
+            return
+        if self.selected_session_id is None:
+            return
+        self._detail_viewports[(self.selected_name, self.selected_session_id)] = (
+            self.query_one("#inspector-scroll", VerticalScroll).scroll_offset.y,
+            self.query_one("#recent-output-scroll", VerticalScroll).scroll_offset.y,
+        )
+
+    def _restore_detail_viewport(self) -> None:
+        if self.selected_name is None or self.selected_session_id is None:
+            return
+        identity = (self.selected_name, self.selected_session_id)
+        inspector_y, output_y = self._detail_viewports.get(identity, (0, 0))
+        inspector = self.query_one("#inspector-scroll", VerticalScroll)
+        output = self.query_one("#recent-output-scroll", VerticalScroll)
+        self.call_after_refresh(inspector.scroll_to, y=inspector_y, animate=False, force=True)
+        self.call_after_refresh(output.scroll_to, y=output_y, animate=False, force=True)
+
+    def _open_narrow_detail(self) -> None:
+        if not self.has_class("narrow") or self._selected() is None:
+            return
+        self._set_narrow_detail_state(True)
+        self._restore_detail_viewport()
+        self.call_after_refresh(self.query_one("#inspector-scroll", VerticalScroll).focus)
+        self._render_header()
+        self._render_action_bar()
+
+    def _close_narrow_detail(self, *, restore_focus: bool = True) -> None:
+        if not self.narrow_detail_open:
+            return
+        self._remember_detail_viewport()
+        self._set_narrow_detail_state(False)
+        if restore_focus:
+            self.call_after_refresh(self.query_one("#sessions", OptionList).focus)
+        self._render_header()
+        self._render_action_bar()
 
     def _set_interaction_mode(self, mode: InteractionMode) -> None:
         self.interaction_mode = mode
@@ -2890,6 +2840,10 @@ class WFApp(App[str | None]):
         )
         if context.searching:
             self.add_class("searching")
+        restore_detail = (
+            context.narrow_detail_open and selection_is_visible and self.has_class("narrow")
+        )
+        self._set_narrow_detail_state(restore_detail)
 
         options = self.query_one("#sessions", OptionList)
         option_ids = {
@@ -2901,12 +2855,27 @@ class WFApp(App[str | None]):
         ):
             options.highlighted = options.get_option_index(context.highlighted_option_id)
         self.call_after_refresh(options.scroll_to, y=context.scroll_y, animate=False, force=True)
+        inspector = self.query_one("#inspector-scroll", VerticalScroll)
+        output = self.query_one("#recent-output-scroll", VerticalScroll)
+        if restore_detail:
+            self.call_after_refresh(
+                inspector.scroll_to,
+                y=context.inspector_scroll_y,
+                animate=False,
+                force=True,
+            )
+            self.call_after_refresh(
+                output.scroll_to,
+                y=context.output_scroll_y,
+                animate=False,
+                force=True,
+            )
         focus_target: Widget = options
         if context.focused_id:
             matches = self.query(f"#{context.focused_id}")
             if matches:
                 focus_target = matches.first()
-        self.call_after_refresh(focus_target.focus)
+        self.call_after_refresh((inspector if restore_detail else focus_target).focus)
         self._render_header()
         self._render_action_bar()
 
@@ -2943,7 +2912,7 @@ class WFApp(App[str | None]):
                 yield OptionList(id="sessions")
             with Vertical(id="detail-pane"):
                 yield Static("Select a session", id="identity")
-                with VerticalScroll(id="inspector-scroll"):
+                with VerticalScroll(id="inspector-scroll", can_focus=True):
                     with Horizontal(id="overview-status-row"):
                         with Vertical(id="overview-card", classes="inspector-card"):
                             yield Static("OVERVIEW", classes="section-title")
@@ -2996,7 +2965,10 @@ class WFApp(App[str | None]):
             self.call_after_refresh(self.refresh_sessions)
 
     def on_resize(self, event: events.Resize) -> None:
+        detail_was_open = self.narrow_detail_open
         self._set_layout_classes(event.size.width, event.size.height)
+        if detail_was_open and not self.has_class("narrow"):
+            self._close_narrow_detail()
         if not self.has_class("too-small"):
             self._render_options()
 
@@ -3084,11 +3056,23 @@ class WFApp(App[str | None]):
             return
         self.tmux_connected = True
         self.refresh_error = ""
+        detail_lost = False
         if self.selected_name is not None:
             current = next((item for item in sessions if item.name == self.selected_name), None)
-            if current is None or current.session_id != self.selected_session_id:
+            current_is_visible = current is not None and self._matches_query(current)
+            if (
+                current is None
+                or current.session_id != self.selected_session_id
+                or not current_is_visible
+            ):
+                if self.narrow_detail_open:
+                    self._remember_detail_viewport()
+                    self._set_narrow_detail_state(False)
+                    detail_lost = True
                 self.selected_name = None
                 self.selected_session_id = None
+        elif self.narrow_detail_open:
+            self._set_narrow_detail_state(False)
         self.sessions = sessions
         valid_identities = {(session.name, session.session_id) for session in sessions}
         self._alerts = {
@@ -3096,10 +3080,22 @@ class WFApp(App[str | None]):
             for identity, alert in self._alerts.items()
             if identity in valid_identities
         }
+        self._detail_viewports = {
+            identity: viewport
+            for identity, viewport in self._detail_viewports.items()
+            if identity in valid_identities
+        }
         self._render_options()
         self.remove_class("refreshing")
         self.last_refreshed_at = datetime.now(UTC)
         self._render_header()
+        if detail_lost:
+            self.notify(
+                "The selected session is no longer available in this view.",
+                title="Returned to session list",
+                severity="warning",
+                timeout=0,
+            )
 
     def _notice_for(self, session: SessionView) -> ActivityNotice:
         return self._alerts.get((session.name, session.session_id), detect_activity(session, ""))
@@ -3289,7 +3285,18 @@ class WFApp(App[str | None]):
             connection = f"{connection}{separator}{updated}"
         text = Text()
         text.append("WF", "bold #72c78e")
-        if self.has_class("very-wide"):
+        selected = self._selected()
+        if self.narrow_detail_open and selected is not None:
+            text.append("  Session  ", "dim")
+            text.append(selected.tool.value.upper(), TOOL_STYLES[selected.tool])
+            warning = is_warning(selected, self._notice_for(selected))
+            available = max(12, self.size.width - 23 - (3 if warning else 0))
+            text.append(
+                f"  {truncate(selected.name, available, ascii_only=self.ascii_only)}", "bold"
+            )
+            if warning:
+                text.append("  !", "bold yellow")
+        elif self.has_class("very-wide"):
             text.append(f"  Workflow Session Manager  v{__version__}")
             text.append(f"    {counts}{filter_text}", "dim")
             text.append(f"    {truncate(self.hostname, 22, ascii_only=self.ascii_only)}")
@@ -3310,6 +3317,14 @@ class WFApp(App[str | None]):
         if self.has_class("searching"):
             query = self.query_one("#search", Input).value
             value = f"SEARCH  {query}_   Enter Apply   Esc Cancel   Ctrl+U Clear"
+        elif self.narrow_detail_open:
+            selected = self._selected()
+            primary = (
+                "Enter Manage"
+                if selected is not None and selected.runtime is RuntimeState.STOPPED
+                else "Enter Attach"
+            )
+            value = f"Esc Back  {primary}  e Edit  n Task  l Logs  r Reload  * Pin  d Manage"
         elif self.has_class("narrow"):
             value = (
                 f"{navigation} Nav   Enter Open   c Create   / Search   f Filter   ? Help   q Quit"
@@ -3327,10 +3342,16 @@ class WFApp(App[str | None]):
         self.query_one("#action-bar", Static).update(value)
 
     def action_cursor_down(self) -> None:
-        self.query_one("#sessions", OptionList).action_cursor_down()
+        if self.narrow_detail_open:
+            self.query_one("#inspector-scroll", VerticalScroll).action_scroll_down()
+        else:
+            self.query_one("#sessions", OptionList).action_cursor_down()
 
     def action_cursor_up(self) -> None:
-        self.query_one("#sessions", OptionList).action_cursor_up()
+        if self.narrow_detail_open:
+            self.query_one("#inspector-scroll", VerticalScroll).action_scroll_up()
+        else:
+            self.query_one("#sessions", OptionList).action_cursor_up()
 
     def _select_option(self, option_id: str | None) -> None:
         if option_id is None or option_id not in self._option_sessions:
@@ -3400,12 +3421,31 @@ class WFApp(App[str | None]):
         separator = " / " if self.ascii_only else " · "
         identity = Text()
         identity.append(f"{session.tool.value.upper():<7}", style=TOOL_STYLES[session.tool])
-        identity.append(session.name, style="bold")
+        identity_name = session.name
+        alert_title = notice.title
+        if self.has_class("narrow"):
+            content_width = max(24, self.size.width - 4)
+            alert_width = (
+                min(len(notice.title) + 4, max(18, content_width // 3)) if notice.warning else 0
+            )
+            pin_width = 3 if session.pinned else 0
+            identity_name = truncate(
+                session.name,
+                max(12, content_width - 7 - pin_width - alert_width),
+                ascii_only=self.ascii_only,
+            )
+            if notice.warning:
+                alert_title = truncate(
+                    notice.title,
+                    max(12, content_width - 7 - pin_width - len(identity_name) - 4),
+                    ascii_only=self.ascii_only,
+                )
+        identity.append(identity_name, style="bold")
         if session.pinned:
             identity.append("  *" if self.ascii_only else "  ★", "yellow")
         if notice.warning:
             alert_style = "bold yellow" if notice.level == "warning" else "bold red"
-            identity.append(f"  ! {notice.title}", alert_style)
+            identity.append(f"  ! {alert_title}", alert_style)
         identity.append(
             "\n"
             + separator.join(
@@ -3426,7 +3466,13 @@ class WFApp(App[str | None]):
             ("Tags", ", ".join(session.tags)),
         ]
         if session.display_name and session.display_name != session.name:
-            overview_values.insert(0, ("Display name", session.display_name))
+            overview_values.insert(
+                0,
+                (
+                    "Name" if self.has_class("narrow") else "Display name",
+                    session.display_name,
+                ),
+            )
         status_values = [
             ("Runtime", display_state(session.runtime.value)),
             ("Task", display_state(session.task_state.value)),
@@ -3508,6 +3554,8 @@ class WFApp(App[str | None]):
     def action_search(self) -> None:
         if self.interaction_mode is not InteractionMode.NORMAL:
             return
+        if self.narrow_detail_open:
+            self._close_narrow_detail(restore_focus=False)
         self._search_before = self.filter_query
         self.add_class("searching")
         self._set_interaction_mode(InteractionMode.SEARCH)
@@ -3520,6 +3568,8 @@ class WFApp(App[str | None]):
     def action_filter(self) -> None:
         if self.interaction_mode not in {InteractionMode.NORMAL, InteractionMode.SEARCH}:
             return
+        if self.narrow_detail_open:
+            self._close_narrow_detail()
         self._begin_overlay(InteractionMode.FILTER)
         self.push_screen(FilterScreen(self.filters), self._apply_filter)
 
@@ -3555,34 +3605,26 @@ class WFApp(App[str | None]):
         self.notify(f"Theme: {self.ui_theme}")
 
     def action_escape(self) -> None:
-        if not self.has_class("searching"):
-            return
-        self.filter_query = self._search_before
-        self.query_one("#search", Input).value = self.filter_query
-        self._finish_search()
-        self._render_options()
+        if self.has_class("searching"):
+            self.filter_query = self._search_before
+            self.query_one("#search", Input).value = self.filter_query
+            self._finish_search()
+            self._render_options()
+        elif self.narrow_detail_open:
+            self._close_narrow_detail()
 
     def action_open(self) -> None:
         session = self._selected()
         if session is None:
             return
+        if self.has_class("narrow") and not self.narrow_detail_open:
+            self._open_narrow_detail()
+            return
         if session.runtime is RuntimeState.STOPPED:
             self.notify("Restart the stopped session from d Manage.", severity="warning")
             self.action_manage()
             return
-        if self.has_class("narrow"):
-            self._begin_overlay(InteractionMode.FORM)
-            self.push_screen(DetailScreen(self.service, session), self._overlay_detail_result)
-        else:
-            self.exit(session.name)
-
-    def _detail_result(self, target: str | None) -> None:
-        if target:
-            self.exit(target)
-
-    def _overlay_detail_result(self, target: str | None) -> None:
-        self._restore_dashboard_mode()
-        self._detail_result(target)
+        self.exit(session.name)
 
     def action_attach(self) -> None:
         self.action_open()
@@ -3862,7 +3904,12 @@ class WFApp(App[str | None]):
         session = self._selected()
         if session:
             self._begin_overlay(InteractionMode.FORM)
-            self.push_screen(LogScreen(self.service, session), self._overlay_detail_result)
+            self.push_screen(LogScreen(self.service, session), self._logs_result)
+
+    def _logs_result(self, target: str | None) -> None:
+        self._restore_dashboard_mode()
+        if target:
+            self.exit(target)
 
     def action_toggle_pin(self) -> None:
         session = self._selected()
@@ -4155,24 +4202,38 @@ class WFApp(App[str | None]):
         )
 
     def action_help(self) -> None:
+        content = (
+            "Up/Down or j/k  Scroll details\n"
+            "Esc      Return to sessions\n"
+            "Enter    Attach or manage a stopped session\n"
+            "e        Edit identity and organization\n"
+            "n        Edit task\n"
+            "l        Open full Logs workspace\n"
+            "*        Toggle pin\n"
+            "d        Manage session\n"
+            "r        Refresh\n"
+            "t        Cycle color theme\n"
+            "q        Quit"
+            if self.narrow_detail_open
+            else "Up/Down or j/k  Navigate\n"
+            "Enter    Attach or open details\n"
+            "c        Create session\n"
+            "/        Search\n"
+            "f        Filter sessions\n"
+            "e        Edit selected session\n"
+            "n        Edit task\n"
+            "l        View logs\n"
+            "*        Toggle pin\n"
+            "d        Manage session\n"
+            "r        Refresh\n"
+            "p        Command palette\n"
+            "t        Cycle color theme\n"
+            "q        Quit"
+        )
         self._begin_overlay(InteractionMode.FORM)
         self.push_screen(
             MessageScreen(
-                "Keyboard help",
-                "Up/Down or j/k  Navigate\n"
-                "Enter    Attach or open details\n"
-                "c        Create session\n"
-                "/        Search\n"
-                "f        Filter sessions\n"
-                "e        Edit selected session\n"
-                "n        Edit task\n"
-                "l        View logs\n"
-                "*        Toggle pin\n"
-                "d        Manage session\n"
-                "r        Refresh\n"
-                "p        Command palette\n"
-                "t        Cycle color theme\n"
-                "q        Quit",
+                "Session detail help" if self.narrow_detail_open else "Keyboard help", content
             ),
             lambda _result: self._restore_dashboard_mode(),
         )

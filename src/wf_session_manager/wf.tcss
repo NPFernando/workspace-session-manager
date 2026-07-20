@@ -329,6 +329,38 @@ OptionList > .option-list--option-disabled {
     display: none;
 }
 
+.narrow.narrow-detail #session-pane {
+    display: none;
+}
+
+.narrow.narrow-detail #detail-pane {
+    display: block;
+    width: 100%;
+    min-width: 0;
+}
+
+.narrow.narrow-detail #inspector-scroll {
+    max-width: 100%;
+    padding: 0 1;
+}
+
+.narrow.narrow-detail #inspector-scroll:focus {
+    border-left: solid #3f6e9d;
+}
+
+.narrow.narrow-detail #output-heading .section-title {
+    width: 1fr;
+}
+
+.narrow.narrow-detail #output-meta,
+.narrow.narrow-detail #actions-card {
+    display: none;
+}
+
+.narrow.narrow-detail #output-card {
+    min-height: 8;
+}
+
 .narrow #app-header {
     height: 2;
     padding: 0 1;
@@ -893,19 +925,6 @@ Button.-error:focus {
 .diagnostics-actions {
     height: auto;
     min-height: 6;
-}
-
-#detail-screen-scroll {
-    height: 1fr;
-    padding: 1 2;
-    scrollbar-color: #47545c;
-    scrollbar-background: #101316;
-}
-
-#detail-screen-content {
-    height: auto;
-    min-height: 100%;
-    color: #cbd3d8;
 }
 
 .logs-workspace {

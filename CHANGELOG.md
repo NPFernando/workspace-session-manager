@@ -24,6 +24,8 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
   identity, task, and task-status forms
 - A responsive full-screen Logs workspace with explicit Live and Saved sources, follow/pause,
   source-local viewport restoration, find navigation, capture times, and selection-aware copying
+- An in-place 80-99-column detail workspace with contextual actions, inspector scrolling, focused
+  warning/failure states, and deterministic light, monochrome, ASCII, and long-content coverage
 
 ### Changed
 
@@ -42,6 +44,8 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 - Restored `--classic` only as a guarded compatibility bridge to an owner-only preserved executable
 - Kept log polling out of the dashboard refresh loop, rejected stale worker results, and retained the
   complete Logs workspace during read failures with an inline retry state
+- Reused the dashboard inspector for narrow details, preserving inspector and output viewports across
+  overlays and returning safely to the list when filters, identity changes, or resizing invalidate it
 
 ## [0.2.0] - 2026-07-20
 
