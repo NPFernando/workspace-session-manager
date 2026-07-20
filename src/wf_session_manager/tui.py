@@ -1121,6 +1121,7 @@ class WFApp(App[str | None]):
         hostname: str | None = None,
         theme_mode: str | None = None,
         onboarding: bool = True,
+        default_cwd: Path | None = None,
     ) -> None:
         super().__init__()
         self.service = service
@@ -1139,6 +1140,7 @@ class WFApp(App[str | None]):
         self.tmux_connected = True
         self._onboarding_enabled = onboarding
         self._onboarding_checked = False
+        self.default_cwd = default_cwd or Path.cwd()
         encoding = locale.getpreferredencoding(False).lower()
         self.ascii_only = os.environ.get("WF_ASCII") == "1" or "utf" not in encoding
         no_color = bool(os.environ.get("NO_COLOR"))
@@ -1669,7 +1671,9 @@ class WFApp(App[str | None]):
         self.action_open()
 
     def action_create(self, tool: Tool = Tool.CLAUDE) -> None:
-        self.push_screen(CreateSessionScreen(Path.cwd(), self.service, tool), self._create_session)
+        self.push_screen(
+            CreateSessionScreen(self.default_cwd, self.service, tool), self._create_session
+        )
 
     def action_new_session(self) -> None:
         self.action_create()

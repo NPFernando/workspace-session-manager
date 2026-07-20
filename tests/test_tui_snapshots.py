@@ -112,6 +112,7 @@ def populated_app(
         monochrome=monochrome,
         hostname="wf-test-host",
         onboarding=False,
+        default_cwd=Path("/tmp"),
     )
 
 

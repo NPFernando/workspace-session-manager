@@ -123,10 +123,9 @@ def test_explicit_edit_command_updates_task_input_and_project(
 
 
 def test_legacy_organize_alias_is_hidden_from_help() -> None:
-    result = CliRunner().invoke(cli.app, ["--help"])
-    assert result.exit_code == 0
-    assert " edit " in result.stdout
-    assert " organize " not in result.stdout
+    commands = {command.name: command for command in cli.app.registered_commands if command.name}
+    assert not commands["edit"].hidden
+    assert commands["organize"].hidden
 
 
 def test_migration_cli_preview_apply_status_and_rollback(
