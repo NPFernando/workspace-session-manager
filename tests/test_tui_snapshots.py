@@ -11,7 +11,12 @@ from textual.widgets import Button, Input, LoadingIndicator, Static
 from conftest import FakeBackend
 from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
 from wf_session_manager.service import SessionService
-from wf_session_manager.tui import CreateSessionScreen, DiagnosticsScreen, WFApp
+from wf_session_manager.tui import (
+    ConfirmActionScreen,
+    CreateSessionScreen,
+    DiagnosticsScreen,
+    WFApp,
+)
 
 SnapCompare = Callable[..., bool]
 FUTURE_ACTIVITY = datetime(2099, 1, 1, tzinfo=UTC)
@@ -415,7 +420,11 @@ def test_destructive_confirmation_snapshot(
         app.screen.query_one("#manage-stop", Button).scroll_visible()
         await pilot.pause()
         await pilot.click("#manage-stop")
-        await pilot.pause()
+        for _ in range(20):
+            await pilot.pause(0.05)
+            if isinstance(app.screen, ConfirmActionScreen):
+                break
+        assert isinstance(app.screen, ConfirmActionScreen)
 
     assert snap_compare(app, terminal_size=(120, 35), run_before=open_confirmation)
 
