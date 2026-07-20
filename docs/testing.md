@@ -24,8 +24,11 @@ verifies that the tmux session remained alive throughout.
 
 `pytest-textual-snapshot` records deterministic SVG frames for wide, medium, narrow, empty, warning,
 failure, usage-limit, diagnostics, create, validation-error, destructive-confirmation, dark, light,
-monochrome, long-content, 50-session, and 200-session states. Reviewed before/after frames at
+monochrome, reduced-motion, diagnostics-running, long-content, 50-session, and 200-session states.
+Reviewed before/after frames at
 `160x45`, `120x35`, `100x30`, and `80x24` are stored under `docs/screenshots/`.
+Fake-backend terminal recordings and replay instructions are stored under `docs/recordings/`; they
+never connect to the live tmux server or production metadata.
 
 ## Manual TUI matrix
 
@@ -49,6 +52,10 @@ Check at least:
 - sanitized pane output containing ANSI, IP, home path, and test token patterns
 - zero-result searches and empty inventories with no hidden actionable selection
 - create validation failure with values preserved and Create disabled
+- latest-value validation after rapid invalid-to-valid name changes
+- usage-limit propagation across header count, selected row, Activity, agent state, and Summary/Raw
+- slow diagnostics progress plus PASS/WARN/FAIL/INFO completion totals
 - Cancel-focused confirmation for every protected Manage operation
 - dark, light, monochrome, `NO_COLOR`, and `WF_ASCII=1` rendering
 - output and session-list scroll position preservation across background refresh
+- `--no-animation`, `WF_MOTION=off`, reduced motion, and focus restoration after modal cancellation

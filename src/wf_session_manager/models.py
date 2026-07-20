@@ -69,6 +69,18 @@ class InputState(StrEnum):
     REQUIRED = "required"
 
 
+class AgentState(StrEnum):
+    """Conservative execution state derived from runtime, task, and pane output."""
+
+    ACTIVE = "active"
+    WAITING = "waiting"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    STOPPED = "stopped"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
 LEGACY_TASK_STATES = {
     "active": TaskState.IN_PROGRESS,
     "done": TaskState.COMPLETED,
@@ -259,6 +271,7 @@ class HealthStatus(StrEnum):
     PASS = "pass"  # noqa: S105
     WARN = "warn"
     FAIL = "fail"
+    INFO = "info"
 
 
 class HealthCheck(BaseModel):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -38,6 +39,12 @@ def default_tools() -> dict[Tool, ToolProfile]:
     }
 
 
+class InterfaceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    animations: Literal["off", "subtle", "full"] = "subtle"
+    reduce_motion: bool = False
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: int = Field(default=1, ge=1, le=1)
@@ -46,6 +53,7 @@ class AppConfig(BaseModel):
     preview_bytes: int = Field(default=32_768, ge=1024, le=1_048_576)
     log_lines: int = Field(default=500, ge=50, le=5000)
     log_bytes: int = Field(default=262_144, ge=4096, le=4_194_304)
+    interface: InterfaceConfig = Field(default_factory=InterfaceConfig)
     legacy_state_dirs: tuple[Path, ...] = Field(
         default_factory=lambda: (
             Path.home() / ".local" / "state" / "wf" / "sessions",

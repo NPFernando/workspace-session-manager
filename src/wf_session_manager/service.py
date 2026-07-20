@@ -104,7 +104,13 @@ class CreateValidation:
     cwd: Path | None
     detected_project: str
     command: tuple[str, ...]
-    errors: tuple[str, ...]
+    name_error: str = ""
+    cwd_error: str = ""
+    tool_error: str = ""
+
+    @property
+    def errors(self) -> tuple[str, ...]:
+        return tuple(issue for issue in (self.name_error, self.cwd_error, self.tool_error) if issue)
 
     @property
     def valid(self) -> bool:
@@ -352,35 +358,39 @@ class SessionService:
         return ""
 
     def validate_create(self, tool: Tool, requested_name: str, cwd: Path) -> CreateValidation:
-        errors: list[str] = []
+        name_error = ""
+        cwd_error = ""
+        tool_error = ""
         normalized = ""
         resolved: Path | None = None
         try:
             normalized = normalized_session_name(tool, requested_name)
         except WFError as error:
-            errors.append(str(error))
+            name_error = str(error)
         if normalized and (
             self.backend.session_exists(normalized) or self.store.load(normalized) is not None
         ):
-            errors.append(f"session already exists: {normalized}")
+            name_error = f"session already exists: {normalized}"
         try:
             resolved = cwd.expanduser().resolve(strict=True)
             if not resolved.is_dir():
-                errors.append(f"working directory is not a directory: {resolved}")
+                cwd_error = f"working directory is not a directory: {resolved}"
                 resolved = None
         except OSError:
-            errors.append(f"working directory does not exist: {cwd}")
+            cwd_error = f"working directory does not exist: {cwd}"
         profile = self.config.tools[tool]
         if not profile.enabled:
-            errors.append(f"{tool.value} is disabled in configuration")
+            tool_error = f"{tool.value} is disabled in configuration"
         elif not command_available(profile.command):
-            errors.append(f"command not found: {profile.command[0]}")
+            tool_error = f"command not found: {profile.command[0]}"
         return CreateValidation(
             normalized_name=normalized,
             cwd=resolved,
             detected_project=self.detect_project(resolved) if resolved else "",
             command=profile.command,
-            errors=tuple(errors),
+            name_error=name_error,
+            cwd_error=cwd_error,
+            tool_error=tool_error,
         )
 
     def create(self, request: CreateRequest, *, dry_run: bool = False) -> SessionView:
@@ -775,7 +785,7 @@ class SessionService:
         checks.append(
             HealthCheck(
                 name="unmanaged-sessions",
-                status=HealthStatus.PASS,
+                status=HealthStatus.INFO,
                 detail=f"{unmanaged} hidden from managed views",
             )
         )
@@ -785,13 +795,8 @@ class SessionService:
         checks.append(
             HealthCheck(
                 name="legacy-readonly",
-                status=HealthStatus.PASS if readable_legacy else HealthStatus.WARN,
+                status=HealthStatus.INFO,
                 detail=", ".join(readable_legacy) or "no legacy state directories found",
-                corrective_action=(
-                    "No action is required unless classic metadata should be imported."
-                )
-                if not readable_legacy
-                else "",
             )
         )
         disk_root = (

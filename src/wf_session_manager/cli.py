@@ -96,9 +96,9 @@ def run_classic() -> None:
     os.execv(classic, [str(classic)])  # noqa: S606 - validated owner-only executable
 
 
-def run_tui(runtime: Runtime) -> None:
+def run_tui(runtime: Runtime, *, no_animation: bool = False) -> None:
     try:
-        result = WFApp(runtime.service()).run()
+        result = WFApp(runtime.service(), no_animation=no_animation).run()
         if result:
             runtime.service().attach(result)
     except WFError as error:
@@ -120,6 +120,10 @@ def root(
         bool,
         typer.Option("--classic", help="Run the preserved classic launcher."),
     ] = False,
+    no_animation: Annotated[
+        bool,
+        typer.Option("--no-animation", help="Disable TUI motion effects."),
+    ] = False,
 ) -> None:
     """Open the session manager when no subcommand is supplied."""
     if classic:
@@ -136,7 +140,7 @@ def root(
         typer.echo(f"WF {__version__}")
         raise typer.Exit()
     if context.invoked_subcommand is None:
-        run_tui(runtime)
+        run_tui(runtime, no_animation=no_animation)
 
 
 @app.command("list")

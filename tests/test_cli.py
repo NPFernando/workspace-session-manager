@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 from conftest import FakeBackend
 from wf_session_manager import cli
 from wf_session_manager.cli import Runtime
+from wf_session_manager.config import AppConfig
 from wf_session_manager.legacy import LegacyMetadataReader
 from wf_session_manager.migration import MigrationManager
 from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
@@ -19,6 +20,24 @@ def test_version() -> None:
     result = CliRunner().invoke(cli.app, ["--version"])
     assert result.exit_code == 0
     assert result.stdout.startswith("WF ")
+
+
+def test_no_animation_option_reaches_tui(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    runtime = Runtime(paths=paths, config=AppConfig())
+    received: list[bool] = []
+    monkeypatch.setattr(cli, "build_runtime", lambda config=None: runtime)
+    monkeypatch.setattr(
+        cli,
+        "run_tui",
+        lambda runtime, *, no_animation=False: received.append(no_animation),
+    )
+    result = CliRunner().invoke(cli.app, ["--no-animation"])
+    assert result.exit_code == 0, result.output
+    assert received == [True]
 
 
 def test_classic_launcher_requires_owner_only_executable(

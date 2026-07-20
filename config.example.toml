@@ -7,6 +7,10 @@ legacy_state_dirs = [
   "~/.ws-session-notes",
 ]
 
+[interface]
+animations = "subtle" # off, subtle, full
+reduce_motion = false
+
 [tools.claude]
 command = ["claude"]
 enabled = true

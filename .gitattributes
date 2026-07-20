@@ -1,1 +1,2 @@
 *.svg whitespace=-trailing-space
+docs/recordings/*.typescript binary

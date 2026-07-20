@@ -10,20 +10,32 @@ import socket
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import ClassVar
+from time import perf_counter
+from typing import Any, ClassVar
 
 from rich.text import Text
-from textual import events, on
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Button, Checkbox, Input, Label, OptionList, Select, Static, Switch
+from textual.widgets import (
+    Button,
+    Checkbox,
+    Input,
+    Label,
+    LoadingIndicator,
+    OptionList,
+    Select,
+    Static,
+    Switch,
+)
 from textual.widgets.option_list import Option
 
 from wf_session_manager import __version__
 from wf_session_manager.errors import WFError
 from wf_session_manager.models import (
+    AgentState,
     CreateRequest,
     DoctorReport,
     HealthCheck,
@@ -40,11 +52,12 @@ from wf_session_manager.service import SessionService
 BindingSpec = Binding | tuple[str, str] | tuple[str, str, str]
 RECENT_WINDOW = timedelta(hours=24)
 USAGE_LIMIT_PATTERN = re.compile(
-    r"(?im)^(?P<tool>codex|claude|hermes)?[^\n]{0,32}usage limit "
-    r"(?:has been )?(?:reached|exceeded)[^\n]*$"
+    r"(?im)^(?P<line>[^\n]*(?:(?:usage|session|rate)\s+limit\s+"
+    r"(?:has been\s+|was\s+)?(?:reached|exceeded)|"
+    r"you(?:'|\u2019)ve\s+hit\s+your\s+(?:session|usage)\s+limit)[^\n]*)$"
 )
 RETRY_PATTERN = re.compile(
-    r"(?im)^(?:retry(?: available)?|try again|available again)"
+    r"(?im)^(?:retry(?: available)?|try again|available again|resets?)"
     r"\s*(?:at|after|:)?\s*(?P<when>[^\n]+)$"
 )
 RAW_TASK_PATTERN = re.compile(
@@ -107,28 +120,105 @@ class ActivityNotice:
     level: str
     title: str
     detail: str
+    agent_state: AgentState
+    kind: str = "none"
+
+    @property
+    def warning(self) -> bool:
+        return self.level in {"warning", "error"}
 
 
 def detect_activity(session: SessionView, output: str) -> ActivityNotice:
+    if session.runtime is RuntimeState.FAILED:
+        return ActivityNotice(
+            "error",
+            "Session failed",
+            "The active pane exited with a failure status.",
+            AgentState.FAILED,
+            "runtime-failed",
+        )
+    if session.runtime is RuntimeState.STOPPED:
+        return ActivityNotice(
+            "warning",
+            "Session stopped",
+            "Restart the tool from Manage when you are ready to continue.",
+            AgentState.STOPPED,
+            "runtime-stopped",
+        )
     usage = USAGE_LIMIT_PATTERN.search(output)
     if usage:
-        tool = (usage.group("tool") or session.tool.value).title()
+        line = usage.group("line")
+        tool = next(
+            (
+                TOOL_LABELS[item]
+                for item in (Tool.CLAUDE, Tool.CODEX, Tool.HERMES)
+                if item.value in line.casefold()
+            ),
+            TOOL_LABELS[session.tool],
+        )
+        limit_kind = "session" if "session limit" in line.casefold() else "usage"
         retry = RETRY_PATTERN.search(output)
         detail = f"Retry available: {retry.group('when').strip()}" if retry else "Try again later."
-        return ActivityNotice("warning", f"{tool} usage limit reached", detail)
+        return ActivityNotice(
+            "warning",
+            f"{tool} {limit_kind} limit reached",
+            detail,
+            AgentState.PAUSED,
+            "usage-limit",
+        )
     if session.input_state is InputState.REQUIRED or session.task_state is TaskState.NEEDS_INPUT:
         return ActivityNotice(
             "warning",
             "Input required",
             "This status was explicitly set for the session.",
-        )
-    if session.runtime is RuntimeState.FAILED:
-        return ActivityNotice(
-            "error", "Session failed", "The active pane exited with a failure status."
+            AgentState.WAITING,
+            "input-required",
         )
     if session.task_state is TaskState.BLOCKED:
-        return ActivityNotice("warning", "Task blocked", "Review the task note before continuing.")
-    return ActivityNotice("neutral", "No action required", "The session can continue normally.")
+        return ActivityNotice(
+            "warning",
+            "Task blocked",
+            "Review the task note before continuing.",
+            AgentState.WAITING,
+            "task-blocked",
+        )
+    if session.task_state is TaskState.WAITING:
+        return ActivityNotice(
+            "neutral", "Waiting", "No user input is currently required.", AgentState.WAITING
+        )
+    if session.task_state is TaskState.COMPLETED:
+        return ActivityNotice(
+            "neutral", "Task completed", "No action is required.", AgentState.COMPLETED
+        )
+    return ActivityNotice(
+        "neutral", "No action required", "The session can continue normally.", AgentState.ACTIVE
+    )
+
+
+def summarize_output(output: str, notice: ActivityNotice) -> Text:
+    """Render a conservative activity summary without exposing CLI chrome by default."""
+    summary = Text()
+    if notice.kind == "usage-limit":
+        summary.append(notice.title, "bold yellow")
+        summary.append(f"\n{notice.detail}\n")
+        summary.append("The tmux session remains active, but the agent cannot continue yet.")
+        return summary
+    ignored = re.compile(
+        r"(?i)^(?:tokens?|context|model|working directory|approval|session id|[-=]{3,}|[>$#]\s*)"
+    )
+    useful = [
+        line.strip()
+        for line in output.splitlines()
+        if line.strip() and not ignored.match(line.strip())
+    ][-4:]
+    if useful:
+        summary.append("Last meaningful output\n", "bold")
+        summary.append("\n".join(useful))
+    else:
+        summary.append(notice.title, "bold")
+        summary.append(f"\n{notice.detail}")
+    summary.append("\n\n[l] Open full output", "dim")
+    return summary
 
 
 def relative_activity(value: datetime | None, *, now: datetime | None = None) -> str:
@@ -157,13 +247,8 @@ def truncate(value: str, width: int, *, ascii_only: bool = False) -> str:
     return f"{value[: max(1, width - len(marker))]}{marker}"
 
 
-def is_warning(session: SessionView) -> bool:
-    return (
-        session.input_state is InputState.REQUIRED
-        or session.task_state is TaskState.NEEDS_INPUT
-        or session.task_state is TaskState.BLOCKED
-        or session.runtime is RuntimeState.FAILED
-    )
+def is_warning(session: SessionView, notice: ActivityNotice | None = None) -> bool:
+    return (notice or detect_activity(session, "")).warning
 
 
 def session_group(session: SessionView, *, now: datetime | None = None) -> str:
@@ -181,9 +266,16 @@ def session_group(session: SessionView, *, now: datetime | None = None) -> str:
     return "Detached"
 
 
-def session_row(session: SessionView, width: int, *, ascii_only: bool = False) -> Text:
+def session_row(
+    session: SessionView,
+    width: int,
+    *,
+    ascii_only: bool = False,
+    notice: ActivityNotice | None = None,
+) -> Text:
     """Build a stable two-line row sized to its current pane."""
-    marker = ("*" if ascii_only else "★") if session.pinned else "!" if is_warning(session) else " "
+    alert = notice or detect_activity(session, "")
+    marker = ("*" if ascii_only else "★") if session.pinned else "!" if alert.warning else " "
     tool = session.tool.value.upper()
     when = relative_activity(session.last_active_at)
     name_width = max(10, width - len(tool) - len(when) - 7)
@@ -218,6 +310,21 @@ def labeled_values(values: list[tuple[str, str]]) -> Text:
     return result
 
 
+def animate_modal_open(screen: Screen[Any]) -> None:
+    """Apply one restrained modal transition when motion is enabled."""
+    motion = getattr(screen.app, "motion", "off")
+    if motion == "off":
+        return
+    dialog = screen.query_one(".dialog")
+    duration = 0.18 if motion == "full" else 0.14
+    dialog.styles.offset = (0, 0)
+    final_offset = dialog.styles.offset
+    dialog.styles.opacity = 0.0
+    dialog.styles.offset = (0, 1)
+    screen.call_after_refresh(dialog.styles.animate, "opacity", 1.0, duration=duration)
+    screen.call_after_refresh(dialog.styles.animate, "offset", final_offset, duration=duration)
+
+
 @dataclass(frozen=True, slots=True)
 class EditResult:
     name: str
@@ -245,6 +352,9 @@ class CreateSessionScreen(ModalScreen[CreateRequest | None]):
         self.service = service
         self.default_tool = default_tool
         self._detected_project = ""
+        self._touched: set[str] = set()
+        self._validating = False
+        self._advanced = False
 
     def _recent_directories(self) -> list[tuple[str, str]]:
         directories = [self.default_cwd]
@@ -266,44 +376,56 @@ class CreateSessionScreen(ModalScreen[CreateRequest | None]):
                         allow_blank=False,
                         id="create-tool",
                     )
+                yield Static("", id="create-tool-status", classes="field-status")
                 with Horizontal(classes="form-row"):
                     yield Label("Session name", classes="field-label")
                     yield Input(placeholder="api-refactor", id="create-name")
+                yield Static("", id="create-name-status", classes="field-status")
                 with Horizontal(classes="form-row"):
                     yield Label("Task", classes="field-label")
                     yield Input(placeholder="Improve API authentication", id="create-note")
                 with Horizontal(classes="form-row"):
                     yield Label("Working directory", classes="field-label")
                     yield Input(value=display_path(self.default_cwd), id="create-cwd")
-                with Horizontal(classes="form-row"):
-                    yield Label("Recent directory", classes="field-label secondary-field")
                     yield Select(
                         self._recent_directories(),
                         value=str(self.default_cwd),
                         allow_blank=False,
                         id="create-recent-dir",
                     )
+                yield Static("", id="create-cwd-status", classes="field-status")
                 with Horizontal(classes="form-row"):
                     yield Label("Project", classes="field-label")
                     yield Input(placeholder="api-platform", id="create-project")
-                with Horizontal(classes="form-row"):
-                    yield Label("Tags", classes="field-label")
-                    yield Input(placeholder="backend, urgent", id="create-tags")
                 with Horizontal(id="logging-row"):
                     yield Label("Logging", classes="field-label")
                     yield Switch(value=True, id="create-logging")
                     yield Static("Sanitized, owner-only, size-limited", id="logging-hint")
+                yield Button("Advanced options", id="create-advanced-toggle")
+                with Vertical(id="create-advanced", classes="collapsed"):
+                    with Horizontal(classes="form-row"):
+                        yield Label("Tags", classes="field-label")
+                        yield Input(placeholder="backend, urgent", id="create-tags")
+                    yield Static("", id="create-tags-status", classes="field-status")
+                    yield Static(
+                        "Command arguments, environment profiles, retention, and tmux options "
+                        "use the validated project configuration.",
+                        classes="advanced-hint",
+                    )
             with Horizontal(classes="preview-row"):
                 yield Label("Command", classes="field-label")
                 yield Static("", id="command-preview")
-            with Horizontal(classes="validation-row"):
-                yield Label("Validation", classes="field-label")
-                yield Static("", id="create-validation")
+            yield Static("Enter a session name to continue.", id="create-submit-reason")
+            yield Static(
+                "FORM  Tab Next   Shift+Tab Previous   Ctrl+Enter Create   Esc Cancel",
+                id="create-form-help",
+            )
             with Horizontal(classes="dialog-actions"):
                 yield Button("Cancel", id="create-cancel")
                 yield Button("Create Session", variant="primary", id="create-submit", disabled=True)
 
     def on_mount(self) -> None:
+        animate_modal_open(self)
         self._validate()
         self.query_one("#create-name", Input).focus()
 
@@ -312,59 +434,129 @@ class CreateSessionScreen(ModalScreen[CreateRequest | None]):
         return normalize_tags([item for item in re.split(r"[\s,]+", value) if item])
 
     def _validate(self) -> None:
+        if self._validating:
+            return
+        self._validating = True
         tool = Tool(str(self.query_one("#create-tool", Select).value))
         cwd = Path(self.query_one("#create-cwd", Input).value).expanduser()
-        name = self.query_one("#create-name", Input).value
-        if self.service:
-            validation = self.service.validate_create(tool, name, cwd)
-            command = validation.command
-            errors = list(validation.errors)
-            project_input = self.query_one("#create-project", Input)
-            if validation.detected_project and (
-                not project_input.value or project_input.value == self._detected_project
-            ):
-                self._detected_project = validation.detected_project
-                project_input.value = validation.detected_project
-        else:
-            validation = None
-            command = (tool.value,)
-            errors = [] if name and cwd.is_dir() else ["Enter a name and existing directory"]
+        name = self.query_one("#create-name", Input).value.strip()
         try:
-            self._parse_tags()
-        except ValueError as validation_error:
-            errors.append(str(validation_error))
-        preview = shlex.join(command)
-        self.query_one("#command-preview", Static).update(preview)
-        status = Text()
-        if errors:
-            for issue in errors[:3]:
-                status.append("x ", "bold red")
-                status.append(f"{issue}\n")
-        else:
+            if self.service:
+                validation = self.service.validate_create(tool, name, cwd)
+                command = validation.command
+                name_error = validation.name_error
+                cwd_error = validation.cwd_error
+                tool_error = validation.tool_error
+                project_input = self.query_one("#create-project", Input)
+                if validation.detected_project and (
+                    not project_input.value or project_input.value == self._detected_project
+                ):
+                    self._detected_project = validation.detected_project
+                    project_input.value = validation.detected_project
+            else:
+                validation = None
+                command = (tool.value,)
+                name_error = "" if name else "session name must contain a letter or digit"
+                cwd_error = "" if cwd.is_dir() else f"working directory does not exist: {cwd}"
+                tool_error = ""
+            tag_error = ""
+            try:
+                self._parse_tags()
+            except ValueError as validation_error:
+                tag_error = str(validation_error)
+            self._render_field_status(
+                "#create-tags-status",
+                tag_error,
+                "Tags are valid",
+                touched="tags" in self._touched,
+            )
+            self.query_one("#command-preview", Static).update(shlex.join(command))
             normalized = validation.normalized_name if validation else name
-            status.append(f"+ Session name available: {normalized}\n", "green")
-            status.append("+ Working directory exists", "green")
-        self.query_one("#create-validation", Static).update(status)
-        self.query_one("#create-submit", Button).disabled = bool(errors)
+            self._render_field_status(
+                "#create-name-status",
+                name_error,
+                f"Available as {normalized}" if normalized else "",
+                touched="name" in self._touched,
+            )
+            self._render_field_status(
+                "#create-cwd-status",
+                cwd_error,
+                "Directory exists",
+                touched="cwd" in self._touched,
+            )
+            self._render_field_status(
+                "#create-tool-status",
+                tool_error,
+                "Tool is available",
+                touched=bool(tool_error),
+            )
+            errors = [issue for issue in (name_error, cwd_error, tool_error, tag_error) if issue]
+            submit = self.query_one("#create-submit", Button)
+            submit.disabled = bool(errors)
+            reason = self.query_one("#create-submit-reason", Static)
+            if errors:
+                reason.display = True
+                reason.update(f"Create unavailable: {errors[0]}")
+                reason.add_class("invalid")
+            else:
+                reason.display = False
+                reason.update("Ready to create. Ctrl+Enter also submits.")
+                reason.remove_class("invalid")
+        finally:
+            self._validating = False
+
+    def _render_field_status(
+        self, selector: str, error: str, success: str, *, touched: bool
+    ) -> None:
+        target = self.query_one(selector, Static)
+        target.display = touched or bool(error)
+        if not touched:
+            target.update("")
+            target.remove_class("valid", "invalid")
+        elif error:
+            target.update(Text.assemble(("x ", "bold red"), error))
+            target.remove_class("valid")
+            target.add_class("invalid")
+        else:
+            target.update(Text.assemble(("+ ", "bold green"), success))
+            target.remove_class("invalid")
+            target.add_class("valid")
 
     @on(Select.Changed, "#create-tool")
     def tool_changed(self) -> None:
+        self._touched.add("tool")
         self._validate()
 
     @on(Select.Changed, "#create-recent-dir")
     def recent_directory_changed(self, event: Select.Changed) -> None:
         if event.value is not Select.BLANK:
-            self.query_one("#create-cwd", Input).value = display_path(Path(str(event.value)))
+            selected = display_path(Path(str(event.value)))
+            if self.query_one("#create-cwd", Input).value == selected:
+                return
+            self._touched.add("cwd")
+            self.query_one("#create-cwd", Input).value = selected
 
     @on(Input.Changed)
     def input_changed(self, event: Input.Changed) -> None:
         if event.input.id and event.input.id.startswith("create-"):
+            if event.input.id == "create-name":
+                self._touched.add("name")
+            elif event.input.id == "create-cwd":
+                self._touched.add("cwd")
+            elif event.input.id == "create-tags":
+                self._touched.add("tags")
             self._validate()
 
     @on(Button.Pressed)
     def button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "create-cancel":
             self.dismiss(None)
+            return
+        if event.button.id == "create-advanced-toggle":
+            self._advanced = not self._advanced
+            advanced = self.query_one("#create-advanced", Vertical)
+            advanced.set_class(not self._advanced, "collapsed")
+            event.button.label = "Hide advanced options" if self._advanced else "Advanced options"
             return
         if event.button.id != "create-submit":
             return
@@ -493,6 +685,7 @@ class ManageSessionScreen(ModalScreen[str | None]):
         with VerticalScroll(id="more-dialog", classes="dialog manage-dialog"):
             yield Label("Manage Session", classes="dialog-title")
             yield Static(self.session.name, classes="dialog-context")
+            yield Static("General", classes="manage-section")
             yield Button("Rename or edit organization", id="manage-edit")
             yield Button("Edit task note", id="manage-note")
             yield Button("Set task and input status", id="manage-status")
@@ -503,9 +696,10 @@ class ManageSessionScreen(ModalScreen[str | None]):
             )
             yield Button("Unpin" if self.session.pinned else "Pin", id="manage-pin")
             yield Button("Advanced details", id="manage-advanced")
+            yield Static("Runtime", classes="manage-section")
             yield Button("Restart tool", id="manage-restart")
-            yield Static("Protected operations", classes="manage-section danger-title")
             yield Button("Stop command", id="manage-stop-command", disabled=stopped)
+            yield Static("Danger zone", classes="manage-section danger-title")
             yield Button("Stop tmux session", variant="error", id="manage-stop", disabled=stopped)
             yield Button("Remove WF metadata", variant="error", id="manage-remove-metadata")
             yield Button("Delete logs", variant="error", id="manage-delete-logs")
@@ -513,6 +707,7 @@ class ManageSessionScreen(ModalScreen[str | None]):
             yield Button("Cancel", id="more-cancel")
 
     def on_mount(self) -> None:
+        animate_modal_open(self)
         self.query_one("#more-cancel", Button).focus()
 
     @on(Button.Pressed)
@@ -602,6 +797,7 @@ class ConfirmActionScreen(ModalScreen[bool]):
                 yield Button("Confirm", variant="error", id="confirm-submit")
 
     def on_mount(self) -> None:
+        animate_modal_open(self)
         self.query_one("#confirm-cancel", Button).focus()
 
     @on(Button.Pressed)
@@ -773,7 +969,7 @@ def diagnostic_detail(check: HealthCheck, *, expanded: bool) -> str:
     if check.name == "state":
         return "Writable" if check.status is HealthStatus.PASS else "Needs attention"
     if check.name == "legacy-readonly":
-        return "Detected" if check.status is HealthStatus.PASS else "Not detected"
+        return "Not detected" if check.detail.startswith("no legacy") else "Detected"
     return check.detail.replace(str(Path.home()), "~")
 
 
@@ -781,18 +977,25 @@ class DiagnosticsScreen(ModalScreen[None]):
     BINDINGS: ClassVar[list[BindingSpec]] = [
         Binding("escape", "close", "Close"),
         Binding("q", "close", "Close"),
+        Binding("r", "run", "Run again"),
+        Binding("e", "export", "Export"),
     ]
 
     def __init__(self, service: SessionService) -> None:
         super().__init__()
         self.service = service
-        self.report: DoctorReport = service.doctor()
+        self.report = DoctorReport(checks=[])
         self.show_details = False
+        self.running = False
+        self.last_run_at: datetime | None = None
+        self.duration_ms: int | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="diagnostics-dialog", classes="dialog diagnostics-dialog"):
             yield Label("System Diagnostics", classes="dialog-title")
+            yield Static("Not run", id="diagnostics-meta")
             yield Static("", id="diagnostics-summary")
+            yield LoadingIndicator(id="diagnostics-loading")
             with VerticalScroll(id="diagnostics-list"):
                 yield Static("", id="diagnostics-content")
             with Horizontal(classes="dialog-actions diagnostics-actions"):
@@ -802,39 +1005,94 @@ class DiagnosticsScreen(ModalScreen[None]):
                 yield Button("Close", variant="primary", id="diagnostics-close")
 
     def on_mount(self) -> None:
-        self._render_report()
+        animate_modal_open(self)
         self.query_one("#diagnostics-close", Button).focus()
+        self.action_run()
 
     def _render_report(self) -> None:
         passed = self.report.count(HealthStatus.PASS)
         warnings = self.report.count(HealthStatus.WARN)
         failed = self.report.count(HealthStatus.FAIL)
+        information = self.report.count(HealthStatus.INFO)
         self.query_one("#diagnostics-summary", Static).update(
-            f"{passed} passed   {warnings} warnings   {failed} failed"
+            f"{passed} passed   {warnings} warnings   {failed} failed   {information} information"
         )
         content = Text()
         for check in self.report.checks:
-            style = "green" if check.status is HealthStatus.PASS else "yellow"
-            if check.status is HealthStatus.FAIL:
-                style = "bold red"
+            styles = {
+                HealthStatus.PASS: "green",
+                HealthStatus.WARN: "yellow",
+                HealthStatus.FAIL: "bold red",
+                HealthStatus.INFO: "#66aaff",
+            }
+            style = styles[check.status]
             content.append(f"{check.status.value.upper():<5}", style)
             content.append(f"{diagnostic_name(check):<22}", "bold")
             content.append(f"{diagnostic_detail(check, expanded=self.show_details)}\n")
-            if check.status is not HealthStatus.PASS and check.corrective_action:
+            if check.status in {HealthStatus.WARN, HealthStatus.FAIL} and check.corrective_action:
                 content.append(f"     Action: {check.corrective_action}\n", "dim")
         self.query_one("#diagnostics-content", Static).update(content)
         self.query_one("#diagnostics-details", Button).label = (
             "Hide Details" if self.show_details else "Show Details"
         )
 
+    def _show_loading(self) -> None:
+        if self.running:
+            self.query_one("#diagnostics-loading", LoadingIndicator).display = True
+
+    def action_run(self) -> None:
+        if self.running:
+            return
+        self.running = True
+        self.query_one("#diagnostics-loading", LoadingIndicator).display = False
+        self.query_one("#diagnostics-summary", Static).update(
+            "Running diagnostics... Checking tmux and tool availability"
+        )
+        self.query_one("#diagnostics-meta", Static).update("Running now")
+        for selector in ("#diagnostics-run", "#diagnostics-export", "#diagnostics-details"):
+            self.query_one(selector, Button).disabled = True
+        self.set_timer(0.25, self._show_loading)
+        self._run_diagnostics()
+
+    @work(thread=True, exclusive=True, group="diagnostics")
+    def _run_diagnostics(self) -> None:
+        started = perf_counter()
+        try:
+            report = self.service.doctor()
+        except (OSError, WFError) as error:
+            report = DoctorReport(
+                checks=[
+                    HealthCheck(
+                        name="diagnostics-run",
+                        status=HealthStatus.FAIL,
+                        detail=str(error),
+                        corrective_action="Close diagnostics, verify the environment, and retry.",
+                    )
+                ]
+            )
+        duration_ms = max(1, round((perf_counter() - started) * 1000))
+        self.app.call_from_thread(self._finish_diagnostics, report, duration_ms)
+
+    def _finish_diagnostics(self, report: DoctorReport, duration_ms: int) -> None:
+        self.report = report
+        self.duration_ms = duration_ms
+        self.last_run_at = datetime.now().astimezone()
+        self.running = False
+        self.query_one("#diagnostics-loading", LoadingIndicator).display = False
+        for selector in ("#diagnostics-run", "#diagnostics-export", "#diagnostics-details"):
+            self.query_one(selector, Button).disabled = False
+        duration = "<1 second" if duration_ms < 1000 else f"{duration_ms / 1000:.1f} seconds"
+        self.query_one("#diagnostics-meta", Static).update(
+            f"Last run: just now   Completed in {duration}"
+        )
+        self._render_report()
+
     @on(Button.Pressed)
     def button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "diagnostics-close":
             self.dismiss(None)
         elif event.button.id == "diagnostics-run":
-            self.report = self.service.doctor()
-            self._render_report()
-            self.notify("Diagnostics refreshed")
+            self.action_run()
         elif event.button.id == "diagnostics-details":
             self.show_details = not self.show_details
             self._render_report()
@@ -846,6 +1104,10 @@ class DiagnosticsScreen(ModalScreen[None]):
             else:
                 self.notify(display_path(destination), title="Privacy-safe report exported")
 
+    def action_export(self) -> None:
+        if not self.running:
+            self.query_one("#diagnostics-export", Button).press()
+
     def action_close(self) -> None:
         self.dismiss(None)
 
@@ -853,30 +1115,55 @@ class DiagnosticsScreen(ModalScreen[None]):
 class OnboardingScreen(ModalScreen[str | None]):
     BINDINGS: ClassVar[list[BindingSpec]] = [Binding("escape", "close", "Close")]
 
+    STEPS: ClassVar[tuple[tuple[str, str], ...]] = (
+        (
+            "1 of 3 - Sessions",
+            "Sessions continue running through tmux after your SSH connection disconnects.",
+        ),
+        (
+            "2 of 3 - Status",
+            "WF keeps tmux runtime, task progress, agent state, and input requirements separate.",
+        ),
+        (
+            "3 of 3 - Safety",
+            "Stop and delete operations always require a protected confirmation.",
+        ),
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.step = 0
+
     def compose(self) -> ComposeResult:
         with Vertical(id="onboarding-dialog", classes="dialog small-dialog"):
-            yield Label("Welcome to WF", classes="dialog-title")
-            yield Static(
-                "WF keeps Claude Code, Codex, Hermes, and shell work running in tmux after SSH "
-                "disconnects. Create a session or review the keyboard help to begin.",
-                id="onboarding-copy",
-            )
+            yield Label(self.STEPS[0][0], id="onboarding-title", classes="dialog-title")
+            yield Static(self.STEPS[0][1], id="onboarding-copy")
             with Horizontal(classes="dialog-actions"):
-                yield Button("View Help", id="onboarding-help")
-                yield Button("Create Session", id="onboarding-create")
-                yield Button("Close", variant="primary", id="onboarding-close")
+                yield Button("Skip", id="onboarding-close")
+                yield Button("Next", variant="primary", id="onboarding-next")
 
     def on_mount(self) -> None:
+        animate_modal_open(self)
         self.query_one("#onboarding-close", Button).focus()
+
+    def _render_step(self) -> None:
+        title, copy = self.STEPS[self.step]
+        self.query_one("#onboarding-title", Label).update(title)
+        self.query_one("#onboarding-copy", Static).update(copy)
+        self.query_one("#onboarding-next", Button).label = (
+            "Start using WF" if self.step == len(self.STEPS) - 1 else "Next"
+        )
 
     @on(Button.Pressed)
     def button_pressed(self, event: Button.Pressed) -> None:
-        actions = {
-            "onboarding-help": "help",
-            "onboarding-create": "create",
-            "onboarding-close": None,
-        }
-        self.dismiss(actions.get(event.button.id or ""))
+        if event.button.id == "onboarding-close":
+            self.dismiss(None)
+        elif event.button.id == "onboarding-next":
+            if self.step == len(self.STEPS) - 1:
+                self.dismiss(None)
+            else:
+                self.step += 1
+                self._render_step()
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -1031,6 +1318,7 @@ class DetailScreen(Screen[str | None]):
 def inspector_document(session: SessionView, output: str, truncated: bool) -> Text:
     """Build the narrow-screen inspector as one wrapping document."""
     text = Text()
+    notice = detect_activity(session, output)
     text.append(session.name, style="bold")
     text.append(f"\n{session.tool.value.upper()}\n\n", style=TOOL_STYLES[session.tool])
     text.append(section_title("OVERVIEW"))
@@ -1054,6 +1342,7 @@ def inspector_document(session: SessionView, output: str, truncated: bool) -> Te
             [
                 ("Runtime", display_state(session.runtime.value)),
                 ("Task", display_state(session.task_state.value)),
+                ("Agent", display_state(notice.agent_state.value)),
                 ("Input", display_input(session.input_state)),
                 ("Windows", str(session.windows)),
                 ("Last active", relative_activity(session.last_active_at)),
@@ -1064,7 +1353,6 @@ def inspector_document(session: SessionView, output: str, truncated: bool) -> Te
     text.append("\n")
     text.append(section_title("ACTIVITY"))
     text.append("\n")
-    notice = detect_activity(session, output)
     style = (
         "bold yellow"
         if notice.level == "warning"
@@ -1078,8 +1366,8 @@ def inspector_document(session: SessionView, output: str, truncated: bool) -> Te
     text.append(section_title("RECENT OUTPUT"))
     text.append("\n")
     if truncated:
-        text.append("[older output truncated]\n", "dim")
-    text.append(output or "No pane output")
+        text.append("[summary from truncated output]\n", "dim")
+    text.append(summarize_output(output, notice))
     text.append("\n\n")
     text.append(section_title("ACTIONS"))
     text.append("\nEnter Attach   l Logs   Esc Back")
@@ -1122,6 +1410,7 @@ class WFApp(App[str | None]):
         theme_mode: str | None = None,
         onboarding: bool = True,
         default_cwd: Path | None = None,
+        no_animation: bool = False,
     ) -> None:
         super().__init__()
         self.service = service
@@ -1136,8 +1425,11 @@ class WFApp(App[str | None]):
         self._expected_option_id: str | None = None
         self._option_sessions: dict[str, SessionView] = {}
         self._option_actions: dict[str, str] = {}
-        self._output_warnings: set[str] = set()
+        self._alerts: dict[tuple[str, str], ActivityNotice] = {}
+        self.output_mode = "summary"
         self.tmux_connected = True
+        self.refresh_error = ""
+        self.last_refreshed_at: datetime | None = None
         self._onboarding_enabled = onboarding
         self._onboarding_checked = False
         self.default_cwd = default_cwd or Path.cwd()
@@ -1147,6 +1439,18 @@ class WFApp(App[str | None]):
         self.monochrome = no_color if monochrome is None else monochrome
         self.ui_theme = theme_mode or ("monochrome" if self.monochrome else "dark")
         self.hostname = hostname or socket.gethostname()
+        configured_motion: str = self.service.config.interface.animations
+        env_motion = os.environ.get("WF_MOTION", "").strip().lower()
+        if env_motion in {"off", "subtle", "full"}:
+            configured_motion = env_motion
+        self.motion = (
+            "off"
+            if no_animation
+            or self.service.config.interface.reduce_motion
+            or configured_motion == "off"
+            or self.monochrome
+            else configured_motion
+        )
 
     def compose(self) -> ComposeResult:
         yield Static("", id="app-header")
@@ -1173,6 +1477,10 @@ class WFApp(App[str | None]):
                     with Vertical(id="output-card", classes="inspector-card output-card"):
                         with Horizontal(id="output-heading"):
                             yield Static("RECENT OUTPUT", classes="section-title")
+                            yield Button(
+                                "Summary", id="output-summary", classes="output-mode active"
+                            )
+                            yield Button("Raw", id="output-raw", classes="output-mode")
                             yield Static("", id="output-meta")
                         with VerticalScroll(id="recent-output-scroll"):
                             yield Static("", id="recent-output", classes="section-body output-body")
@@ -1183,6 +1491,7 @@ class WFApp(App[str | None]):
         yield Static("", id="small-terminal")
 
     def on_mount(self) -> None:
+        self.set_class(self.motion == "off", "motion-off")
         self._set_layout_classes(self.size.width, self.size.height)
         self.refresh_sessions()
         self.query_one("#sessions", OptionList).focus()
@@ -1245,6 +1554,10 @@ class WFApp(App[str | None]):
         elif action == "help":
             self.action_help()
 
+    def _notify_success(self, message: str, *, title: str = "Completed") -> None:
+        marker = "OK" if self.ascii_only else "✓"
+        self.notify(f"{marker} {message}", title=title)
+
     def _row_width(self) -> int:
         if self.has_class("wide"):
             return max(28, int(self.size.width * 0.36) - 5)
@@ -1259,6 +1572,7 @@ class WFApp(App[str | None]):
             sessions = self.service.list_sessions()
         except WFError as error:
             self.tmux_connected = False
+            self.refresh_error = str(error)
             self.remove_class("refreshing")
             self._render_header()
             self.notify(
@@ -1268,15 +1582,64 @@ class WFApp(App[str | None]):
             )
             return
         self.tmux_connected = True
+        self.refresh_error = ""
         if self.selected_name is not None:
             current = next((item for item in sessions if item.name == self.selected_name), None)
             if current is None or current.session_id != self.selected_session_id:
                 self.selected_name = None
                 self.selected_session_id = None
         self.sessions = sessions
+        valid_identities = {(session.name, session.session_id) for session in sessions}
+        self._alerts = {
+            identity: alert
+            for identity, alert in self._alerts.items()
+            if identity in valid_identities
+        }
         self._render_options()
         self.remove_class("refreshing")
+        self.last_refreshed_at = datetime.now(UTC)
         self._render_header()
+
+    def _notice_for(self, session: SessionView) -> ActivityNotice:
+        return self._alerts.get((session.name, session.session_id), detect_activity(session, ""))
+
+    def _store_notice(self, session: SessionView, notice: ActivityNotice) -> None:
+        identity = (session.name, session.session_id)
+        previous = self._alerts.get(identity, detect_activity(session, ""))
+        self._alerts[identity] = notice
+        option_id = f"session:{session.session_id}"
+        if option_id in self._option_sessions:
+            prompt = session_row(
+                session,
+                self._row_width(),
+                ascii_only=self.ascii_only,
+                notice=notice,
+            )
+            if self.motion != "off" and notice.warning and notice.kind != previous.kind:
+                prompt.stylize("on #4b3b1f")
+                self.set_timer(
+                    0.45,
+                    lambda: self._restore_session_row(session.name, session.session_id),
+                )
+            self.query_one("#sessions", OptionList).replace_option_prompt(option_id, prompt)
+
+    def _restore_session_row(self, name: str, session_id: str) -> None:
+        session = next(
+            (item for item in self.sessions if item.name == name and item.session_id == session_id),
+            None,
+        )
+        option_id = f"session:{session_id}"
+        if session is None or option_id not in self._option_sessions:
+            return
+        self.query_one("#sessions", OptionList).replace_option_prompt(
+            option_id,
+            session_row(
+                session,
+                self._row_width(),
+                ascii_only=self.ascii_only,
+                notice=self._notice_for(session),
+            ),
+        )
 
     def _matches_query(self, session: SessionView) -> bool:
         if self.filters.tool is not None and session.tool is not self.filters.tool:
@@ -1285,7 +1648,7 @@ class WFApp(App[str | None]):
             return False
         if self.filters.task is not None and session.task_state is not self.filters.task:
             return False
-        if self.filters.warnings_only and not is_warning(session):
+        if self.filters.warnings_only and not is_warning(session, self._notice_for(session)):
             return False
         if self.filters.recent_only:
             if session.last_active_at is None:
@@ -1360,7 +1723,12 @@ class WFApp(App[str | None]):
                 self._option_sessions[option_id] = session
                 options.add_option(
                     Option(
-                        session_row(session, self._row_width(), ascii_only=self.ascii_only),
+                        session_row(
+                            session,
+                            self._row_width(),
+                            ascii_only=self.ascii_only,
+                            notice=self._notice_for(session),
+                        ),
                         id=option_id,
                     )
                 )
@@ -1390,10 +1758,9 @@ class WFApp(App[str | None]):
     def _render_header(self) -> None:
         attached = sum(session.runtime is RuntimeState.ATTACHED for session in self.sessions)
         detached = sum(session.runtime is RuntimeState.DETACHED for session in self.sessions)
-        warnings = sum(
-            is_warning(session) or session.name in self._output_warnings
-            for session in self.sessions
-        )
+        warnings = sum(is_warning(session, self._notice_for(session)) for session in self.sessions)
+        if not self.tmux_connected:
+            warnings += 1
         session_label = "session" if len(self.sessions) == 1 else "sessions"
         warning_text = (
             "No warnings" if warnings == 0 else f"{warnings} warning{'s' if warnings != 1 else ''}"
@@ -1413,7 +1780,11 @@ class WFApp(App[str | None]):
         filter_text = f"{separator}{', '.join(active_filters)}" if active_filters else ""
         connection = "tmux connected" if self.tmux_connected else "tmux unavailable"
         if self.has_class("refreshing"):
-            connection = "refreshing"
+            connection = "Refreshing sessions..."
+        elif self.last_refreshed_at is not None:
+            age = int((datetime.now(UTC) - self.last_refreshed_at).total_seconds())
+            updated = "Updated now" if age < 1 else f"Updated {age}s ago"
+            connection = f"{connection}{separator}{updated}"
         text = Text()
         text.append("WF", "bold #72c78e")
         if self.has_class("very-wide"):
@@ -1422,7 +1793,7 @@ class WFApp(App[str | None]):
             text.append(f"    {truncate(self.hostname, 22, ascii_only=self.ascii_only)}")
             text.append(f"{separator}{connection}", "green" if self.tmux_connected else "red")
         elif self.has_class("wide"):
-            text.append(f"  Workflow Session Manager  v{__version__}")
+            text.append("  Workflow Session Manager")
             text.append(f"    {counts}{filter_text}", "dim")
             text.append(f"{separator}{connection}", "green" if self.tmux_connected else "red")
         elif self.has_class("medium"):
@@ -1435,7 +1806,8 @@ class WFApp(App[str | None]):
     def _render_action_bar(self) -> None:
         navigation = "Up/Down/jk" if self.ascii_only else "↑↓/jk"
         if self.has_class("searching"):
-            value = "Type to filter   Enter Apply   Esc Cancel"
+            query = self.query_one("#search", Input).value
+            value = f"SEARCH  {query}_   Enter Apply   Esc Cancel   Ctrl+U Clear"
         elif self.has_class("narrow"):
             value = (
                 f"{navigation} Nav   Enter Open   c Create   / Search   f Filter   ? Help   q Quit"
@@ -1521,10 +1893,17 @@ class WFApp(App[str | None]):
             self.query_one("#overview", Static).update(str(error))
             return
         session = details.session
+        notice = detect_activity(session, details.preview)
+        self._store_notice(session, notice)
         separator = " / " if self.ascii_only else " · "
         identity = Text()
         identity.append(f"{session.tool.value.upper():<7}", style=TOOL_STYLES[session.tool])
         identity.append(session.name, style="bold")
+        if session.pinned:
+            identity.append("  *" if self.ascii_only else "  ★", "yellow")
+        if notice.warning:
+            alert_style = "bold yellow" if notice.level == "warning" else "bold red"
+            identity.append(f"  ! {notice.title}", alert_style)
         identity.append(
             "\n"
             + separator.join(
@@ -1547,6 +1926,7 @@ class WFApp(App[str | None]):
         status_values = [
             ("Runtime", display_state(session.runtime.value)),
             ("Task", display_state(session.task_state.value)),
+            ("Agent", display_state(notice.agent_state.value)),
             ("Input", display_input(session.input_state)),
             ("Windows", str(session.windows)),
             ("Logging", "Enabled" if session.logging_enabled else "Disabled"),
@@ -1554,10 +1934,9 @@ class WFApp(App[str | None]):
         ]
         if self.has_class("medium"):
             overview_values = overview_values[:1]
-            status_values = status_values[:3]
+            status_values = status_values[:4]
         self.query_one("#overview", Static).update(labeled_values(overview_values))
         self.query_one("#runtime-status", Static).update(labeled_values(status_values))
-        notice = detect_activity(session, details.preview)
         activity = Text(notice.title, style="bold")
         activity.append(f"\n{notice.detail}")
         activity_card = self.query_one("#activity-card", Vertical)
@@ -1565,24 +1944,24 @@ class WFApp(App[str | None]):
         if notice.level == "warning":
             activity.stylize("yellow", 0, len(notice.title))
             activity_card.add_class("warning")
-            self._output_warnings.add(session.name)
         elif notice.level == "error":
             activity.stylize("red", 0, len(notice.title))
             activity_card.add_class("error")
-            self._output_warnings.add(session.name)
         else:
             activity_card.add_class("success")
-            self._output_warnings.discard(session.name)
         self.query_one("#activity", Static).update(activity)
         preview = Text()
-        if details.preview_truncated:
-            preview.append("[older output truncated]\n", "dim")
-        preview.append(details.preview or "No pane output")
+        if self.output_mode == "summary":
+            preview = summarize_output(details.preview, notice)
+        else:
+            if details.preview_truncated:
+                preview.append("[older output truncated]\n", "dim")
+            preview.append(details.preview or "No pane output")
         self.query_one("#recent-output", Static).update(preview)
         line_count = len(details.preview.splitlines())
         truncated = "truncated" if details.preview_truncated else "complete"
         self.query_one("#output-meta", Static).update(
-            f"{line_count} lines  {truncated}  sanitized  l full logs"
+            f"{self.output_mode.title()}  {line_count} lines  {truncated}  sanitized  l full logs"
         )
         self.query_one("#session-actions", Static).update(
             "Enter Attach   e Edit   n Task   l Logs   r Refresh   * Pin   d Manage"
@@ -1595,6 +1974,14 @@ class WFApp(App[str | None]):
             force=True,
         )
         self._render_header()
+
+    @on(Button.Pressed, ".output-mode")
+    def output_mode_changed(self, event: Button.Pressed) -> None:
+        self.output_mode = "raw" if event.button.id == "output-raw" else "summary"
+        for mode in ("summary", "raw"):
+            self.query_one(f"#output-{mode}", Button).set_class(self.output_mode == mode, "active")
+        if self.selected_name:
+            self._render_details(self.selected_name)
 
     @on(Input.Changed, "#search")
     def search_changed(self, event: Input.Changed) -> None:
@@ -1699,7 +2086,7 @@ class WFApp(App[str | None]):
             return
         self.selected_name = session.name
         self.selected_session_id = session.session_id
-        self.notify(f"Created {session.name}", title="Session ready")
+        self._notify_success(f"Session created: {session.name}", title="Session ready")
         self.refresh_sessions()
 
     def action_edit(self) -> None:
@@ -1728,6 +2115,7 @@ class WFApp(App[str | None]):
             return
         self.selected_name = updated.name
         self.selected_session_id = updated.session_id
+        self._notify_success("Session details updated")
         self.refresh_sessions()
 
     def action_note(self) -> None:
@@ -1744,6 +2132,7 @@ class WFApp(App[str | None]):
         except WFError as error:
             self.notify(str(error), title="Save failed", severity="error")
             return
+        self._notify_success("Task updated")
         self.refresh_sessions()
 
     def action_logs(self) -> None:
@@ -1762,6 +2151,7 @@ class WFApp(App[str | None]):
             return
         self.selected_name = updated.name
         self.selected_session_id = updated.session_id
+        self._notify_success("Session unpinned" if session.pinned else "Session pinned")
         self.refresh_sessions()
 
     def action_manage(self) -> None:
@@ -1795,7 +2185,9 @@ class WFApp(App[str | None]):
                 return
             self.selected_name = updated.name
             self.selected_session_id = updated.session_id
-            self.notify("Logging enabled" if updated.logging_enabled else "Logging disabled")
+            self._notify_success(
+                "Logging enabled" if updated.logging_enabled else "Logging disabled"
+            )
             self.refresh_sessions()
         elif action == "delete":
             self.push_screen(DeleteSessionScreen(session.name), self._delete_session)
@@ -1860,7 +2252,7 @@ class WFApp(App[str | None]):
         except (WFError, OSError) as error:
             self.notify(str(error), title=f"{display_state(action)} failed", severity="error")
             return
-        self.notify(message)
+        self._notify_success(message)
         self.refresh_sessions()
 
     def action_advanced_details(self) -> None:
@@ -1879,7 +2271,7 @@ class WFApp(App[str | None]):
             return
         self.selected_name = None
         self.selected_session_id = None
-        self.notify(f"Deleted {session.name}")
+        self._notify_success(f"Deleted {session.name}")
         self.refresh_sessions()
 
     def action_diagnostics(self) -> None:

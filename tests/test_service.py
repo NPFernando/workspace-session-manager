@@ -194,7 +194,23 @@ def test_create_validation_detects_duplicate_directory_and_git_project(
     service.create(CreateRequest(name="api", tool=Tool.CLAUDE, cwd=nested))
     duplicate = service.validate_create(Tool.CLAUDE, "api", nested)
     assert not duplicate.valid
+    assert duplicate.name_error
+    assert not duplicate.cwd_error
     assert "already exists" in duplicate.errors[0]
+
+    missing = service.validate_create(Tool.CLAUDE, "api-refactor", nested / "missing")
+    assert not missing.valid
+    assert not missing.name_error
+    assert missing.cwd_error
+
+
+def test_diagnostics_classifies_environment_facts_as_information(
+    service: SessionService,
+) -> None:
+    report = service.doctor()
+    statuses = {check.name: check.status for check in report.checks}
+    assert statuses["unmanaged-sessions"] is HealthStatus.INFO
+    assert statuses["legacy-readonly"] is HealthStatus.INFO
 
 
 def test_logging_stop_restart_and_metadata_removal_are_explicit(

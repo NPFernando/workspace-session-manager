@@ -12,6 +12,10 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 - Optional owner-only sanitized tmux logging with bounded log and pane views
 - Structured usage-limit activity warnings, advanced details, diagnostics export, and stopped-session
   recovery
+- Independent agent execution and alert states propagated through the header, rows, inspector, and
+  structured output summary
+- PASS, WARN, FAIL, and INFO diagnostic classifications with progress, last-run, and duration states
+- Configurable subtle motion, `--no-animation`, `WF_MOTION=off`, and reduced-motion behavior
 - Dark, light, monochrome, `NO_COLOR`, and ASCII presentation modes
 - Snapshot coverage for dialogs, validation failures, usage warnings, destructive confirmation, light
   mode, and inventories of 50 and 200 sessions
@@ -19,9 +23,12 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 ### Changed
 
 - Rebuilt the inspector into Overview, Status, Activity, Recent Output, and Actions containers
+- Replaced raw output by default with a Summary/Raw switch while retaining bounded sanitized logs
+- Moved create validation directly under each field and prevented stale-value name validation
 - Made session grouping canonical so a session appears only once; recent activity is now a filter
 - Renamed `d More` to `d Manage` and separated ordinary operations from protected operations
 - Refined 160, 120, 100, and 80-column layouts, fixed-width tool badges, activity times, and headers
+- Expanded first-run guidance to a dismissible three-step safety and persistence walkthrough
 - Restored `--classic` only as a guarded compatibility bridge to an owner-only preserved executable
 
 ## [0.2.0] - 2026-07-20

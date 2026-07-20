@@ -29,3 +29,11 @@ def test_config_is_strict_toml(tmp_path: Path) -> None:
 def test_tilde_paths_expand() -> None:
     config = AppConfig(legacy_state_dirs=(Path("~/.legacy-wf"),))
     assert config.legacy_state_dirs[0].is_absolute()
+
+
+def test_motion_configuration_is_strict() -> None:
+    config = AppConfig.model_validate({"interface": {"animations": "full", "reduce_motion": True}})
+    assert config.interface.animations == "full"
+    assert config.interface.reduce_motion
+    with pytest.raises(ValueError):
+        AppConfig.model_validate({"interface": {"animations": "constant"}})

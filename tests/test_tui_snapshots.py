@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import Input
+from textual.widgets import Button, Input, LoadingIndicator, Static
 
 from conftest import FakeBackend
 from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
 from wf_session_manager.service import SessionService
-from wf_session_manager.tui import WFApp
+from wf_session_manager.tui import DiagnosticsScreen, WFApp
 
 SnapCompare = Callable[..., bool]
 FUTURE_ACTIVITY = datetime(2099, 1, 1, tzinfo=UTC)
@@ -113,6 +113,7 @@ def populated_app(
         hostname="wf-test-host",
         onboarding=False,
         default_cwd=Path("/"),
+        no_animation=True,
     )
 
 
@@ -255,16 +256,44 @@ def test_diagnostics_modal_snapshot(
     assert snap_compare(app, terminal_size=(120, 35), run_before=open_diagnostics)
 
 
+def test_diagnostics_running_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def open_running_diagnostics(pilot: Pilot) -> None:
+        screen = DiagnosticsScreen(service)
+        screen.action_run = lambda: None  # type: ignore[method-assign]
+        app.push_screen(screen)
+        await pilot.pause()
+        screen.running = True
+        screen.query_one("#diagnostics-meta", Static).update("Running now")
+        screen.query_one("#diagnostics-summary", Static).update(
+            "Running diagnostics... Checking tmux and tool availability"
+        )
+        screen.query_one("#diagnostics-loading", LoadingIndicator).display = False
+        for selector in ("#diagnostics-run", "#diagnostics-export", "#diagnostics-details"):
+            screen.query_one(selector, Button).disabled = True
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=open_running_diagnostics)
+
+
 def test_create_form_snapshot(
     snap_compare: SnapCompare,
     service: SessionService,
     fake_backend: FakeBackend,
 ) -> None:
-    assert snap_compare(
-        populated_app(service, fake_backend),
-        press=("c", "_"),
-        terminal_size=(120, 35),
-    )
+    app = populated_app(service, fake_backend)
+
+    async def enter_valid_name(pilot: Pilot) -> None:
+        await pilot.press("c")
+        app.screen.query_one("#create-name", Input).value = "api-refactor"
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=enter_valid_name)
 
 
 def test_create_validation_error_snapshot(
@@ -293,9 +322,25 @@ def test_usage_limit_warning_snapshot(
         "Warning: Codex usage limit reached\nRetry available: 23 Jul 2026, 10:46 AM"
     )
     assert snap_compare(
-        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
+        WFApp(
+            service,
+            monochrome=False,
+            hostname="wf-test-host",
+            onboarding=False,
+            no_animation=True,
+        ),
         terminal_size=(120, 35),
     )
+
+
+def test_reduced_motion_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+    assert app.motion == "off"
+    assert snap_compare(app, terminal_size=(120, 35))
 
 
 def test_destructive_confirmation_snapshot(

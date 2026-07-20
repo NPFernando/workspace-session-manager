@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event
 
 import pytest
 from textual.widgets import Button, Input, OptionList, Select, Static
 
 from conftest import FakeBackend
+from wf_session_manager.errors import TmuxError
 from wf_session_manager.models import (
+    AgentState,
     CreateRequest,
     InputState,
     RuntimeState,
@@ -296,6 +299,18 @@ def test_usage_limit_detection_is_structured(service: SessionService) -> None:
     assert notice.level == "warning"
     assert notice.title == "Codex usage limit reached"
     assert notice.detail == "Retry available: 23 Jul 2026, 10:46 AM"
+    assert notice.agent_state is AgentState.PAUSED
+
+
+def test_claude_session_limit_wording_is_detected(service: SessionService) -> None:
+    name = create_managed(service, "limited", Tool.CLAUDE)
+    notice = detect_activity(
+        service.get(name),
+        "You've hit your session limit\nAvailable again at 10:10 AM",
+    )
+    assert notice.warning
+    assert notice.title == "Claude Code session limit reached"
+    assert notice.detail == "Retry available: 10:10 AM"
 
 
 @pytest.mark.asyncio
@@ -318,7 +333,7 @@ async def test_create_form_validates_duplicates_and_directory_inline(
         app.screen.query_one("#create-cwd", Input).value = str(project)
         await pilot.pause()
         assert submit.disabled
-        assert "already exists" in str(app.screen.query_one("#create-validation", Static).content)
+        assert "already exists" in str(app.screen.query_one("#create-name-status", Static).content)
 
         app.screen.query_one("#create-name", Input).value = "new-work"
         await pilot.pause()
@@ -329,6 +344,49 @@ async def test_create_form_validates_duplicates_and_directory_inline(
         await pilot.pause()
         assert submit.disabled
         assert app.screen.query_one("#create-name", Input).value == "new-work"
+
+
+@pytest.mark.asyncio
+async def test_create_form_uses_latest_normalized_name_value(
+    service: SessionService,
+    tmp_path: Path,
+) -> None:
+    app = WFApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("c")
+        form = app.screen
+        form.query_one("#create-name", Input).value = "_"
+        form.query_one("#create-name", Input).value = "api-refactor"
+        form.query_one("#create-cwd", Input).value = str(tmp_path)
+        await pilot.pause()
+        status = str(form.query_one("#create-name-status", Static).content)
+        assert "Available as claude-api-refactor" in status
+        assert not form.query_one("#create-submit", Button).disabled
+
+
+@pytest.mark.asyncio
+async def test_usage_limit_updates_header_row_activity_and_agent_state(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    name = create_managed(service, "limited", Tool.CLAUDE)
+    fake_backend.previews[name] = "You've hit your session limit\nAvailable again at 10:10 AM"
+    app = WFApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.pause()
+        assert "1 warning" in str(app.query_one("#app-header", Static).content)
+        assert "Claude Code session limit reached" in str(
+            app.query_one("#activity", Static).content
+        )
+        assert "Agent       Paused" in str(app.query_one("#runtime-status", Static).content)
+        session = app.sessions[0]
+        option = app.query_one("#sessions", OptionList).get_option(f"session:{session.session_id}")
+        assert "!" in str(option.prompt)
+        summary = str(app.query_one("#recent-output", Static).content)
+        assert "tmux session remains active" in summary
+        assert "You've hit" not in summary
+        await pilot.click("#output-raw")
+        assert "You've hit" in str(app.query_one("#recent-output", Static).content)
 
 
 @pytest.mark.asyncio
@@ -343,7 +401,7 @@ async def test_diagnostics_is_centered_modal_with_safe_default_details(
         assert isinstance(app.screen, DiagnosticsScreen)
         assert app.focused is app.screen.query_one("#diagnostics-close", Button)
         summary = str(app.screen.query_one("#diagnostics-summary", Static).content)
-        assert "passed" in summary and "failed" in summary
+        assert "passed" in summary and "failed" in summary and "information" in summary
         content = str(app.screen.query_one("#diagnostics-content", Static).content)
         assert str(service.paths.state_dir) not in content
         await pilot.click("#diagnostics-details")
@@ -353,6 +411,34 @@ async def test_diagnostics_is_centered_modal_with_safe_default_details(
         ) or "tmp" in str(app.screen.query_one("#diagnostics-content", Static).content)
         await pilot.press("escape")
         assert app.screen is app.screen_stack[0]
+
+
+@pytest.mark.asyncio
+async def test_slow_diagnostics_shows_progress_then_duration(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = service.doctor
+    started = Event()
+    release = Event()
+
+    def slow_doctor():  # type: ignore[no-untyped-def]
+        started.set()
+        release.wait(timeout=2)
+        return original()
+
+    monkeypatch.setattr(service, "doctor", slow_doctor)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        app.action_diagnostics()
+        await pilot.pause(0.28)
+        assert started.is_set()
+        assert app.screen.running
+        assert app.screen.query_one("#diagnostics-loading").display
+        release.set()
+        await pilot.pause(0.1)
+        assert not app.screen.running
+        assert "Completed in" in str(app.screen.query_one("#diagnostics-meta", Static).content)
 
 
 @pytest.mark.asyncio
@@ -466,3 +552,50 @@ async def test_no_color_starts_in_monochrome_mode(
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.pause()
         assert app.has_class("monochrome")
+
+
+def test_motion_can_be_disabled_by_cli_env_and_monochrome(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WF_MOTION", "off")
+    assert WFApp(service, monochrome=False, onboarding=False).motion == "off"
+    monkeypatch.delenv("WF_MOTION")
+    assert WFApp(service, monochrome=False, onboarding=False, no_animation=True).motion == "off"
+    assert WFApp(service, monochrome=True, onboarding=False).motion == "off"
+
+
+@pytest.mark.asyncio
+async def test_modal_cancel_restores_dashboard_focus(service: SessionService) -> None:
+    create_managed(service, "focus", Tool.SHELL)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        sessions = app.query_one("#sessions", OptionList)
+        assert app.focused is sessions
+        await pilot.press("c", "escape")
+        await pilot.pause()
+        assert app.screen is app.screen_stack[0]
+        assert app.focused is sessions
+
+
+@pytest.mark.asyncio
+async def test_failed_refresh_preserves_selection_and_filters(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_managed(service, "refresh", Tool.SHELL)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("/", "r", "e", "f", "enter")
+        selected = app.selected_name
+
+        def fail_refresh(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+            raise TmuxError("simulated refresh interruption")
+
+        monkeypatch.setattr(service, "list_sessions", fail_refresh)
+        app.refresh_sessions()
+        await pilot.pause()
+        assert app.selected_name == selected
+        assert app.filter_query == "ref"
+        assert not app.tmux_connected
+        assert "tmux unavailable" in str(app.query_one("#app-header", Static).content)

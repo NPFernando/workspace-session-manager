@@ -13,10 +13,11 @@ tmux sessions. Release installation and cutover remain separate approval-gated o
 - Distinct Overview, Status, Activity, Recent Output, and protected Manage panels
 - Persistent detached sessions through tmux
 - Claude, Codex, Hermes, and shell profiles with strict TOML validation
-- Separate runtime, task, and input states with notes, projects, tags, pinning, and rename
+- Separate runtime, task, agent, input, and alert states with notes, projects, tags, and pinning
 - ANSI/OSC sanitization, secret redaction, and byte-and-line bounded pane and log views
 - Optional owner-only sanitized logging, usage-limit warnings, diagnostics export, and onboarding
 - Dark, light, monochrome, `NO_COLOR`, and ASCII-compatible presentation modes
+- Subtle SSH-friendly motion with config, `--no-animation`, and `WF_MOTION=off` overrides
 - Read-only discovery and preview of legacy WF sidecar metadata
 - Exact-ID, snapshot-validated, reversible session adoption
 - Ownership checks tied to both tmux's unique session ID and a tmux owner marker
@@ -60,6 +61,7 @@ paths or restart a tmux session.
 
 ```bash
 wf-dev                         # Open the Textual interface
+wf-dev --no-animation          # Open with all optional motion disabled
 wf-dev list
 wf-dev list --all              # Include unmanaged sessions for diagnostics
 wf-dev list --json
@@ -119,6 +121,9 @@ ${XDG_CONFIG_HOME:-~/.config}/wf-session-manager/config.toml
 
 Configuration is parsed as TOML and validated by Pydantic. It is never evaluated as shell code.
 Agent commands are argument arrays, which avoids shell interpolation in configuration parsing.
+The `[interface]` table accepts `animations = "off" | "subtle" | "full"` and
+`reduce_motion = true | false`. `WF_MOTION=off` takes precedence for an individual launch;
+monochrome mode also disables optional motion.
 
 ## Data model
 
