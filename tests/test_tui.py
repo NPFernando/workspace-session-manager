@@ -16,7 +16,9 @@ from wf_session_manager.models import (
     AgentState,
     CreateRequest,
     InputState,
+    OutputSource,
     RuntimeState,
+    SessionDetails,
     TaskState,
     Tool,
 )
@@ -31,6 +33,7 @@ from wf_session_manager.tui import (
     FilterScreen,
     IdentityOrganizationScreen,
     InteractionMode,
+    LogScreen,
     ManageSessionScreen,
     MoreActionsScreen,
     NoteScreen,
@@ -82,6 +85,14 @@ async def wait_for_identity_validation(
             return
         await pilot.pause(0.05)
     raise AssertionError("identity validation did not complete")
+
+
+async def wait_for_log_refresh(pilot: Pilot[object], screen: LogScreen) -> None:
+    for _ in range(80):
+        if not screen.refreshing and screen.captured_at is not None:
+            return
+        await pilot.pause(0.05)
+    raise AssertionError("log refresh did not complete")
 
 
 @pytest.mark.asyncio
@@ -144,6 +155,295 @@ async def test_narrow_enter_opens_detail_then_attaches(service: SessionService) 
         assert isinstance(app.screen, DetailScreen)
         await pilot.press("enter")
     assert app.return_value == "claude-first"
+
+
+@pytest.mark.asyncio
+async def test_logs_follow_pause_manual_refresh_and_restore_dashboard_timer(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    name = create_managed(service, "live-logs", Tool.SHELL)
+    fake_backend.previews[name] = "first line\nsecond line"
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        dashboard_timer = app._dashboard_refresh_timer
+        assert dashboard_timer is not None and dashboard_timer._active.is_set()
+
+        await pilot.press("l")
+        assert isinstance(app.screen, LogScreen)
+        screen = app.screen
+        await wait_for_log_refresh(pilot, screen)
+        assert screen.output_source is OutputSource.PANE
+        assert screen.follow_output
+        assert "second line" in screen.query_one("#log-output", TextArea).text
+        assert not dashboard_timer._active.is_set()
+
+        await pilot.press("f")
+        assert not screen.follow_output
+        fake_backend.previews[name] = "updated while paused"
+        screen._poll_if_following()
+        await pilot.pause()
+        assert "second line" in screen.rendered_output
+
+        await pilot.press("r")
+        await wait_for_log_refresh(pilot, screen)
+        assert screen.rendered_output == "updated while paused"
+        assert not screen.follow_output
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen is app.screen_stack[0]
+        assert dashboard_timer._active.is_set()
+        assert app.interaction_mode is InteractionMode.NORMAL
+
+
+@pytest.mark.asyncio
+async def test_logs_switch_between_live_and_saved_sources(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    created = service.create(
+        CreateRequest(
+            name="source-switch",
+            tool=Tool.SHELL,
+            cwd=Path("/tmp"),
+            logging_enabled=True,
+        )
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    path = service.paths.logs_dir / f"{record.record_id}.log"
+    path.write_text("saved history\n", encoding="utf-8")
+    fake_backend.previews[created.name] = "live output"
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("l")
+        assert isinstance(app.screen, LogScreen)
+        screen = app.screen
+        await wait_for_log_refresh(pilot, screen)
+        assert screen.output_source is OutputSource.PANE
+        assert screen.rendered_output == "live output"
+        assert not screen.query_one("#log-source-saved", Button).disabled
+
+        await pilot.click("#log-source-saved")
+        await wait_for_log_refresh(pilot, screen)
+        assert screen.output_source is OutputSource.SAVED
+        assert screen.rendered_output == "saved history"
+        assert screen.query_one("#log-source-saved", Button).has_class("active")
+
+
+@pytest.mark.asyncio
+async def test_logs_find_navigation_pauses_follow_and_copy_uses_selection(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    name = create_managed(service, "find-logs", Tool.SHELL)
+    fake_backend.previews[name] = "alpha one\nbeta\nalpha two"
+    copied: list[str] = []
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("l")
+        assert isinstance(app.screen, LogScreen)
+        screen = app.screen
+        await wait_for_log_refresh(pilot, screen)
+
+        await pilot.press("/", *"alpha")
+        await pilot.pause()
+        assert screen.finding
+        assert not screen.follow_output
+        assert len(screen.matches) == 2
+        assert screen.match_index == 0
+        assert screen.query_one("#log-output", TextArea).selected_text == "alpha"
+
+        search = screen.query_one("#log-find-input", Input)
+        search.value = "missing"
+        await pilot.pause()
+        assert screen.matches == []
+        assert "No matches" in str(screen.query_one("#log-find-count", Static).content)
+        await pilot.press("ctrl+u")
+        assert search.value == ""
+        assert "Type to find" in str(screen.query_one("#log-find-count", Static).content)
+        search.value = "alpha"
+        await pilot.pause()
+
+        await pilot.press("enter")
+        assert screen.match_index == 1
+        await pilot.press("shift+enter")
+        assert screen.match_index == 0
+        await pilot.press("escape")
+        assert not screen.finding
+        assert not screen.follow_output
+
+        await pilot.press("c")
+        assert copied == ["alpha"]
+        screen.query_one("#log-output", TextArea).move_cursor((0, 0))
+        await pilot.press("c")
+        assert copied[-1] == screen.rendered_output
+
+
+@pytest.mark.asyncio
+async def test_logs_surface_warning_refresh_error_and_identity_guard(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    name = create_managed(service, "warning-logs", Tool.CODEX)
+    fake_backend.previews[name] = (
+        "Warning: Codex usage limit reached\nRetry available: tomorrow at 10:00"
+    )
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("l")
+        assert isinstance(app.screen, LogScreen)
+        screen = app.screen
+        await wait_for_log_refresh(pilot, screen)
+        assert screen.has_class("has-log-alert")
+        assert "usage limit reached" in str(screen.query_one("#log-alert", Static).content)
+
+        fake_backend.sessions[name] = fake_backend.sessions[name].model_copy(
+            update={"session_id": "$replacement"}
+        )
+        await pilot.press("r")
+        for _ in range(80):
+            if screen.error_message:
+                break
+            await pilot.pause(0.05)
+        assert screen.error_message
+        assert not screen.follow_output
+        assert screen.has_class("has-log-error")
+
+        screen.action_attach()
+        assert app.return_value is None
+
+
+@pytest.mark.asyncio
+async def test_logs_retry_time_refresh_guards_and_stale_result(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    name = create_managed(service, "retry-logs", Tool.SHELL)
+    fake_backend.previews[name] = "Recovered output"
+    original_logs = service.logs
+    should_fail = True
+
+    def flaky_logs(session_name: str, *, source: OutputSource | None = None) -> SessionDetails:
+        if should_fail:
+            raise TmuxError("tmux socket unavailable")
+        return original_logs(session_name, source=source)
+
+    monkeypatch.setattr(service, "logs", flaky_logs)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("l")
+        assert isinstance(app.screen, LogScreen)
+        screen = app.screen
+        for _ in range(80):
+            if screen.error_message:
+                break
+            await pilot.pause(0.05)
+        assert screen.error_message == "tmux socket unavailable"
+        assert not screen.refreshing
+        assert "Output unavailable" in screen.query_one("#log-output", TextArea).placeholder
+        assert "Attach unavailable" in str(screen.query_one("#log-action-bar", Static).content)
+
+        should_fail = False
+        await pilot.press("r")
+        await wait_for_log_refresh(pilot, screen)
+        assert screen.rendered_output == "Recovered output"
+        assert screen.error_message == ""
+
+        await pilot.press("t")
+        assert "Captured" in str(screen.query_one("#log-status", Static).content)
+
+        details = original_logs(name, source=OutputSource.PANE)
+        screen.rendered_output = "Keep newer output"
+        screen._finish_refresh(screen._refresh_generation - 1, details, "")
+        assert screen.rendered_output == "Keep newer output"
+
+        screen.refreshing = True
+        generation = screen._refresh_generation
+        screen.action_refresh()
+        assert screen._refresh_generation == generation
+        screen.refreshing = False
+
+
+@pytest.mark.asyncio
+async def test_logs_restore_viewport_for_each_source(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    created = service.create(
+        CreateRequest(
+            name="viewport-logs",
+            tool=Tool.SHELL,
+            cwd=Path("/tmp"),
+            logging_enabled=True,
+        )
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    path = service.paths.logs_dir / f"{record.record_id}.log"
+    path.write_text("\n".join(f"saved line {index}" for index in range(20)), encoding="utf-8")
+    fake_backend.previews[created.name] = "\n".join(f"live line {index}" for index in range(20))
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(100, 24)) as pilot:
+        await pilot.press("l")
+        assert isinstance(app.screen, LogScreen)
+        screen = app.screen
+        await wait_for_log_refresh(pilot, screen)
+        await pilot.press("f")
+        area = screen.query_one("#log-output", TextArea)
+        area.move_cursor((6, 0))
+        area.move_cursor((6, 4), select=True)
+        live_selection = area.selection
+
+        await pilot.click("#log-source-saved")
+        await wait_for_log_refresh(pilot, screen)
+        area.move_cursor((3, 0))
+        area.move_cursor((3, 5), select=True)
+        saved_selection = area.selection
+
+        await pilot.click("#log-source-pane")
+        await wait_for_log_refresh(pilot, screen)
+        await pilot.pause()
+        assert area.selection == live_selection
+
+        await pilot.click("#log-source-saved")
+        await wait_for_log_refresh(pilot, screen)
+        await pilot.pause()
+        assert area.selection == saved_selection
+
+
+@pytest.mark.asyncio
+async def test_logs_resize_and_stopped_session_disable_attach(
+    service: SessionService,
+) -> None:
+    name = create_managed(service, "stopped-view", Tool.SHELL)
+    service.stop_session(name)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.press("l")
+        assert isinstance(app.screen, LogScreen)
+        screen = app.screen
+        await wait_for_log_refresh(pilot, screen)
+        assert screen.output_source is OutputSource.SAVED
+        assert screen.session.runtime is RuntimeState.STOPPED
+        assert screen.query_one("#log-source-pane", Button).disabled
+        screen.action_attach()
+        assert app.return_value is None
+
+        await pilot.resize_terminal(80, 24)
+        await pilot.pause()
+        assert screen.has_class("log-narrow")
+        await pilot.resize_terminal(72, 20)
+        await pilot.pause()
+        assert screen.has_class("log-too-small")
+        assert screen.query_one("#log-small-terminal", Static).display
 
 
 @pytest.mark.asyncio

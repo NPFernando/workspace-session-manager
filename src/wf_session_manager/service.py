@@ -31,6 +31,7 @@ from wf_session_manager.models import (
     HealthCheck,
     HealthStatus,
     InputState,
+    OutputSource,
     RuntimeState,
     SessionDetails,
     SessionMetadata,
@@ -315,12 +316,19 @@ class SessionService:
 
     def inspect(self, name: str) -> SessionDetails:
         session = self.get(name)
+        saved_available = self._saved_log_available(name)
+        available_sources = (
+            *((OutputSource.PANE,) if session.runtime is not RuntimeState.STOPPED else ()),
+            *((OutputSource.SAVED,) if saved_available else ()),
+        )
         if session.runtime is RuntimeState.STOPPED:
             preview = self._read_log(name, self.config.preview_lines, self.config.preview_bytes)
             return SessionDetails(
                 session=session,
                 preview=preview.text,
                 preview_truncated=preview.truncated,
+                output_source=OutputSource.SAVED,
+                available_sources=available_sources,
             )
         output = self.backend.capture_pane(
             name, self.config.preview_lines + 1, expected_id=session.session_id
@@ -334,15 +342,34 @@ class SessionService:
             session=session,
             preview=preview.text,
             preview_truncated=preview.truncated,
+            output_source=OutputSource.PANE,
+            available_sources=available_sources,
         )
 
-    def logs(self, name: str) -> SessionDetails:
+    def logs(self, name: str, *, source: OutputSource | None = None) -> SessionDetails:
         """Return a larger, still bounded and sanitized pane capture."""
         session = self.get(name)
-        persisted = self._read_log(name, self.config.log_lines, self.config.log_bytes)
-        if persisted.text or session.runtime is RuntimeState.STOPPED:
-            preview = persisted
-        else:
+        saved_available = self._saved_log_available(name)
+        live_available = session.runtime is not RuntimeState.STOPPED
+        available_sources = (
+            *((OutputSource.PANE,) if live_available else ()),
+            *((OutputSource.SAVED,) if saved_available else ()),
+        )
+
+        selected_source = source
+        persisted: BoundedOutput | None = None
+        if selected_source is OutputSource.PANE and not live_available:
+            raise SessionNotFoundError(f"live pane unavailable for stopped session: {name}")
+        if selected_source is OutputSource.SAVED and not saved_available:
+            raise StateError(f"saved log unavailable for session: {name}")
+        if selected_source is None and saved_available:
+            persisted = self._read_log(name, self.config.log_lines, self.config.log_bytes)
+            if persisted.text or not live_available:
+                selected_source = OutputSource.SAVED
+        if selected_source is None:
+            selected_source = OutputSource.PANE if live_available else OutputSource.SAVED
+
+        if selected_source is OutputSource.PANE:
             output = self.backend.capture_pane(
                 name, self.config.log_lines + 1, expected_id=session.session_id
             )
@@ -351,10 +378,16 @@ class SessionService:
                 max_lines=self.config.log_lines,
                 max_bytes=self.config.log_bytes,
             )
+        else:
+            preview = persisted or self._read_log(
+                name, self.config.log_lines, self.config.log_bytes
+            )
         return SessionDetails(
             session=session,
             preview=preview.text,
             preview_truncated=preview.truncated,
+            output_source=selected_source,
+            available_sources=available_sources,
         )
 
     def detect_project(self, cwd: Path) -> str:
@@ -596,6 +629,21 @@ class SessionService:
         except OSError as error:
             raise StateError(f"unable to read log for {name}: {error}") from error
         return bounded_output(content, max_lines=max_lines, max_bytes=max_bytes)
+
+    def _saved_log_available(self, name: str) -> bool:
+        record = self.store.load(name)
+        if record is None:
+            return False
+        path = self._log_path(record)
+        if path.is_symlink():
+            return False
+        try:
+            details = path.stat()
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise StateError(f"unable to inspect log for {name}: {error}") from error
+        return stat.S_ISREG(details.st_mode) and details.st_uid == os.getuid()
 
     def _managed_record(self, name: str, *, require_live: bool = False) -> SessionMetadata:
         record = self.store.load(name)

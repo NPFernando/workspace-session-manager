@@ -22,6 +22,8 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 - A session-aware command palette with categorized WF actions, shortcuts, and availability details
 - A compact searchable Manage browser with General, Runtime, and Danger categories, plus dedicated
   identity, task, and task-status forms
+- A responsive full-screen Logs workspace with explicit Live and Saved sources, follow/pause,
+  source-local viewport restoration, find navigation, capture times, and selection-aware copying
 
 ### Changed
 
@@ -38,6 +40,8 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
   canceled confirmations to the originating action
 - Preserved Manage search, highlighted action, and scroll state across nested forms and confirmations
 - Restored `--classic` only as a guarded compatibility bridge to an owner-only preserved executable
+- Kept log polling out of the dashboard refresh loop, rejected stale worker results, and retained the
+  complete Logs workspace during read failures with an inline retry state
 
 ## [0.2.0] - 2026-07-20
 

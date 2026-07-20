@@ -15,6 +15,7 @@ tmux sessions. Release installation and cutover remain separate approval-gated o
 - Claude, Codex, Hermes, and shell profiles with strict TOML validation
 - Separate runtime, task, agent, input, and alert states with notes, projects, tags, and pinning
 - ANSI/OSC sanitization, secret redaction, and byte-and-line bounded pane and log views
+- Source-aware Logs workspace with Live/Saved switching, follow/pause, find navigation, and copy
 - Optional owner-only sanitized logging, usage-limit warnings, diagnostics export, and onboarding
 - Session-aware command palette with categorized commands, shortcuts, and availability details
 - Dark, light, monochrome, `NO_COLOR`, and ASCII-compatible presentation modes
@@ -106,6 +107,12 @@ hidden unless `list --all` is requested.
 | `t` | Cycle dark, light, and monochrome themes |
 | `Esc` | Cancel search or return from a narrow detail screen |
 | `q` | Quit |
+
+Inside Logs, `f` pauses or resumes polling, `r` performs a manual read, and `/` opens literal,
+case-insensitive find. `Enter` and `Shift+Enter` move between matches, `Ctrl+U` clears the query,
+`t` switches between relative and absolute capture times, and `c` copies the selection or the loaded
+sanitized output. Active sessions open on the Live pane; stopped sessions open on Saved output when
+available. Pausing preserves the current selection and scroll position independently for each source.
 
 The create dialog validates names and directories, detects duplicate sessions and Git projects,
 shows the exact command, and keeps Create disabled until required fields are valid. `d` opens a

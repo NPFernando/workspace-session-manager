@@ -6,6 +6,9 @@ focused review frames for the normal dashboard, usage-limit warning, create vali
 failure, expanded Create advanced options, diagnostics running and completed, and reduced-motion
 mode. It also includes Filter, session-aware Command Palette, responsive and filtered Manage states,
 disabled action reasons, identity and status forms, and protected Confirmation workflows.
+`logs/` contains the reviewed Logs workspace at `160x45`, `120x35`, `100x30`, and `80x24`.
+The focused state set also includes Saved output, find mode, a structured usage warning, and an inline
+read failure with retry guidance.
 
 All current frames use the fake backend and synthetic values. The SVGs do not connect to tmux or
 contain operational session data.

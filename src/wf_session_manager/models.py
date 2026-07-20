@@ -81,6 +81,13 @@ class AgentState(StrEnum):
     UNKNOWN = "unknown"
 
 
+class OutputSource(StrEnum):
+    """Sanitized output source used by inspectors and the full Logs workspace."""
+
+    PANE = "pane"
+    SAVED = "saved"
+
+
 LEGACY_TASK_STATES = {
     "active": TaskState.IN_PROGRESS,
     "done": TaskState.COMPLETED,
@@ -248,6 +255,8 @@ class SessionDetails(BaseModel):
     session: SessionView
     preview: str
     preview_truncated: bool = False
+    output_source: OutputSource = OutputSource.PANE
+    available_sources: tuple[OutputSource, ...] = (OutputSource.PANE,)
 
 
 class CreateRequest(BaseModel):

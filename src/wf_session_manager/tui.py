@@ -47,7 +47,9 @@ from wf_session_manager.models import (
     HealthCheck,
     HealthStatus,
     InputState,
+    OutputSource,
     RuntimeState,
+    SessionDetails,
     SessionView,
     TaskState,
     Tool,
@@ -1346,7 +1348,7 @@ class ManageSessionScreen(ModalScreen[ManageSelection | None]):
     BINDINGS: ClassVar[list[BindingSpec]] = [
         Binding("escape", "cancel", "Close"),
         Binding("/", "find", "Find"),
-        Binding("ctrl+u", "clear_find", "Clear", show=False),
+        Binding("ctrl+u", "clear_find", "Clear", show=False, priority=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
         Binding("e", "choose('identity')", "Identity", show=False),
@@ -2064,80 +2066,450 @@ class LogScreen(Screen[str | None]):
         Binding("r", "refresh", "Refresh"),
         Binding("enter", "attach", "Attach"),
         Binding("f", "toggle_follow", "Follow"),
-        Binding("t", "toggle_timestamps", "Timestamps"),
+        Binding("t", "toggle_time", "Time"),
         Binding("c", "copy", "Copy"),
+        Binding("/", "find", "Find"),
+        Binding("ctrl+u", "clear_find", "Clear", show=False, priority=True),
+        Binding("shift+enter", "previous_match", "Previous", show=False),
     ]
 
     def __init__(self, service: SessionService, session: SessionView) -> None:
         super().__init__()
+        self.add_class("logs-workspace")
         self.service = service
         self.session = session
         self.follow_output = True
-        self.show_timestamps = False
+        self.show_absolute_time = False
+        self.output_source = (
+            OutputSource.SAVED if session.runtime is RuntimeState.STOPPED else OutputSource.PANE
+        )
+        self.available_sources: tuple[OutputSource, ...] = (
+            () if session.runtime is RuntimeState.STOPPED else (OutputSource.PANE,)
+        )
         self.rendered_output = ""
         self.captured_at: datetime | None = None
+        self._preview_truncated = False
+        self.refreshing = False
+        self.error_message = ""
+        self.finding = False
+        self.find_query = ""
+        self.matches: list[tuple[tuple[int, int], tuple[int, int]]] = []
+        self.match_index = -1
+        self._refresh_timer: Timer | None = None
+        self._refresh_generation = 0
+        self._viewports: dict[
+            OutputSource,
+            tuple[tuple[int, int], tuple[int, int], int],
+        ] = {}
 
     def compose(self) -> ComposeResult:
-        yield Static(f"WF  Logs  {self.session.name}", id="log-header")
-        yield Static("", id="log-meta")
-        with VerticalScroll(id="log-scroll"):
-            yield Static("Loading output...", id="log-output")
-        yield Static(
-            "Esc Back   r Refresh   f Follow   t Timestamps   c Copy   Enter Attach",
-            id="action-bar",
+        yield Static("", id="log-header")
+        yield Static("", id="log-status")
+        with Horizontal(id="log-controls"):
+            yield Button("Live", id="log-source-pane", classes="log-source", compact=True)
+            yield Button("Saved", id="log-source-saved", classes="log-source", compact=True)
+            yield Button("Following", id="log-follow", compact=True)
+            yield Static("", id="log-output-meta")
+        yield Static("", id="log-alert")
+        with Horizontal(id="log-find"):
+            yield Static("FIND", id="log-find-label")
+            yield Input(placeholder="Find in sanitized output", compact=True, id="log-find-input")
+            yield Static("", id="log-find-count")
+        yield Static("", id="log-error")
+        yield TextArea(
+            "",
+            read_only=True,
+            soft_wrap=True,
+            show_cursor=True,
+            highlight_cursor_line=False,
+            placeholder="Loading sanitized output...",
+            id="log-output",
         )
+        yield Static("", id="log-action-bar")
+        yield Static("", id="log-small-terminal")
 
     def on_mount(self) -> None:
+        self.query_one("#log-output", TextArea).cursor_blink = False
+        self._set_layout_classes(self.size.width, self.size.height)
+        self._render_workspace()
+        if isinstance(self.app, WFApp):
+            self.app._suspend_dashboard_refresh()
+        self._refresh_timer = self.set_interval(
+            self.service.config.refresh_interval,
+            self._poll_if_following,
+        )
         self.action_refresh()
+        self.query_one("#log-output", TextArea).focus()
+
+    def on_unmount(self) -> None:
+        self._refresh_generation += 1
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+            self._refresh_timer = None
+        if isinstance(self.app, WFApp):
+            self.app._resume_dashboard_refresh()
+
+    def on_resize(self, event: events.Resize) -> None:
+        self._set_layout_classes(event.size.width, event.size.height)
+        self._render_workspace()
+
+    def _set_layout_classes(self, width: int, height: int) -> None:
+        self.set_class(width < 100, "log-narrow")
+        self.set_class(100 <= width < 120, "log-medium")
+        self.set_class(width < 80 or height < 24, "log-too-small")
+        if width < 80 or height < 24:
+            self.query_one("#log-small-terminal", Static).update(
+                "WF Logs requires a terminal of at least 80x24.\n\n"
+                f"Current: {width}x{height}\n\nEsc  Back"
+            )
+
+    def _poll_if_following(self) -> None:
+        if self.follow_output and not self.finding and not self.refreshing:
+            self._start_refresh(self.output_source)
 
     def action_refresh(self) -> None:
-        scroller = self.query_one("#log-scroll", VerticalScroll)
-        y = scroller.scroll_offset.y
-        try:
-            details = self.service.logs(self.session.name)
-        except WFError as error:
-            self.query_one("#log-output", Static).update(str(error))
+        if self.finding or self.refreshing:
             return
-        output = details.preview or "No pane output"
-        if details.preview_truncated:
-            output = f"[older output truncated]\n{output}"
-        self.rendered_output = output
-        self.captured_at = datetime.now(UTC)
-        self._render_output()
-        if self.follow_output:
-            self.call_after_refresh(scroller.scroll_end, animate=False)
-        else:
-            self.call_after_refresh(scroller.scroll_to, y=y, animate=False, force=True)
+        self._remember_viewport(self.output_source)
+        self._start_refresh(self.output_source)
 
-    def _render_output(self) -> None:
-        prefix = ""
-        if self.show_timestamps and self.captured_at:
-            prefix = f"Captured {self.captured_at.astimezone():%Y-%m-%d %H:%M:%S %Z}\n\n"
-        self.query_one("#log-output", Static).update(Text(f"{prefix}{self.rendered_output}"))
+    def _start_refresh(self, source: OutputSource) -> None:
+        self._refresh_generation += 1
+        generation = self._refresh_generation
+        self.refreshing = True
+        self.error_message = ""
+        self._render_workspace()
+        requested_source = (
+            None
+            if source is OutputSource.SAVED
+            and self.session.runtime is RuntimeState.STOPPED
+            and OutputSource.SAVED not in self.available_sources
+            else source
+        )
+        self._load_output(generation, requested_source)
+
+    @work(thread=True, exclusive=True, group="log-refresh")
+    def _load_output(self, generation: int, source: OutputSource | None) -> None:
+        try:
+            details = self.service.logs(self.session.name, source=source)
+        except (OSError, WFError) as error:
+            self.app.call_from_thread(self._finish_refresh, generation, None, str(error))
+            return
+        self.app.call_from_thread(self._finish_refresh, generation, details, "")
+
+    def _finish_refresh(
+        self,
+        generation: int,
+        details: SessionDetails | None,
+        error: str,
+    ) -> None:
+        if generation != self._refresh_generation or not self.is_mounted:
+            return
+        self.refreshing = False
+        if error:
+            self.follow_output = False
+            self.error_message = error
+            self._render_workspace()
+            return
+        assert details is not None
+        if details.session.session_id != self.session.session_id:
+            self.follow_output = False
+            self.error_message = (
+                "Session identity changed. Return to the dashboard and inspect the new session."
+            )
+            self._render_workspace()
+            return
+        self.session = details.session
+        self.output_source = details.output_source
+        self.available_sources = details.available_sources
+        self.rendered_output = details.preview
+        self.captured_at = datetime.now(UTC)
+        self._preview_truncated = details.preview_truncated
+        self._load_text()
+        self._render_workspace()
+        if self.follow_output:
+            self._scroll_to_end()
+        else:
+            self._restore_viewport(self.output_source)
+
+    def _remember_viewport(self, source: OutputSource) -> None:
+        if not self.query("#log-output"):
+            return
+        area = self.query_one("#log-output", TextArea)
+        self._viewports[source] = (
+            area.selection.start,
+            area.selection.end,
+            area.scroll_offset.y,
+        )
+
+    def _restore_viewport(self, source: OutputSource) -> None:
+        area = self.query_one("#log-output", TextArea)
+        viewport = self._viewports.get(source)
+        if viewport is None:
+            area.move_cursor((0, 0))
+            self.call_after_refresh(area.scroll_home, animate=False)
+            return
+        start, end, scroll_y = viewport
+        document_end = area.document.end
+
+        def clamp(location: tuple[int, int]) -> tuple[int, int]:
+            row = min(location[0], document_end[0])
+            line = area.document.get_line(row)
+            return row, min(location[1], len(line))
+
+        area.move_cursor(clamp(start))
+        area.move_cursor(clamp(end), select=start != end)
+        self.call_after_refresh(area.scroll_to, y=scroll_y, animate=False, force=True)
+
+    def _scroll_to_end(self) -> None:
+        area = self.query_one("#log-output", TextArea)
+        area.move_cursor(area.document.end)
+        self.call_after_refresh(area.scroll_end, animate=False)
+
+    def _load_text(self) -> None:
+        self.query_one("#log-output", TextArea).load_text(self.rendered_output)
+        if self.find_query:
+            self._find_matches(select_first=False)
+
+    def _capture_label(self) -> str:
+        if self.captured_at is None:
+            return "Not updated"
+        local = self.captured_at.astimezone()
+        if self.show_absolute_time:
+            return f"Captured {local:%H:%M:%S %Z}"
+        age = max(0, int((datetime.now(UTC) - self.captured_at).total_seconds()))
+        return "Updated now" if age < 1 else f"Updated {age}s ago"
+
+    def _render_workspace(self) -> None:
+        if not self.query("#log-header"):
+            return
+        self.set_class(bool(self.error_message), "has-log-error")
+        notice = detect_activity(self.session, self.rendered_output)
+        self.set_class(notice.warning, "has-log-alert")
+        header = Text("WF  Logs  ", "bold")
+        header.append(TOOL_LABELS[self.session.tool].upper(), TOOL_STYLES[self.session.tool])
+        header.append(f"  {self.session.name}", "bold")
+        self.query_one("#log-header", Static).update(header)
+
+        agent = notice.agent_state.value
+        source = "Live pane" if self.output_source is OutputSource.PANE else "Saved log"
+        status = (
+            f"{display_state(self.session.runtime.value)}  |  "
+            f"{display_state(self.session.task_state.value)}  |  "
+            f"Agent {display_state(agent)}  |  {source}  |  {self._capture_label()}"
+        )
+        if self.session.input_state is InputState.REQUIRED:
+            status = f"{status}  |  Input required"
+        if self.refreshing:
+            status = f"{status}  |  Refreshing..."
+        self.query_one("#log-status", Static).update(status)
+
+        pane = self.query_one("#log-source-pane", Button)
+        saved = self.query_one("#log-source-saved", Button)
+        pane.disabled = OutputSource.PANE not in self.available_sources
+        saved.disabled = OutputSource.SAVED not in self.available_sources
+        pane.set_class(self.output_source is OutputSource.PANE, "active")
+        saved.set_class(self.output_source is OutputSource.SAVED, "active")
+        follow = self.query_one("#log-follow", Button)
+        follow.label = "Following" if self.follow_output else "Paused"
+        follow.set_class(self.follow_output, "active")
+
+        alert = Text(notice.title, "bold yellow" if notice.level == "warning" else "bold red")
+        alert.append(f"  {notice.detail}")
+        self.query_one("#log-alert", Static).update(alert if notice.warning else "")
+        self.query_one("#log-error", Static).update(
+            f"OUTPUT UNAVAILABLE  {self.error_message}  Press r to retry."
+            if self.error_message
+            else ""
+        )
         lines = len(self.rendered_output.splitlines())
-        follow = "following" if self.follow_output else "position preserved"
-        self.query_one("#log-meta", Static).update(f"{lines} lines   {follow}")
+        bounded = "Older output truncated" if self._preview_truncated else "Complete"
+        self.query_one("#log-output-meta", Static).update(f"{lines} sanitized lines  |  {bounded}")
+        output = self.query_one("#log-output", TextArea)
+        output.tooltip = f"{lines} sanitized lines; {bounded.casefold()}; {source}"
+        output.placeholder = (
+            "Refreshing sanitized output..."
+            if self.refreshing
+            else "Output unavailable. Press r to retry."
+            if self.error_message
+            else "No sanitized output available."
+        )
+        self._render_find_status()
+        self._render_footer()
+
+    def _render_find_status(self) -> None:
+        count = self.query_one("#log-find-count", Static)
+        if not self.find_query:
+            count.update("Type to find")
+        elif not self.matches:
+            count.update("No matches")
+        else:
+            count.update(f"{self.match_index + 1}/{len(self.matches)}")
+
+    def _render_footer(self) -> None:
+        footer = self.query_one("#log-action-bar", Static)
+        if self.finding:
+            footer.update("FIND  Enter Next   Shift+Enter Previous   Ctrl+U Clear   Esc Done")
+            return
+        follow = "Pause" if self.follow_output else "Follow"
+        attach = (
+            "Attach unavailable"
+            if self.session.runtime is RuntimeState.STOPPED or self.error_message
+            else "Enter Attach"
+        )
+        if self.has_class("log-narrow"):
+            footer.update(f"Esc Back   / Find   f {follow}   r Refresh   c Copy   {attach}")
+        else:
+            footer.update(
+                f"LOGS  Up/Down Scroll   / Find   f {follow}   r Refresh   "
+                f"c Copy   t Time   {attach}   Esc Back"
+            )
 
     def action_toggle_follow(self) -> None:
+        if self.finding:
+            return
         self.follow_output = not self.follow_output
-        self._render_output()
+        self._render_workspace()
         if self.follow_output:
-            self.query_one("#log-scroll", VerticalScroll).scroll_end(animate=False)
+            self._scroll_to_end()
+            self.action_refresh()
+        else:
+            self._remember_viewport(self.output_source)
 
-    def action_toggle_timestamps(self) -> None:
-        self.show_timestamps = not self.show_timestamps
-        self._render_output()
+    def action_toggle_time(self) -> None:
+        if self.finding:
+            return
+        self.show_absolute_time = not self.show_absolute_time
+        self._render_workspace()
 
     def action_copy(self) -> None:
-        if not self.rendered_output:
+        if self.finding:
             return
-        self.app.copy_to_clipboard(self.rendered_output)
-        self.notify("Sanitized output copied")
+        area = self.query_one("#log-output", TextArea)
+        content = area.selected_text or self.rendered_output
+        if not content:
+            return
+        self.app.copy_to_clipboard(content)
+        self.notify("Selected output copied" if area.selected_text else "Sanitized output copied")
+
+    @on(Button.Pressed, ".log-source")
+    def source_pressed(self, event: Button.Pressed) -> None:
+        source = OutputSource.PANE if event.button.id == "log-source-pane" else OutputSource.SAVED
+        if source is self.output_source or source not in self.available_sources:
+            return
+        self._remember_viewport(self.output_source)
+        self.find_query = ""
+        self.matches = []
+        self.match_index = -1
+        self.finding = False
+        self.remove_class("finding")
+        self.output_source = source
+        self._start_refresh(source)
+
+    @on(Button.Pressed, "#log-follow")
+    def follow_pressed(self) -> None:
+        self.action_toggle_follow()
+
+    def action_find(self) -> None:
+        if self.refreshing or self.has_class("log-too-small"):
+            return
+        self.follow_output = False
+        self.finding = True
+        self.add_class("finding")
+        search = self.query_one("#log-find-input", Input)
+        search.value = self.find_query
+        search.focus()
+        self._render_workspace()
+
+    @on(Input.Changed, "#log-find-input")
+    def find_changed(self, event: Input.Changed) -> None:
+        if not self.finding:
+            return
+        self.find_query = event.value
+        self._find_matches(select_first=True)
+        self._render_find_status()
+
+    @on(Input.Submitted, "#log-find-input")
+    def find_submitted(self) -> None:
+        self.action_next_match()
+
+    def _find_matches(self, *, select_first: bool) -> None:
+        query = self.find_query.casefold()
+        self.matches = []
+        self.match_index = -1
+        if not query:
+            return
+        searchable = self.rendered_output.casefold()
+        offset = 0
+        while (found := searchable.find(query, offset)) >= 0:
+            self.matches.append(
+                (
+                    self._offset_to_location(found),
+                    self._offset_to_location(found + len(query)),
+                )
+            )
+            offset = found + max(1, len(query))
+        if self.matches and select_first:
+            self.match_index = 0
+            self._select_match()
+
+    def _offset_to_location(self, offset: int) -> tuple[int, int]:
+        prefix = self.rendered_output[:offset]
+        row = prefix.count("\n")
+        last_break = prefix.rfind("\n")
+        return row, offset if last_break < 0 else offset - last_break - 1
+
+    def _select_match(self) -> None:
+        if self.match_index < 0 or not self.matches:
+            return
+        start, end = self.matches[self.match_index]
+        area = self.query_one("#log-output", TextArea)
+        area.move_cursor(start)
+        area.move_cursor(end, select=True, center=True)
+        self._render_find_status()
+
+    def action_next_match(self) -> None:
+        if not self.finding or not self.matches:
+            return
+        self.match_index = (self.match_index + 1) % len(self.matches)
+        self._select_match()
+
+    def action_previous_match(self) -> None:
+        if not self.finding or not self.matches:
+            return
+        self.match_index = (self.match_index - 1) % len(self.matches)
+        self._select_match()
+
+    def action_clear_find(self) -> None:
+        if self.finding:
+            self.query_one("#log-find-input", Input).value = ""
 
     def action_attach(self) -> None:
+        if self.finding:
+            self.action_next_match()
+            return
+        if self.session.runtime is RuntimeState.STOPPED or self.error_message:
+            self.notify("Attach is unavailable for this session state.", severity="warning")
+            return
+        try:
+            current = self.service.get(self.session.name)
+        except WFError as error:
+            self.notify(str(error), severity="warning")
+            return
+        if current.session_id != self.session.session_id:
+            self.follow_output = False
+            self.error_message = "Session identity changed; attach was blocked."
+            self._render_workspace()
+            return
         self.dismiss(self.session.name)
 
     def action_close(self) -> None:
+        if self.finding:
+            self.finding = False
+            self.remove_class("finding")
+            self.query_one("#log-output", TextArea).focus()
+            self._render_workspace()
+            return
         self.dismiss(None)
 
 
@@ -2436,6 +2808,8 @@ class WFApp(App[str | None]):
         self.tmux_connected = True
         self.refresh_error = ""
         self.last_refreshed_at: datetime | None = None
+        self._dashboard_refresh_timer: Timer | None = None
+        self._dashboard_refresh_suspensions = 0
         self._onboarding_enabled = onboarding
         self._onboarding_checked = False
         self.default_cwd = default_cwd or Path.cwd()
@@ -2602,8 +2976,24 @@ class WFApp(App[str | None]):
         self._set_layout_classes(self.size.width, self.size.height)
         self.refresh_sessions()
         self.query_one("#sessions", OptionList).focus()
-        self.set_interval(self.service.config.refresh_interval, self.refresh_sessions)
+        self._dashboard_refresh_timer = self.set_interval(
+            self.service.config.refresh_interval,
+            self.refresh_sessions,
+        )
         self.call_after_refresh(self._maybe_show_onboarding)
+
+    def _suspend_dashboard_refresh(self) -> None:
+        self._dashboard_refresh_suspensions += 1
+        if self._dashboard_refresh_suspensions == 1 and self._dashboard_refresh_timer:
+            self._dashboard_refresh_timer.pause()
+
+    def _resume_dashboard_refresh(self) -> None:
+        if self._dashboard_refresh_suspensions == 0:
+            return
+        self._dashboard_refresh_suspensions -= 1
+        if self._dashboard_refresh_suspensions == 0 and self._dashboard_refresh_timer:
+            self._dashboard_refresh_timer.resume()
+            self.call_after_refresh(self.refresh_sessions)
 
     def on_resize(self, event: events.Resize) -> None:
         self._set_layout_classes(event.size.width, event.size.height)

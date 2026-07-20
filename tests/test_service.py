@@ -4,13 +4,20 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from conftest import FakeBackend
-from wf_session_manager.errors import OwnershipError, StateError, TmuxError, ToolUnavailableError
+from wf_session_manager.errors import (
+    OwnershipError,
+    SessionNotFoundError,
+    StateError,
+    TmuxError,
+    ToolUnavailableError,
+)
 from wf_session_manager.models import (
     CreateRequest,
     DoctorReport,
     HealthCheck,
     HealthStatus,
     InputState,
+    OutputSource,
     RuntimeState,
     SessionMetadata,
     TaskState,
@@ -175,8 +182,83 @@ def test_logs_are_sanitized_and_report_truncation(
     )
     details = service.logs(created.name)
     assert details.preview_truncated
+    assert details.output_source is OutputSource.PANE
+    assert details.available_sources == (OutputSource.PANE,)
     assert "private" not in details.preview
     assert len(details.preview.splitlines()) == service.config.log_lines
+
+
+def test_logs_expose_live_and_saved_sources(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(
+        CreateRequest(name="sources", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    log_path.write_text("saved line\npassword=private\n", encoding="utf-8")
+    fake_backend.previews[created.name] = "live line"
+
+    automatic = service.logs(created.name)
+    assert automatic.output_source is OutputSource.SAVED
+    assert automatic.available_sources == (OutputSource.PANE, OutputSource.SAVED)
+    assert "saved line" in automatic.preview
+    assert "private" not in automatic.preview
+
+    live = service.logs(created.name, source=OutputSource.PANE)
+    assert live.output_source is OutputSource.PANE
+    assert live.preview == "live line"
+
+    saved = service.logs(created.name, source=OutputSource.SAVED)
+    assert saved.output_source is OutputSource.SAVED
+    assert "saved line" in saved.preview
+
+
+def test_logs_reject_unavailable_sources_and_use_saved_output_when_stopped(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(CreateRequest(name="stopped-logs", tool=Tool.SHELL, cwd=tmp_path))
+    with pytest.raises(StateError, match="saved log unavailable"):
+        service.logs(created.name, source=OutputSource.SAVED)
+
+    record = service.store.load(created.name)
+    assert record is not None
+    service.paths.logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    log_path.write_text("retained output\n", encoding="utf-8")
+    service.stop_session(created.name)
+
+    stopped = service.logs(created.name)
+    assert stopped.output_source is OutputSource.SAVED
+    assert stopped.available_sources == (OutputSource.SAVED,)
+    assert stopped.preview == "retained output"
+    with pytest.raises(SessionNotFoundError, match="live pane unavailable"):
+        service.logs(created.name, source=OutputSource.PANE)
+
+
+def test_live_logs_ignore_an_unsafe_saved_source(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(CreateRequest(name="unsafe-log", tool=Tool.SHELL, cwd=tmp_path))
+    record = service.store.load(created.name)
+    assert record is not None
+    service.paths.logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    log_path.symlink_to(tmp_path / "elsewhere.log")
+    fake_backend.previews[created.name] = "safe pane"
+
+    live = service.logs(created.name, source=OutputSource.PANE)
+    assert live.preview == "safe pane"
+    assert live.available_sources == (OutputSource.PANE,)
+    with pytest.raises(StateError, match="saved log unavailable"):
+        service.logs(created.name, source=OutputSource.SAVED)
 
 
 def test_create_validation_detects_duplicate_directory_and_git_project(

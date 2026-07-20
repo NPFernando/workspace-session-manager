@@ -103,6 +103,14 @@ bounded by both lines and UTF-8 bytes after sanitization. Optional persistent lo
 `pipe-pane` with an argument-array command that invokes WF's sanitizer and writes owner-only rotating
 files. Logging state is a tmux option and is never enabled for an unmanaged session.
 
+The Logs workspace makes its source explicit. Live reads capture the exact verified tmux session ID;
+Saved reads accept only the expected owner-only regular log file. Active sessions default to Live,
+while stopped sessions default to Saved. The service keeps its original automatic saved-first policy
+when no source is requested, preserving compatibility for CLI callers. TUI polling runs in one
+exclusive worker, rejects stale generations and changed session identities, and pauses the dashboard
+timer while Logs is open. Paused and find modes stop automatic reads and preserve a separate viewport
+for each source.
+
 Input-required status remains explicit metadata and is never inferred from arbitrary pane output.
 Conservative activity detectors may surface recognized usage-limit text in the inspector without
 changing runtime, task, or input state.

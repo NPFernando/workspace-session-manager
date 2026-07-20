@@ -895,15 +895,6 @@ Button.-error:focus {
     min-height: 6;
 }
 
-#log-meta {
-    dock: top;
-    height: 2;
-    padding: 0 2;
-    background: #151a1e;
-    color: #87959d;
-}
-
-#log-scroll,
 #detail-screen-scroll {
     height: 1fr;
     padding: 1 2;
@@ -911,11 +902,198 @@ Button.-error:focus {
     scrollbar-background: #101316;
 }
 
-#log-output,
 #detail-screen-content {
     height: auto;
     min-height: 100%;
     color: #cbd3d8;
+}
+
+.logs-workspace {
+    background: #101316;
+}
+
+.logs-workspace #log-header {
+    height: 2;
+    padding: 0 2;
+    content-align: left middle;
+}
+
+#log-status {
+    height: 1;
+    padding: 0 2;
+    background: #151a1e;
+    color: #aab5bb;
+    overflow: hidden;
+}
+
+#log-controls {
+    height: 2;
+    min-height: 2;
+    padding: 0 2;
+    background: #151a1e;
+    border-bottom: solid #303941;
+}
+
+#log-controls Button {
+    width: 10;
+    min-width: 10;
+    height: 1;
+    min-height: 1;
+    margin-right: 1;
+    border: none;
+    background: #20272c;
+    color: #aeb9bf;
+}
+
+#log-controls Button.active {
+    background: #24598a;
+    color: #ffffff;
+    text-style: bold;
+}
+
+#log-controls Button:focus {
+    border: none;
+    background: #316b9f;
+}
+
+#log-controls Button:disabled {
+    border: none;
+    background: #171c20;
+    color: #5f6a70;
+}
+
+#log-follow {
+    width: 12;
+    min-width: 12;
+}
+
+#log-output-meta {
+    width: 1fr;
+    height: 1;
+    color: #82919a;
+    text-align: right;
+    overflow: hidden;
+}
+
+#log-alert,
+#log-error {
+    display: none;
+    height: auto;
+    min-height: 2;
+    padding: 0 2;
+}
+
+.has-log-alert #log-alert {
+    display: block;
+    background: #302814;
+    color: #f0c66c;
+    border-bottom: solid #80682f;
+}
+
+.has-log-error #log-error {
+    display: block;
+    background: #31191c;
+    color: #ef8a91;
+    border-bottom: solid #8d3f47;
+}
+
+#log-find {
+    display: none;
+    height: 1;
+    min-height: 1;
+    padding: 0 2;
+    background: #18232c;
+}
+
+.finding #log-find {
+    display: block;
+}
+
+#log-find-label {
+    width: 7;
+    color: #7db7ee;
+    text-style: bold;
+}
+
+#log-find-input {
+    width: 1fr;
+    height: 1;
+    border: none;
+    background: #101820;
+}
+
+#log-find-input:focus {
+    border: none;
+    background: #162433;
+}
+
+#log-find-count {
+    width: 14;
+    padding-left: 1;
+    color: #9eabb3;
+    text-align: right;
+}
+
+#log-output {
+    height: 1fr;
+    min-height: 8;
+    padding: 0 1;
+    border: none;
+    background: #101316;
+    color: #d5dde1;
+    scrollbar-color: #47545c;
+    scrollbar-background: #101316;
+}
+
+#log-output:focus {
+    border-left: solid #3f6e9d;
+    background: #11161a;
+}
+
+#log-action-bar {
+    height: 2;
+    min-height: 2;
+    padding: 0 2;
+    background: #181d21;
+    color: #cbd3d8;
+    border-top: solid #303941;
+    overflow: hidden;
+}
+
+#log-small-terminal {
+    display: none;
+}
+
+.log-narrow #log-status {
+    height: 2;
+}
+
+.log-narrow #log-controls {
+    height: 2;
+}
+
+.log-narrow #log-action-bar {
+    height: 2;
+}
+
+.log-too-small #log-header,
+.log-too-small #log-status,
+.log-too-small #log-controls,
+.log-too-small #log-alert,
+.log-too-small #log-error,
+.log-too-small #log-find,
+.log-too-small #log-output,
+.log-too-small #log-action-bar {
+    display: none;
+}
+
+.log-too-small #log-small-terminal {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 3 4;
+    color: #d5dde1;
+    background: #101316;
 }
 
 .light Screen,
@@ -957,6 +1135,46 @@ Button.-error:focus {
 .light .section-body,
 .light .output-body {
     color: #20272b;
+}
+
+.light .logs-workspace,
+.light #log-output,
+.light #log-output:focus {
+    background: #f8fafb;
+    color: #20272b;
+}
+
+.light #log-header,
+.light #log-status,
+.light #log-controls,
+.light #log-action-bar {
+    background: #e7ecef;
+    color: #3d4a51;
+}
+
+.light #log-find {
+    background: #dce8f0;
+}
+
+.light #log-find-input,
+.light #log-find-input:focus {
+    background: #ffffff;
+    color: #20272b;
+}
+
+.light #log-output-meta,
+.light #log-find-count {
+    color: #52616a;
+}
+
+.light .has-log-alert #log-alert {
+    background: #fff5d7;
+    color: #795700;
+}
+
+.light .has-log-error #log-error {
+    background: #fdebed;
+    color: #9d2633;
 }
 
 .light #recent-output-scroll,
@@ -1030,9 +1248,27 @@ Button.-error:focus {
 .monochrome #create-submit-reason,
 .monochrome #manage-actions,
 .monochrome #manage-detail,
-.monochrome #manage-search {
+.monochrome #manage-search,
+.monochrome #log-output,
+.monochrome #log-output:focus {
     color: #e6e6e6;
     background: #080808;
+}
+
+.monochrome #log-header,
+.monochrome #log-status,
+.monochrome #log-controls,
+.monochrome #log-action-bar,
+.monochrome #log-find,
+.monochrome #log-alert,
+.monochrome #log-error {
+    color: #e6e6e6;
+    background: #111111;
+}
+
+.monochrome #log-controls Button.active {
+    color: #000000;
+    background: #d7d7d7;
 }
 
 .monochrome .manage-dialog,

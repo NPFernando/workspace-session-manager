@@ -9,6 +9,7 @@ from textual.pilot import Pilot
 from textual.widgets import Button, Input, LoadingIndicator, Static
 
 from conftest import FakeBackend
+from wf_session_manager.errors import TmuxError
 from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
 from wf_session_manager.service import SessionService
 from wf_session_manager.tui import (
@@ -16,6 +17,7 @@ from wf_session_manager.tui import (
     CreateSessionScreen,
     DiagnosticsScreen,
     IdentityOrganizationScreen,
+    LogScreen,
     StatusScreen,
     WFApp,
 )
@@ -122,6 +124,48 @@ def populated_app(
         default_cwd=Path("/"),
         no_animation=True,
     )
+
+
+def logs_app(
+    service: SessionService,
+    backend: FakeBackend,
+    *,
+    output: str = "",
+    tool: Tool = Tool.SHELL,
+) -> tuple[WFApp, str]:
+    name = add_session(
+        service,
+        backend,
+        "api-refactor",
+        tool,
+        note="Improve API authentication",
+        project="api-platform",
+        attached=True,
+    )
+    backend.previews[name] = output
+    return (
+        WFApp(
+            service,
+            monochrome=False,
+            hostname="wf-test-host",
+            onboarding=False,
+            no_animation=True,
+        ),
+        name,
+    )
+
+
+async def open_logs(pilot: Pilot, app: WFApp) -> LogScreen:
+    await pilot.press("l")
+    assert isinstance(app.screen, LogScreen)
+    screen = app.screen
+    for _ in range(80):
+        if not screen.refreshing and (screen.captured_at is not None or screen.error_message):
+            break
+        await pilot.pause(0.05)
+    assert not screen.refreshing
+    await pilot.pause()
+    return screen
 
 
 def test_wide_snapshot(
@@ -401,6 +445,183 @@ def test_manage_ascii_snapshot(
         await pilot.pause()
 
     assert snap_compare(app, terminal_size=(120, 35), run_before=open_manage)
+
+
+@pytest.mark.parametrize(
+    "terminal_size",
+    [(160, 45), (120, 35), (100, 30), (80, 24)],
+    ids=["160x45", "120x35", "100x30", "80x24"],
+)
+def test_logs_responsive_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    terminal_size: tuple[int, int],
+) -> None:
+    app, _name = logs_app(
+        service,
+        fake_backend,
+        output="\n".join(
+            (
+                "Loading project context",
+                "Validated API configuration",
+                "Completed authentication audit",
+                "Ready for the next workflow action",
+            )
+        ),
+    )
+
+    async def show_logs(pilot: Pilot) -> None:
+        await open_logs(pilot, app)
+
+    assert snap_compare(app, terminal_size=terminal_size, run_before=show_logs)
+
+
+def test_logs_saved_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    created = service.create(
+        CreateRequest(
+            name="saved-output",
+            tool=Tool.CLAUDE,
+            cwd=Path("/tmp"),
+            note="Review retained build output",
+            logging_enabled=True,
+        )
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    path = service.paths.logs_dir / f"{record.record_id}.log"
+    path.write_text("Sanitized build output\nDeployment checks passed\n", encoding="utf-8")
+    fake_backend.previews[created.name] = "Live pane is ready"
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async def show_saved(pilot: Pilot) -> None:
+        screen = await open_logs(pilot, app)
+        screen.query_one("#log-source-saved", Button).press()
+        for _ in range(80):
+            await pilot.pause(0.05)
+            if not screen.refreshing and screen.output_source.value == "saved":
+                break
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=show_saved)
+
+
+def test_logs_paused_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app, _name = logs_app(service, fake_backend, output="Line one\nLine two\nLine three")
+
+    async def show_paused(pilot: Pilot) -> None:
+        await open_logs(pilot, app)
+        await pilot.press("f")
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=show_paused)
+
+
+def test_logs_find_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app, _name = logs_app(
+        service,
+        fake_backend,
+        output="Project loaded\nAuthentication audit complete\nProject ready",
+    )
+
+    async def show_find(pilot: Pilot) -> None:
+        await open_logs(pilot, app)
+        await pilot.press("/", *"project")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=show_find)
+
+
+def test_logs_warning_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app, _name = logs_app(
+        service,
+        fake_backend,
+        tool=Tool.CODEX,
+        output="Warning: Codex usage limit reached\nRetry available: tomorrow at 10:00",
+    )
+
+    async def show_warning(pilot: Pilot) -> None:
+        await open_logs(pilot, app)
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=show_warning)
+
+
+def test_logs_error_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, _name = logs_app(service, fake_backend, output="Initial output")
+
+    def fail_logs(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        raise TmuxError("tmux socket unavailable")
+
+    monkeypatch.setattr(service, "logs", fail_logs)
+
+    async def show_error(pilot: Pilot) -> None:
+        await open_logs(pilot, app)
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=show_error)
+
+
+def test_logs_empty_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app, _name = logs_app(service, fake_backend)
+
+    async def show_empty(pilot: Pilot) -> None:
+        await open_logs(pilot, app)
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=show_empty)
+
+
+@pytest.mark.parametrize("theme", ["light", "monochrome"])
+def test_logs_theme_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    theme: str,
+) -> None:
+    app, _name = logs_app(service, fake_backend, output="Sanitized output\nReady")
+    app.ui_theme = theme
+    app.monochrome = theme == "monochrome"
+
+    async def show_logs(pilot: Pilot) -> None:
+        await open_logs(pilot, app)
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=show_logs)
+
+
+def test_logs_ascii_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WF_ASCII", "1")
+    app, _name = logs_app(service, fake_backend, output="Sanitized output\nReady")
+
+    async def show_logs(pilot: Pilot) -> None:
+        await open_logs(pilot, app)
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=show_logs)
 
 
 def test_identity_form_snapshot(
