@@ -27,7 +27,8 @@ owner-only files with no symlink path component.
 ## Destructive operations
 
 Rename, metadata edits, pinning, and deletion require ownership proof. CLI deletion requires typing
-the exact session name unless `--yes` is supplied. The TUI always requires exact-name confirmation.
+the exact session name unless `--yes` is supplied. The TUI exposes deletion only through More Actions,
+then requires a second exact-name confirmation whose default focus is Cancel.
 WF never sends `sudo` and has no system-wide install path. The standalone SSH-hook migration script
 defaults to a dry run, requires a literal match with the assessed hook, creates a backup, and changes
 the profile only with its separate approval flag.
@@ -40,6 +41,13 @@ installer invocation. A private process lock prevents concurrent installer invoc
 over the preserved command, virtual environment, ownership marker, or command symlink.
 Command switches use same-directory temporary symlinks and atomic rename, while pre-cutover backups
 refuse existing destinations instead of replacing them.
+
+## Pane output
+
+Preview and log captures use exact tmux IDs. Sanitization removes CSI, OSC, and control characters
+before Rich or Textual sees the content, then redacts common credentials, IP addresses, and the local
+home path. The sanitized result is bounded by configured line and byte limits and is never persisted.
+WF does not infer input-required state from captured output.
 
 Classic retirement verifies both the archive topology and the extracted executable hash before
 deleting the preservation copy. The archive checksum references only its basename and is verified at

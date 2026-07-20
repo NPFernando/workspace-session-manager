@@ -9,6 +9,7 @@ from wf_session_manager import cli
 from wf_session_manager.cli import Runtime
 from wf_session_manager.legacy import LegacyMetadataReader
 from wf_session_manager.migration import MigrationManager
+from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
 from wf_session_manager.paths import AppPaths
 from wf_session_manager.service import SessionService
 from wf_session_manager.store import MetadataStore
@@ -69,6 +70,40 @@ def test_default_list_hides_unmanaged_session(
     result = CliRunner().invoke(cli.app, ["list", "--json"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout) == []
+
+
+def test_explicit_edit_command_updates_task_input_and_project(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    session = service.create(CreateRequest(name="edit", tool=Tool.SHELL, cwd=tmp_path))
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "edit",
+            session.name,
+            "--state",
+            "waiting",
+            "--input",
+            "required",
+            "--project",
+            "workflow-core",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    updated = service.get(session.name)
+    assert updated.task_state is TaskState.WAITING
+    assert updated.input_state is InputState.REQUIRED
+    assert updated.project == "workflow-core"
+
+
+def test_legacy_organize_alias_is_hidden_from_help() -> None:
+    result = CliRunner().invoke(cli.app, ["--help"])
+    assert result.exit_code == 0
+    assert " edit " in result.stdout
+    assert " organize " not in result.stdout
 
 
 def test_migration_cli_preview_apply_status_and_rollback(

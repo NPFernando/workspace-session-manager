@@ -9,7 +9,7 @@ from conftest import FakeBackend
 from wf_session_manager.errors import MigrationError, StateError, TmuxError
 from wf_session_manager.legacy import LegacyMetadataReader
 from wf_session_manager.migration import MigrationJournal, MigrationManager
-from wf_session_manager.models import SessionMetadata, SessionState, Tool
+from wf_session_manager.models import SessionMetadata, TaskState, Tool
 from wf_session_manager.paths import AppPaths
 from wf_session_manager.store import MetadataStore
 
@@ -128,7 +128,7 @@ def test_apply_and_rollback_never_remove_tmux_session(
     assert applied.status == "applied"
     assert record is not None
     assert record.tmux_session_id == session.session_id
-    assert record.state is SessionState.WAITING
+    assert record.task_state is TaskState.WAITING
     assert fake_backend.get_option(session.name, "@wf_owner") == "wf-session-manager"
 
     rolled_back = manager.rollback(applied.migration_id)

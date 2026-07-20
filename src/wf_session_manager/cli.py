@@ -17,7 +17,7 @@ from wf_session_manager.config import AppConfig, load_config
 from wf_session_manager.errors import WFError
 from wf_session_manager.legacy import LegacyMetadataReader
 from wf_session_manager.migration import MigrationManager, MigrationPlan
-from wf_session_manager.models import CreateRequest, SessionState, Tool
+from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
 from wf_session_manager.paths import AppPaths
 from wf_session_manager.service import SessionService
 from wf_session_manager.store import MetadataStore
@@ -133,18 +133,20 @@ def list_command(
         typer.echo(json.dumps([item.model_dump(mode="json") for item in sessions], indent=2))
         return
     table = Table(show_header=True, header_style="bold cyan", box=None)
-    table.add_column("Status")
+    table.add_column("Runtime")
     table.add_column("Session")
     table.add_column("Tool")
-    table.add_column("State")
+    table.add_column("Task")
+    table.add_column("Input")
     table.add_column("Directory")
     table.add_column("Owner")
     for session in sessions:
         table.add_row(
-            "attached" if session.attached else "detached",
+            session.runtime.value,
             session.name,
             session.tool.value,
-            session.state,
+            session.task_state.value.replace("_", " "),
+            session.input_state.value,
             str(session.cwd),
             "managed" if session.owned else "unmanaged",
         )
@@ -168,7 +170,9 @@ def inspect(
     session = details.session
     console.print(f"[bold cyan]{session.name}[/bold cyan]")
     console.print(f"Tool: {session.tool.value}")
-    console.print(f"Status: {'attached' if session.attached else 'detached'}")
+    console.print(f"Runtime: {session.runtime.value}")
+    console.print(f"Task: {session.task_state.value.replace('_', ' ')}")
+    console.print(f"Input: {session.input_state.value}")
     console.print("Ownership: managed")
     console.print(f"Directory: {session.cwd}")
     console.print(f"Note: {session.note or '-'}")
@@ -182,13 +186,21 @@ def create(
     tool: Annotated[Tool, typer.Option("--tool", "-t")],
     name: Annotated[str, typer.Option("--name", "-n")],
     cwd: Annotated[Path | None, typer.Option("--cwd", "-C")] = None,
+    project: Annotated[str, typer.Option("--project")] = "",
     note: Annotated[str, typer.Option("--note")] = "",
     tag: Annotated[list[str] | None, typer.Option("--tag")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     attach: Annotated[bool, typer.Option("--attach")] = False,
 ) -> None:
     """Create a detached, persistent WF-owned session."""
-    request = CreateRequest(name=name, tool=tool, cwd=cwd or Path.cwd(), note=note, tags=tag or [])
+    request = CreateRequest(
+        name=name,
+        tool=tool,
+        cwd=cwd or Path.cwd(),
+        project=project,
+        note=note,
+        tags=tag or [],
+    )
     service = runtime_from_context(context).service()
     try:
         session = service.create(request, dry_run=dry_run)
@@ -232,20 +244,43 @@ def note(context: typer.Context, name: str, text: str) -> None:
     typer.echo(f"Updated note for {name}")
 
 
-@app.command()
-def organize(
+@app.command("edit")
+def edit_session(
     context: typer.Context,
     name: str,
     tag: Annotated[list[str] | None, typer.Option("--tag")] = None,
-    state: Annotated[SessionState | None, typer.Option("--state")] = None,
+    state: Annotated[TaskState | None, typer.Option("--state")] = None,
+    input_state: Annotated[InputState | None, typer.Option("--input")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
     pin: Annotated[bool | None, typer.Option("--pin/--unpin")] = None,
 ) -> None:
     """Set tags, task state, or pin status on a WF-owned session."""
     try:
-        runtime_from_context(context).service().organize(name, tags=tag, state=state, pinned=pin)
+        runtime_from_context(context).service().organize(
+            name,
+            tags=tag,
+            state=state,
+            input_state=input_state,
+            project=project,
+            pinned=pin,
+        )
     except WFError as error:
         abort(error)
     typer.echo(f"Updated {name}")
+
+
+@app.command("organize", hidden=True)
+def organize_compatibility(
+    context: typer.Context,
+    name: str,
+    tag: Annotated[list[str] | None, typer.Option("--tag")] = None,
+    state: Annotated[TaskState | None, typer.Option("--state")] = None,
+    input_state: Annotated[InputState | None, typer.Option("--input")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    pin: Annotated[bool | None, typer.Option("--pin/--unpin")] = None,
+) -> None:
+    """Compatibility alias for the explicit edit command."""
+    edit_session(context, name, tag, state, input_state, project, pin)
 
 
 @app.command()

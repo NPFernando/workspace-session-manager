@@ -68,6 +68,14 @@ State directories use mode `0700`; files and locks use `0600`. Writes occur thro
 in the destination directory, followed by `fsync` and atomic `os.replace`. Linux `flock` serializes
 writers.
 
+Schema-v2 metadata separates user-assigned task and input states. Schema-v1 `active`, `done`, and
+`paused` values are normalized to `in_progress`, `completed`, and `waiting` when read. A record is
+written as schema v2 only when it is created or explicitly edited.
+
+Runtime state is read from tmux. Attached-client count distinguishes attached and detached sessions;
+dead-pane status distinguishes stopped and failed sessions. Session activity timestamps come from
+tmux and are combined conservatively with WF's last-attach timestamp.
+
 ## Attach behavior
 
 Outside tmux, WF runs `tmux attach-session`. Inside tmux, it runs `tmux switch-client`. tmux owns the
@@ -75,6 +83,7 @@ long-running process, so closing SSH does not terminate the session.
 
 ## Preview privacy
 
-Pane previews are captured on demand and never persisted by the new application. ANSI and control
-sequences are stripped, common token/password forms are redacted, local home paths are shortened,
-and output is line-bounded before rendering.
+Pane previews are captured on demand and never persisted by the new application. ANSI, OSC, and
+control sequences are stripped; common token/password forms are redacted; local home paths are
+shortened; and output is bounded by both lines and UTF-8 bytes after sanitization. Input-required
+status is explicit metadata and is never inferred from arbitrary pane output.

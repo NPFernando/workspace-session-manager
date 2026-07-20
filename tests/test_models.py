@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from wf_session_manager.models import SessionMetadata, Tool
-from wf_session_manager.security import bounded_preview, redact_text
+from wf_session_manager.models import InputState, SessionMetadata, TaskState, Tool
+from wf_session_manager.security import bounded_output, bounded_preview, redact_text
 from wf_session_manager.service import normalized_session_name, slugify_name
 
 
@@ -41,3 +41,42 @@ def test_preview_is_sanitized_redacted_and_bounded() -> None:
     assert "192.168" not in redacted
     assert "~/private" in redacted
     assert bounded_preview(source, 2).splitlines()[-1] == "last"
+
+
+@pytest.mark.parametrize(
+    ("legacy", "current"),
+    [
+        ("active", TaskState.IN_PROGRESS),
+        ("waiting", TaskState.WAITING),
+        ("blocked", TaskState.BLOCKED),
+        ("done", TaskState.COMPLETED),
+        ("paused", TaskState.WAITING),
+    ],
+)
+def test_schema_v1_metadata_is_normalized_without_a_file_migration(
+    legacy: str,
+    current: TaskState,
+) -> None:
+    record = SessionMetadata.model_validate(
+        {
+            "schema_version": 1,
+            "tmux_session_id": "$1",
+            "name": "claude-test",
+            "tool": "claude",
+            "cwd": "/tmp",
+            "state": legacy,
+        }
+    )
+    assert record.schema_version == 2
+    assert record.task_state is current
+    assert record.input_state is InputState.NONE
+    assert "state" not in record.model_dump()
+
+
+def test_output_is_bounded_by_lines_and_utf8_bytes() -> None:
+    result = bounded_output("one\ntwo\nthree\nfour", max_lines=3, max_bytes=10)
+    assert result.truncated
+    assert result.text == "three\nfour"
+    unicode_result = bounded_output("start\n" + "x" * 20 + "£", max_lines=10, max_bytes=8)
+    assert unicode_result.truncated
+    assert "�" not in unicode_result.text

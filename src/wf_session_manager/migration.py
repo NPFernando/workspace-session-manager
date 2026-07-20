@@ -26,6 +26,7 @@ from wf_session_manager.models import (
     SessionState,
     TmuxSession,
     Tool,
+    normalize_task_state,
     utc_now,
 )
 from wf_session_manager.paths import AppPaths
@@ -104,6 +105,7 @@ class MigrationItem(BaseModel):
     tmux_session_id: str
     tool: Tool
     cwd: Path
+    project: str = ""
     note: Annotated[str, Field(max_length=2000)] = ""
     tags: Annotated[list[str], Field(max_length=12)] = Field(default_factory=list)
     state: SessionState = SessionState.ACTIVE
@@ -288,6 +290,7 @@ class MigrationManager:
             tmux_session_id=session.session_id,
             tool=legacy.tool or infer_tool(session.name, session.current_command),
             cwd=cwd,
+            project=legacy.project.name if legacy.project else "",
             note=legacy.note,
             tags=legacy.tags,
             state=state,
@@ -398,9 +401,10 @@ class MigrationManager:
                 name=item.name,
                 tool=item.tool,
                 cwd=item.cwd,
+                project=item.project,
                 note=item.note,
                 tags=item.tags,
-                state=item.state,
+                task_state=normalize_task_state(item.state),
                 pinned=item.pinned,
                 created_at=item.created_at,
                 updated_at=now,

@@ -26,16 +26,19 @@ from wf_session_manager.models import (
     DoctorReport,
     HealthCheck,
     HealthStatus,
+    InputState,
+    RuntimeState,
     SessionDetails,
     SessionMetadata,
-    SessionState,
     SessionView,
+    TaskState,
     TmuxSession,
     Tool,
+    normalize_task_state,
     utc_now,
 )
 from wf_session_manager.paths import AppPaths
-from wf_session_manager.security import bounded_preview
+from wf_session_manager.security import bounded_output
 from wf_session_manager.store import MetadataStore
 
 
@@ -111,6 +114,23 @@ def command_available(command: tuple[str, ...]) -> bool:
     return shutil.which(executable) is not None
 
 
+def runtime_state(session: TmuxSession) -> RuntimeState:
+    if session.pane_dead:
+        if session.pane_dead_status not in (None, 0):
+            return RuntimeState.FAILED
+        return RuntimeState.STOPPED
+    if session.attached:
+        return RuntimeState.ATTACHED
+    return RuntimeState.DETACHED
+
+
+def legacy_task_state(value: str) -> TaskState:
+    try:
+        return normalize_task_state(value)
+    except ValueError:
+        return TaskState.UNSPECIFIED
+
+
 class SessionService:
     def __init__(
         self,
@@ -167,22 +187,41 @@ class SessionService:
             if legacy and legacy.cwd
             else session.cwd,
             current_command=session.current_command,
+            runtime=runtime_state(session),
             attached=session.attached,
             attached_clients=session.attached_clients,
             windows=session.windows,
             created_at=session.created_at,
+            project=(
+                record.project
+                if owned and record
+                else legacy.project.name
+                if legacy and legacy.project
+                else ""
+            ),
             note=record.note if owned and record else legacy.note if legacy else "",
             tags=record.tags if owned and record else [],
-            state=record.state.value if owned and record else legacy.state if legacy else "active",
+            task_state=(
+                record.task_state
+                if owned and record
+                else legacy_task_state(legacy.state)
+                if legacy
+                else TaskState.UNSPECIFIED
+            ),
+            input_state=record.input_state if owned and record else InputState.NONE,
             pinned=record.pinned if owned and record else legacy.pinned if legacy else False,
             owned=owned,
             legacy_metadata=legacy is not None,
-            last_active_at=(
-                record.last_attached_at
-                if owned and record
-                else legacy.last_used
-                if legacy
-                else None
+            last_active_at=max(
+                filter(
+                    None,
+                    (
+                        session.last_activity_at,
+                        record.last_attached_at if owned and record else None,
+                        legacy.last_used if legacy else None,
+                        session.created_at,
+                    ),
+                )
             ),
         )
 
@@ -195,11 +234,34 @@ class SessionService:
     def inspect(self, name: str) -> SessionDetails:
         session = self.get(name)
         output = self.backend.capture_pane(
-            name, self.config.preview_lines, expected_id=session.session_id
+            name, self.config.preview_lines + 1, expected_id=session.session_id
+        )
+        preview = bounded_output(
+            output,
+            max_lines=self.config.preview_lines,
+            max_bytes=self.config.preview_bytes,
         )
         return SessionDetails(
             session=session,
-            preview=bounded_preview(output, self.config.preview_lines),
+            preview=preview.text,
+            preview_truncated=preview.truncated,
+        )
+
+    def logs(self, name: str) -> SessionDetails:
+        """Return a larger, still bounded and sanitized pane capture."""
+        session = self.get(name)
+        output = self.backend.capture_pane(
+            name, self.config.log_lines + 1, expected_id=session.session_id
+        )
+        preview = bounded_output(
+            output,
+            max_lines=self.config.log_lines,
+            max_bytes=self.config.log_bytes,
+        )
+        return SessionDetails(
+            session=session,
+            preview=preview.text,
+            preview_truncated=preview.truncated,
         )
 
     def create(self, request: CreateRequest, *, dry_run: bool = False) -> SessionView:
@@ -231,14 +293,18 @@ class SessionService:
                 tool=request.tool,
                 cwd=cwd,
                 current_command=Path(profile.command[0]).name,
+                runtime=RuntimeState.DETACHED,
                 attached=False,
                 attached_clients=0,
                 windows=1,
                 created_at=now,
+                project=request.project,
                 note=request.note,
                 tags=request.tags,
-                state=SessionState.ACTIVE.value,
+                task_state=request.task_state,
+                input_state=request.input_state,
                 owned=True,
+                last_active_at=now,
             )
 
         agent_command = None if request.tool is Tool.SHELL else profile.command
@@ -253,8 +319,11 @@ class SessionService:
             name=name,
             tool=request.tool,
             cwd=cwd,
+            project=request.project,
             note=request.note,
             tags=request.tags,
+            task_state=request.task_state,
+            input_state=request.input_state,
         )
         try:
             self.store.save(record)
@@ -305,7 +374,9 @@ class SessionService:
         name: str,
         *,
         tags: list[str] | None = None,
-        state: SessionState | None = None,
+        state: TaskState | None = None,
+        input_state: InputState | None = None,
+        project: str | None = None,
         pinned: bool | None = None,
     ) -> SessionView:
         record = self._owned_record(name)
@@ -313,7 +384,11 @@ class SessionService:
         if tags is not None:
             updates["tags"] = tags
         if state is not None:
-            updates["state"] = state
+            updates["task_state"] = state
+        if input_state is not None:
+            updates["input_state"] = input_state
+        if project is not None:
+            updates["project"] = project
         if pinned is not None:
             updates["pinned"] = pinned
         updated = SessionMetadata.model_validate(record.model_copy(update=updates).model_dump())

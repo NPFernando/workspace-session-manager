@@ -32,6 +32,9 @@ class FakeBackend:
         cwd: Path = Path("/tmp"),
         command: str = "bash",
         clients: int = 0,
+        last_activity_at: datetime | None = None,
+        pane_dead: bool = False,
+        pane_dead_status: int | None = None,
     ) -> TmuxSession:
         self._counter += 1
         session = TmuxSession(
@@ -42,6 +45,9 @@ class FakeBackend:
             windows=1,
             cwd=cwd,
             current_command=command,
+            last_activity_at=last_activity_at,
+            pane_dead=pane_dead,
+            pane_dead_status=pane_dead_status,
         )
         self.sessions[name] = session
         return session

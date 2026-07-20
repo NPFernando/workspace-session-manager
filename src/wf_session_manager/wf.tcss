@@ -1,129 +1,295 @@
 Screen {
-    background: #111417;
-    color: #e8ecef;
+    background: #101316;
+    color: #e8edf0;
 }
 
-#brand {
+#app-header, #log-header {
     dock: top;
-    height: 2;
-    padding: 0 2;
-    background: #161c20;
-    color: #7fd1b9;
-    text-style: bold;
+    height: 3;
+    padding: 1 2 0 2;
+    background: #181d21;
+    border-bottom: solid #303941;
+    overflow: hidden;
 }
 
-#subtitle {
+#search-mode {
     dock: top;
-    height: 1;
+    display: none;
+    height: 3;
     padding: 0 2;
-    background: #161c20;
-    color: #a9b4bc;
+    background: #181d21;
+    border-bottom: solid #303941;
+}
+
+.searching #search-mode {
+    display: block;
+}
+
+#search-label {
+    width: 9;
+    height: 3;
+    padding-top: 1;
+    color: #9eabb3;
 }
 
 #search {
-    dock: top;
+    width: 1fr;
     height: 3;
-    margin: 1 2 0 2;
-    border: tall #34424b;
-    background: #171c20;
+    border: tall #3f6e9d;
+    background: #11161a;
 }
 
 #search:focus {
-    border: tall #7fd1b9;
+    border: tall #66aaff;
+}
+
+#search-hint {
+    width: 25;
+    height: 3;
+    padding: 1 0 0 2;
+    color: #82919a;
 }
 
 #workspace {
     height: 1fr;
-    margin: 1 2;
 }
 
 #session-pane {
-    width: 62%;
-    min-width: 48;
-    border-right: solid #34424b;
-    padding-right: 1;
+    width: 36%;
+    min-width: 36;
+    border-right: solid #303941;
+    background: #12171a;
 }
 
-#detail-pane {
-    width: 38%;
-    min-width: 32;
-    padding-left: 2;
+.medium #session-pane {
+    width: 42%;
 }
 
 #sessions {
     height: 1fr;
-    background: #111417;
+    padding: 0 1;
+    background: #12171a;
+    border: none;
+    scrollbar-color: #47545c;
+    scrollbar-background: #171c20;
 }
 
-DataTable > .datatable--header {
-    background: #20282e;
-    color: #d6e2e8;
+OptionList > .option-list--option {
+    padding: 0 1;
+}
+
+OptionList > .option-list--option-highlighted {
+    background: #24598a;
+    color: #ffffff;
+    text-style: none;
+}
+
+OptionList > .option-list--option-disabled {
+    color: #7e8c95;
+    background: #12171a;
+    padding-top: 1;
+}
+
+#detail-pane {
+    width: 64%;
+    min-width: 40;
+    background: #101316;
+}
+
+.medium #detail-pane {
+    width: 58%;
+}
+
+#identity {
+    height: auto;
+    min-height: 4;
+    padding: 1 2;
+    background: #161b1f;
+    border-bottom: solid #303941;
+}
+
+#inspector-scroll {
+    height: 1fr;
+    padding: 0 2 1 2;
+    scrollbar-color: #47545c;
+    scrollbar-background: #101316;
+}
+
+#inspector-actions-title {
+    height: 2;
+    padding: 0 2;
+}
+
+#session-actions {
+    height: 2;
+    padding: 0 2;
+    overflow: hidden;
+}
+
+.section-title {
+    height: 2;
+    padding-top: 1;
+    color: #8fa1ac;
     text-style: bold;
 }
 
-DataTable > .datatable--cursor {
-    background: #28433e;
-    color: #ffffff;
+.section-body {
+    height: auto;
+    min-height: 1;
+    color: #dce3e7;
 }
 
-#status {
+.output-body {
+    min-height: 5;
+    padding: 1;
+    background: #0b0e10;
+    border-left: solid #303941;
+}
+
+.medium #identity,
+.short #identity {
+    min-height: 3;
+    padding: 0 2;
+}
+
+.medium #inspector-scroll,
+.short #inspector-scroll {
+    padding: 0 2;
+}
+
+.medium .section-title,
+.short .section-title {
+    height: 1;
+    padding-top: 0;
+}
+
+.medium .output-body,
+.short .output-body {
+    min-height: 3;
+}
+
+.medium #inspector-actions-title,
+.short #inspector-actions-title {
+    height: 1;
+}
+
+#action-bar {
+    dock: bottom;
+    height: 2;
+    padding: 0 2;
+    background: #181d21;
+    color: #c4cdd2;
+    border-top: solid #303941;
+    content-align: left middle;
+    overflow: hidden;
+}
+
+#small-terminal {
+    display: none;
+    width: 100%;
+    height: 100%;
+    content-align: center middle;
+    text-align: center;
+    color: #dce3e7;
+}
+
+.narrow #session-pane {
+    width: 100%;
+    min-width: 0;
+    border-right: none;
+}
+
+.narrow #detail-pane {
+    display: none;
+}
+
+.narrow #app-header {
+    height: 2;
+    padding-top: 0;
+}
+
+.narrow #action-bar {
     height: 2;
     padding: 0 1;
-    color: #9aa8b0;
 }
 
-#detail-title {
-    height: 2;
-    color: #7fd1b9;
+.too-small #app-header,
+.too-small #search-mode,
+.too-small #workspace,
+.too-small #action-bar {
+    display: none;
+}
+
+.too-small #small-terminal {
+    display: block;
+}
+
+.monochrome Screen,
+.monochrome #app-header,
+.monochrome #session-pane,
+.monochrome #detail-pane,
+.monochrome #action-bar,
+.monochrome OptionList > .option-list--option-disabled {
+    color: #e6e6e6;
+    background: #111111;
+}
+
+.monochrome OptionList > .option-list--option-highlighted {
+    color: #000000;
+    background: #d7d7d7;
     text-style: bold;
-}
-
-#details {
-    height: auto;
-    min-height: 10;
-    padding-bottom: 1;
-}
-
-#preview {
-    height: 1fr;
-    min-height: 8;
-    padding: 1;
-    border: solid #34424b;
-    background: #0c0f11;
-    color: #c6d0d5;
-    overflow-y: auto;
-}
-
-Footer {
-    background: #161c20;
 }
 
 .dialog {
-    width: 64;
+    width: 68;
     max-width: 92%;
     height: auto;
     max-height: 92%;
     align: center middle;
     padding: 1 2;
-    border: round #59717d;
-    background: #181e22;
+    border: solid #596b76;
+    background: #181d21;
+    scrollbar-color: #47545c;
+}
+
+.small-dialog {
+    width: 58;
+}
+
+.message-dialog {
+    height: auto;
+    max-height: 80%;
 }
 
 .dialog-title {
     height: 2;
-    color: #7fd1b9;
+    color: #eef3f6;
     text-style: bold;
+}
+
+.dialog-context, .confirm-name {
+    height: auto;
+    margin-bottom: 1;
+    color: #9eabb3;
 }
 
 .field-label {
     height: 1;
     margin-top: 1;
-    color: #b9c4ca;
+    color: #aeb9bf;
 }
 
 .dialog Input,
 .dialog Select {
     width: 100%;
+}
+
+#command-preview {
+    height: auto;
+    min-height: 2;
+    padding: 0 1;
+    background: #0b0e10;
+    color: #cbd3d8;
 }
 
 .dialog-actions {
@@ -136,46 +302,38 @@ Footer {
     margin-left: 1;
 }
 
+#more-dialog Button, #message-close {
+    width: 100%;
+    margin-top: 1;
+}
+
 .danger-dialog {
-    border: round #b85c5c;
+    border: solid #b94f59;
+}
+
+.danger-title {
+    color: #ef6b73;
 }
 
 .confirm-copy {
+    height: auto;
     margin-bottom: 1;
 }
 
-.compact #workspace {
-    layout: vertical;
+#message-content {
+    height: auto;
+    margin-bottom: 1;
 }
 
-.compact #session-pane,
-.compact #detail-pane {
-    width: 100%;
-    min-width: 0;
+#log-scroll, #detail-screen-scroll {
+    height: 1fr;
+    padding: 1 2;
+    scrollbar-color: #47545c;
+    scrollbar-background: #101316;
 }
 
-.compact #session-pane {
-    height: 58%;
-    border-right: none;
-    border-bottom: solid #34424b;
-    padding-right: 0;
-    padding-bottom: 1;
-}
-
-.compact #detail-pane {
-    height: 42%;
-    padding-left: 0;
-    padding-top: 1;
-}
-
-.short #subtitle {
-    display: none;
-}
-
-.short #search {
-    margin-top: 0;
-}
-
-.short #details {
-    min-height: 7;
+#log-output, #detail-screen-content {
+    height: auto;
+    min-height: 100%;
+    color: #cbd3d8;
 }

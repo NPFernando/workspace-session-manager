@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 ANSI_CSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -36,5 +37,34 @@ def redact_text(text: str, home: Path | None = None) -> str:
 
 def bounded_preview(text: str, max_lines: int) -> str:
     """Bound output after redaction to prevent oversized terminal payloads."""
-    lines = redact_text(text).splitlines()
-    return "\n".join(lines[-max_lines:])
+    return bounded_output(text, max_lines=max_lines).text
+
+
+@dataclass(frozen=True, slots=True)
+class BoundedOutput:
+    text: str
+    truncated: bool
+
+
+def bounded_output(text: str, *, max_lines: int, max_bytes: int = 32_768) -> BoundedOutput:
+    """Sanitize and retain the newest complete output within line and byte limits."""
+    clean = redact_text(text)
+    lines = clean.splitlines()
+    truncated = len(lines) > max_lines
+    selected = lines[-max_lines:]
+    kept: list[str] = []
+    used = 0
+    for line in reversed(selected):
+        line_size = len(line.encode("utf-8"))
+        additional = line_size + (1 if kept else 0)
+        if used + additional > max_bytes:
+            truncated = True
+            break
+        kept.append(line)
+        used += additional
+    if not kept and selected:
+        truncated = True
+        rendered = selected[-1].encode("utf-8")[-max_bytes:].decode("utf-8", errors="ignore")
+    else:
+        rendered = "\n".join(reversed(kept))
+    return BoundedOutput(text=rendered, truncated=truncated)

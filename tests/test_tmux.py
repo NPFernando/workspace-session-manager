@@ -1,5 +1,6 @@
 import subprocess
 from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 
@@ -33,13 +34,27 @@ class RecordingRunner:
 
 def test_list_sessions_parses_machine_format() -> None:
     line = FIELD_SEPARATOR.join(
-        ("$3", "claude-api", "1767225600", "1", "2", "/srv/api", "claude", "")
+        (
+            "$3",
+            "claude-api",
+            "1767225600",
+            "1767225660",
+            "1",
+            "2",
+            "/srv/api",
+            "claude",
+            "",
+            "0",
+            "",
+        )
     )
     runner = RecordingRunner(stdout=f"{line}\n")
     sessions = TmuxBackend(runner).list_sessions()
     assert sessions[0].name == "claude-api"
     assert sessions[0].attached
     assert sessions[0].cwd.as_posix() == "/srv/api"
+    assert sessions[0].last_activity_at is not None
+    assert not sessions[0].pane_dead
     assert runner.calls[0][:2] == ("tmux", "list-sessions")
 
 
@@ -86,7 +101,19 @@ def test_unset_session_option_uses_exact_pane_target() -> None:
 
 def live_session_line(session_id: str = "$3", name: str = "claude-api") -> str:
     return FIELD_SEPARATOR.join(
-        (session_id, name, "1767225600", "0", "1", "/srv/api", "claude", "")
+        (
+            session_id,
+            name,
+            "1767225600",
+            "1767225660",
+            "0",
+            "1",
+            "/srv/api",
+            "claude",
+            "",
+            "0",
+            "",
+        )
     )
 
 
@@ -159,3 +186,21 @@ def test_expected_id_mismatch_never_runs_final_tmux_command() -> None:
     with pytest.raises(TmuxError, match="expected tmux ID \\$original"):
         TmuxBackend(runner).kill_session("claude-api", expected_id="$original")
     assert runner.calls == [("tmux", "list-sessions", "-F", TMUX_FORMAT)]
+
+
+def test_named_socket_is_applied_to_every_tmux_command() -> None:
+    runner = RecordingRunner(stdout="tmux 3.4\n")
+    assert TmuxBackend(runner, socket_name="wf-test").version() == "tmux 3.4"
+    assert runner.calls == [("tmux", "-L", "wf-test", "-V")]
+
+
+def test_socket_path_is_applied_to_every_tmux_command(tmp_path: Path) -> None:
+    socket_path = tmp_path / "tmux.sock"
+    runner = RecordingRunner(stdout="tmux 3.4\n")
+    assert TmuxBackend(runner, socket_path=socket_path).version() == "tmux 3.4"
+    assert runner.calls == [("tmux", "-S", str(socket_path), "-V")]
+
+
+def test_socket_name_and_path_are_mutually_exclusive(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not both"):
+        TmuxBackend(socket_name="wf-test", socket_path=tmp_path / "tmux.sock")

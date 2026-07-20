@@ -20,11 +20,14 @@ TMUX_FORMAT = "\x1f".join(
         "#{session_id}",
         "#{session_name}",
         "#{session_created}",
+        "#{session_activity}",
         "#{session_attached}",
         "#{session_windows}",
         "#{pane_current_path}",
         "#{pane_current_command}",
         "#{@wf_owner}",
+        "#{pane_dead}",
+        "#{pane_dead_status}",
     )
 )
 
@@ -58,8 +61,27 @@ def subprocess_runner(
 class TmuxBackend:
     """Small tmux API with no implicit ownership decisions."""
 
-    def __init__(self, runner: Runner = subprocess_runner) -> None:
+    def __init__(
+        self,
+        runner: Runner = subprocess_runner,
+        socket_name: str | None = None,
+        socket_path: Path | None = None,
+    ) -> None:
+        if socket_name is not None and socket_path is not None:
+            raise ValueError("choose a tmux socket name or socket path, not both")
         self._runner = runner
+        self._socket_name = socket_name
+        self._socket_path = socket_path
+
+    def _command(self, *args: str) -> tuple[str, ...]:
+        prefix: tuple[str, ...]
+        if self._socket_path is not None:
+            prefix = ("tmux", "-S", str(self._socket_path))
+        elif self._socket_name is not None:
+            prefix = ("tmux", "-L", self._socket_name)
+        else:
+            prefix = ("tmux",)
+        return (*prefix, *args)
 
     def _run(
         self,
@@ -69,7 +91,7 @@ class TmuxBackend:
         allow_no_server: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         try:
-            result = self._runner(("tmux", *args), capture=capture, timeout=timeout)
+            result = self._runner(self._command(*args), capture=capture, timeout=timeout)
         except (OSError, subprocess.SubprocessError) as error:
             raise TmuxError(f"unable to run tmux: {error}") from error
 
@@ -98,9 +120,21 @@ class TmuxBackend:
             if not line:
                 continue
             fields = line.split(FIELD_SEPARATOR)
-            if len(fields) != 8:
+            if len(fields) != 11:
                 raise TmuxError("tmux returned an unexpected session record")
-            session_id, name, created, attached, windows, cwd, command, owner = fields
+            (
+                session_id,
+                name,
+                created,
+                activity,
+                attached,
+                windows,
+                cwd,
+                command,
+                owner,
+                pane_dead,
+                pane_dead_status,
+            ) = fields
             try:
                 sessions.append(
                     TmuxSession(
@@ -112,6 +146,9 @@ class TmuxBackend:
                         cwd=Path(cwd or "/"),
                         current_command=command,
                         wf_owner=owner or None,
+                        last_activity_at=datetime.fromtimestamp(int(activity), tz=UTC),
+                        pane_dead=pane_dead == "1",
+                        pane_dead_status=int(pane_dead_status) if pane_dead_status else None,
                     )
                 )
             except (ValueError, TypeError) as error:
@@ -195,7 +232,7 @@ class TmuxBackend:
     def get_option(self, name: str, option: str, expected_id: str | None = None) -> str | None:
         target = self._session_target(name, expected_id)
         result = self._runner(
-            ("tmux", "show-options", "-qv", "-t", f"{target}:", option),
+            self._command("show-options", "-qv", "-t", f"{target}:", option),
             capture=True,
             timeout=5.0,
         )

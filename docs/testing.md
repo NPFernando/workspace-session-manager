@@ -15,9 +15,16 @@ They do not access the live tmux server or operational metadata.
 WF_RUN_TMUX_INTEGRATION=1 pytest -m integration -q --no-cov
 ```
 
-The integration tests create random `wf-it-...` sessions. Cleanup requires the generated name and
-exact tmux ID. One test covers managed creation; the other removes its test owner marker, adopts the
-same exact ID, rolls adoption back, and verifies that the tmux session remained alive throughout.
+The integration tests use `tmux -S` with a socket inside pytest's temporary directory. Cleanup
+requires the generated socket path, session name, and exact tmux ID. One test covers managed
+creation; the other removes its test owner marker, adopts the same exact ID, rolls adoption back, and
+verifies that the tmux session remained alive throughout.
+
+## Visual regression
+
+`pytest-textual-snapshot` records deterministic SVG frames for wide, medium, narrow, empty, warning,
+failure, monochrome, and long-content states. Reviewed before/after frames at `160x45`, `120x35`,
+`100x30`, and `80x24` are stored under `docs/screenshots/`.
 
 ## Manual TUI matrix
 
@@ -26,7 +33,7 @@ run `uv run wf-dev` against the managed inventory. Use `wf-dev list --all` for r
 
 Check at least:
 
-- `80x24`, `100x28`, and `120x36`
+- `80x24`, `100x30`, `120x35`, and `160x45`
 - SSH disconnect and reconnect after creating a disposable `wf-dev` session
 - inside-tmux switching and outside-tmux attachment
 - missing Claude, Codex, and Hermes commands

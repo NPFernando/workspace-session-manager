@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SESSION_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
 
@@ -26,12 +26,53 @@ class Tool(StrEnum):
     SHELL = "shell"
 
 
+class RuntimeState(StrEnum):
+    ATTACHED = "attached"
+    DETACHED = "detached"
+    STOPPED = "stopped"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
+class TaskState(StrEnum):
+    IN_PROGRESS = "in_progress"
+    WAITING = "waiting"
+    NEEDS_INPUT = "needs_input"
+    BLOCKED = "blocked"
+    COMPLETED = "completed"
+    UNSPECIFIED = "unspecified"
+
+
 class SessionState(StrEnum):
+    """Schema-v1 state values retained for migration plan compatibility."""
+
     ACTIVE = "active"
     WAITING = "waiting"
     BLOCKED = "blocked"
     DONE = "done"
     PAUSED = "paused"
+
+
+class InputState(StrEnum):
+    NONE = "none"
+    REQUIRED = "required"
+
+
+LEGACY_TASK_STATES = {
+    "active": TaskState.IN_PROGRESS,
+    "done": TaskState.COMPLETED,
+    "paused": TaskState.WAITING,
+}
+
+
+def normalize_task_state(value: object) -> TaskState:
+    """Normalize schema-v1 and legacy launcher task state values."""
+    if isinstance(value, TaskState):
+        return value
+    raw = str(value or "").strip().lower().replace(" ", "_")
+    if raw in LEGACY_TASK_STATES:
+        return LEGACY_TASK_STATES[raw]
+    return TaskState(raw or TaskState.UNSPECIFIED)
 
 
 class SessionName(BaseModel):
@@ -63,6 +104,9 @@ class TmuxSession(BaseModel):
     cwd: Path
     current_command: str
     wf_owner: str | None = None
+    last_activity_at: datetime | None = None
+    pane_dead: bool = False
+    pane_dead_status: int | None = None
 
     @property
     def attached(self) -> bool:
@@ -73,20 +117,35 @@ class SessionMetadata(BaseModel):
     """WF-owned state. A tmux ID prevents accidental adoption after name reuse."""
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     record_id: UUID = Field(default_factory=uuid4)
     owner: Literal["wf-session-manager"] = "wf-session-manager"
     tmux_session_id: str
     name: str
     tool: Tool
     cwd: Path
+    project: Annotated[str, Field(max_length=200)] = ""
     note: Annotated[str, Field(max_length=2000)] = ""
     tags: Annotated[list[str], Field(max_length=12)] = Field(default_factory=list)
-    state: SessionState = SessionState.ACTIVE
+    task_state: TaskState = TaskState.IN_PROGRESS
+    input_state: InputState = InputState.NONE
     pinned: bool = False
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     last_attached_at: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_schema_v1(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        migrated = dict(value)
+        if "task_state" not in migrated:
+            migrated["task_state"] = normalize_task_state(migrated.pop("state", None)).value
+        migrated.setdefault("input_state", InputState.NONE.value)
+        migrated.setdefault("project", "")
+        migrated["schema_version"] = 2
+        return migrated
 
     @field_validator("name")
     @classmethod
@@ -111,6 +170,11 @@ class SessionMetadata(BaseModel):
             if tag not in cleaned:
                 cleaned.append(tag)
         return cleaned
+
+    @property
+    def state(self) -> TaskState:
+        """Compatibility accessor for integrations written against schema v1."""
+        return self.task_state
 
 
 class LegacyMetadata(BaseModel):
@@ -137,17 +201,25 @@ class SessionView(BaseModel):
     tool: Tool
     cwd: Path
     current_command: str
+    runtime: RuntimeState
     attached: bool
     attached_clients: int
     windows: int
     created_at: datetime
+    project: str = ""
     note: str = ""
     tags: list[str] = Field(default_factory=list)
-    state: str = "active"
+    task_state: TaskState = TaskState.UNSPECIFIED
+    input_state: InputState = InputState.NONE
     pinned: bool = False
     owned: bool = False
     legacy_metadata: bool = False
     last_active_at: datetime | None = None
+
+    @property
+    def state(self) -> str:
+        """Compatibility accessor for schema-v1 CLI and API clients."""
+        return self.task_state.value
 
 
 class SessionDetails(BaseModel):
@@ -155,6 +227,7 @@ class SessionDetails(BaseModel):
 
     session: SessionView
     preview: str
+    preview_truncated: bool = False
 
 
 class CreateRequest(BaseModel):
@@ -163,8 +236,11 @@ class CreateRequest(BaseModel):
     name: str
     tool: Tool
     cwd: Path
+    project: Annotated[str, Field(max_length=200)] = ""
     note: Annotated[str, Field(max_length=2000)] = ""
     tags: Annotated[list[str], Field(max_length=12)] = Field(default_factory=list)
+    task_state: TaskState = TaskState.IN_PROGRESS
+    input_state: InputState = InputState.NONE
 
 
 class HealthStatus(StrEnum):

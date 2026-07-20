@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from conftest import FakeBackend
+from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
+from wf_session_manager.service import SessionService
+from wf_session_manager.tui import WFApp
+
+SnapCompare = Callable[..., bool]
+FUTURE_ACTIVITY = datetime(2099, 1, 1, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def deterministic_color(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+
+def add_session(
+    service: SessionService,
+    backend: FakeBackend,
+    name: str,
+    tool: Tool,
+    *,
+    note: str = "",
+    project: str = "",
+    task_state: TaskState = TaskState.IN_PROGRESS,
+    input_state: InputState = InputState.NONE,
+    pinned: bool = False,
+    attached: bool = False,
+    failed: bool = False,
+) -> str:
+    view = service.create(
+        CreateRequest(
+            name=name,
+            tool=tool,
+            cwd=Path("/tmp"),
+            project=project,
+            note=note,
+        )
+    )
+    service.organize(
+        view.name,
+        state=task_state,
+        input_state=input_state,
+        pinned=pinned,
+    )
+    backend.sessions[view.name] = backend.sessions[view.name].model_copy(
+        update={
+            "attached_clients": 1 if attached else 0,
+            "last_activity_at": FUTURE_ACTIVITY,
+            "pane_dead": failed,
+            "pane_dead_status": 1 if failed else None,
+        }
+    )
+    backend.previews[view.name] = (
+        "Loading project context\n"
+        "Validated configuration\n"
+        "Reviewing implementation details\n"
+        "Ready for the next workflow action"
+    )
+    return view.name
+
+
+def populated_app(
+    service: SessionService,
+    backend: FakeBackend,
+    *,
+    monochrome: bool = False,
+) -> WFApp:
+    add_session(
+        service,
+        backend,
+        "astrology-pancha-pakshi",
+        Tool.CLAUDE,
+        note="Build a bilingual astrology platform",
+        project="fernandofamily-astrology",
+        input_state=InputState.REQUIRED,
+        attached=True,
+    )
+    add_session(
+        service,
+        backend,
+        "astrology-website",
+        Tool.CODEX,
+        note="Refine responsive birth-chart pages",
+        project="astrology-web",
+    )
+    add_session(
+        service,
+        backend,
+        "graphify",
+        Tool.CLAUDE,
+        task_state=TaskState.WAITING,
+        pinned=True,
+    )
+    add_session(
+        service,
+        backend,
+        "maintenance-shell",
+        Tool.SHELL,
+        task_state=TaskState.UNSPECIFIED,
+    )
+    return WFApp(service, monochrome=monochrome, hostname="wf-test-host")
+
+
+def test_wide_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    assert snap_compare(populated_app(service, fake_backend), terminal_size=(160, 45))
+
+
+def test_medium_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    assert snap_compare(populated_app(service, fake_backend), terminal_size=(100, 30))
+
+
+def test_narrow_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    assert snap_compare(populated_app(service, fake_backend), terminal_size=(80, 24))
+
+
+def test_empty_snapshot(snap_compare: SnapCompare, service: SessionService) -> None:
+    assert snap_compare(
+        WFApp(service, monochrome=False, hostname="wf-test-host"),
+        terminal_size=(120, 35),
+    )
+
+
+def test_warning_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    add_session(
+        service,
+        fake_backend,
+        "decision-required",
+        Tool.HERMES,
+        note="Choose the deployment target before continuing",
+        input_state=InputState.REQUIRED,
+    )
+    assert snap_compare(
+        WFApp(service, monochrome=False, hostname="wf-test-host"),
+        terminal_size=(120, 35),
+    )
+
+
+def test_failure_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    add_session(
+        service,
+        fake_backend,
+        "failed-build",
+        Tool.CODEX,
+        note="Repair the packaging pipeline",
+        failed=True,
+    )
+    assert snap_compare(
+        WFApp(service, monochrome=False, hostname="wf-test-host"),
+        terminal_size=(120, 35),
+    )
+
+
+def test_monochrome_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    assert snap_compare(
+        populated_app(service, fake_backend, monochrome=True),
+        terminal_size=(120, 35),
+    )
+
+
+def test_long_content_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    name = add_session(
+        service,
+        fake_backend,
+        "extremely-long-session-name-for-responsive-terminal-layout-validation",
+        Tool.CLAUDE,
+        note=(
+            "Build and validate a deliberately long workflow description that must wrap cleanly "
+            "inside the inspector without hiding status, output, or available actions."
+        ),
+        project="long-content-and-responsive-layout-validation-project",
+        attached=True,
+    )
+    fake_backend.previews[name] = "\n".join(
+        f"Output line {index}: validating bounded rendering and horizontal clipping"
+        for index in range(20)
+    )
+    assert snap_compare(
+        WFApp(service, monochrome=False, hostname="wf-test-host"),
+        terminal_size=(160, 45),
+    )

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wf-session-manager"
-version = "0.1.0"
+version = "0.2.0"
 description = "A safe Textual interface for persistent tmux-based AI and shell sessions"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -37,6 +37,7 @@ dev = [
   "pytest>=8.4,<10",
   "pytest-asyncio>=1.2,<2",
   "pytest-cov>=7,<8",
+  "pytest-textual-snapshot>=1.1,<2",
   "ruff>=0.15,<1",
 ]
 

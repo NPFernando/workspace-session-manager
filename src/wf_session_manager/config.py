@@ -42,7 +42,10 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: int = Field(default=1, ge=1, le=1)
     refresh_interval: float = Field(default=3.0, ge=1.0, le=60.0)
-    preview_lines: int = Field(default=80, ge=10, le=500)
+    preview_lines: int = Field(default=12, ge=8, le=500)
+    preview_bytes: int = Field(default=32_768, ge=1024, le=1_048_576)
+    log_lines: int = Field(default=500, ge=50, le=5000)
+    log_bytes: int = Field(default=262_144, ge=4096, le=4_194_304)
     legacy_state_dirs: tuple[Path, ...] = Field(
         default_factory=lambda: (
             Path.home() / ".local" / "state" / "wf" / "sessions",

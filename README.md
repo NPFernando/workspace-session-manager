@@ -1,19 +1,19 @@
 # WF - Workflow Session Manager
 
-WF is a terminal application for creating, resuming, inspecting, and organizing persistent Claude
+WF is a terminal application for creating, resuming, inspecting, and managing persistent Claude
 Code, Codex CLI, Hermes Agent, and shell sessions on Linux. Textual provides the default interface,
 Typer provides automation-friendly commands, and tmux keeps work alive across SSH disconnects.
 
-The project is currently in parallel-development mode. Repository setup does not replace an existing
-`WF` installation, change login hooks, or adopt existing tmux sessions. Each cutover action has a
-separate approval gate.
+Repository development does not replace an installed `WF`, change login hooks, or adopt existing
+tmux sessions. Release installation and cutover remain separate approval-gated operations.
 
 ## Highlights
 
-- Session-first Textual dashboard with search, details, sanitized pane preview, and responsive layout
+- Grouped Textual dashboard with on-demand search, protected actions, and responsive layouts
 - Persistent detached sessions through tmux
 - Claude, Codex, Hermes, and shell profiles with strict TOML validation
-- Notes, tags, task state, pinning, rename, resume, and guarded deletion
+- Separate runtime, task, and input states with notes, projects, tags, pinning, and rename
+- ANSI/OSC sanitization, secret redaction, and byte-and-line bounded pane and log views
 - Read-only discovery and preview of legacy WF sidecar metadata
 - Exact-ID, snapshot-validated, reversible session adoption
 - Ownership checks tied to both tmux's unique session ID and a tmux owner marker
@@ -63,7 +63,7 @@ wf-dev list --json
 wf-dev inspect claude-api
 wf-dev create --tool claude --name api --cwd ~/projects/api
 wf-dev create --tool shell --name diagnostics --cwd ~
-wf-dev organize claude-api --tag backend --state active --pin
+wf-dev edit claude-api --tag backend --state in_progress --input none --pin
 wf-dev note claude-api "Refactor authentication flow"
 wf-dev rename claude-api api-refactor
 wf-dev resume
@@ -83,12 +83,16 @@ hidden unless `list --all` is requested.
 
 | Key | Action |
 | --- | --- |
-| `Enter` | Attach to the selected session |
-| `n` | Create a session |
-| `e` | Edit note, tags, task state, and pin |
-| `p` | Toggle pin |
-| `d` | Delete a managed session with exact-name confirmation |
-| `/` | Focus search |
+| `Enter` | Attach, or open details at 80-99 columns |
+| `c` | Create a session |
+| `e` | Edit name, project, tags, task/input state, and pin |
+| `n` | Edit the task description |
+| `l` | Open the sanitized log view |
+| `*` | Toggle pin |
+| `d` | Open protected session actions |
+| `/` | Enter on-demand search mode |
+| `p` | Open the command palette |
+| `?` | Open contextual help |
 | `r` | Refresh |
 | `q` | Quit |
 
@@ -111,9 +115,10 @@ New metadata is stored in:
 ${XDG_STATE_HOME:-~/.local/state}/wf-session-manager/sessions/
 ```
 
-Each JSON file is owner-only and written atomically. A record includes the tmux session ID that was
-assigned at creation or captured during approved adoption. If a session name is later reused, the
-stale record does not grant ownership.
+Each JSON file is owner-only and written atomically. Schema-v2 records include the exact tmux session
+ID plus independent task and input states. Schema-v1 records remain readable and are normalized in
+memory; reading alone does not rewrite them. If a session name is later reused, the stale record does
+not grant ownership.
 
 See [architecture](docs/architecture.md), [security](docs/security.md), and
 [migration](docs/migration.md) for design details.
@@ -126,13 +131,14 @@ make test-integration
 make secret-scan
 ```
 
-The real-tmux integration tests create random, clearly prefixed sessions. Cleanup removes only those
-exact test session IDs. Adoption coverage also verifies that rollback does not restart, rename, or
-remove its disposable tmux session.
+The real-tmux integration tests use socket paths inside pytest temporary directories. Cleanup removes
+only exact test session IDs and temporary sockets. Adoption coverage also verifies that rollback does
+not restart, rename, or remove its disposable tmux session.
 
 ## Project status
 
-Version `0.1.0` is the first independently testable implementation. Operational cutover remains an
+Version `0.2.0` adds the production dashboard hierarchy, protected interactions, responsive modes,
+and deterministic visual regression coverage. Installing it over an existing release remains an
 explicit approval-gated step; see [migration](docs/migration.md).
 
 ## License
