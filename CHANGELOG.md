@@ -20,6 +20,8 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 - Snapshot coverage for dialogs, validation failures, usage warnings, destructive confirmation, light
   mode, and inventories of 50 and 200 sessions
 - A session-aware command palette with categorized WF actions, shortcuts, and availability details
+- A compact searchable Manage browser with General, Runtime, and Danger categories, plus dedicated
+  identity, task, and task-status forms
 
 ### Changed
 
@@ -34,6 +36,7 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
   restore dashboard query, selection, focus, and scroll state without shortcut leakage
 - Bound protected Manage actions to the exact session identity that opened the workflow and return
   canceled confirmations to the originating action
+- Preserved Manage search, highlighted action, and scroll state across nested forms and confirmations
 - Restored `--classic` only as a guarded compatibility bridge to an owner-only preserved executable
 
 ## [0.2.0] - 2026-07-20

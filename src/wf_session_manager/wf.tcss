@@ -490,21 +490,130 @@ ModalScreen {
 }
 
 .manage-dialog {
-    width: 64;
-    height: 88%;
+    width: 72;
+    height: 31;
+    max-height: 94%;
+    padding-bottom: 0;
 }
 
 #manage-actions {
     height: 1fr;
+    min-height: 10;
+    background: #13181c;
+    border: none;
     scrollbar-color: #47545c;
     scrollbar-background: #181d21;
 }
 
-#manage-actions Button {
-    height: 2;
-    min-height: 2;
+#manage-actions > .option-list--option {
+    height: 1;
+    min-height: 1;
+    padding: 0 1;
+}
+
+#manage-actions > .option-list--option-disabled {
+    height: 1;
+    min-height: 1;
+    padding: 0 1;
+    background: #101417;
+}
+
+#manage-search {
+    display: none;
+    height: 1;
+    border: none;
+    background: #101417;
+}
+
+.finding #manage-search {
+    display: block;
+}
+
+#manage-detail {
+    height: 3;
+    min-height: 3;
+    padding: 0 1;
+    border-left: solid #41515b;
+    background: #151a1e;
+    color: #cbd3d8;
+}
+
+#manage-help {
+    height: 1;
+    min-height: 1;
     margin-top: 0;
-    content-align: left middle;
+}
+
+#manage-close-row {
+    height: 1;
+    min-height: 1;
+    align-horizontal: right;
+}
+
+#more-cancel {
+    width: 12;
+    min-width: 12;
+    height: 1;
+    min-height: 1;
+    margin-top: 0;
+    border: none;
+}
+
+.narrow-manage {
+    align: left top;
+}
+
+.narrow-manage .manage-dialog {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: none;
+}
+
+.identity-dialog {
+    width: 68;
+}
+
+.identity-dialog .field-label {
+    margin-top: 0;
+}
+
+.identity-dialog Input {
+    height: 1;
+    border: none;
+    background: #11161a;
+}
+
+.identity-dialog Input:focus {
+    border: none;
+    background: #162433;
+    color: #eef3f6;
+}
+
+.identity-dialog .field-status {
+    margin-left: 0;
+}
+
+.task-dialog {
+    width: 68;
+    height: 18;
+}
+
+#note-value {
+    height: 1fr;
+    min-height: 6;
+    border: tall #3a464e;
+    background: #11161a;
+}
+
+#note-status {
+    margin-left: 0;
+    text-align: right;
+}
+
+.status-dialog {
+    width: 64;
 }
 
 .diagnostics-dialog {
@@ -738,23 +847,9 @@ Button.-error:focus {
     width: 72;
 }
 
-#more-dialog Button,
 #message-close {
     width: 100%;
     margin-top: 1;
-}
-
-.manage-section {
-    height: 2;
-    margin-top: 1;
-    padding-top: 1;
-    border-top: solid #36434b;
-    color: #aeb9bf;
-    text-style: bold;
-}
-
-.manage-section.danger-title {
-    border-top: solid #5d363a;
 }
 
 .danger-dialog {
@@ -868,9 +963,48 @@ Button.-error:focus {
 .light #command-preview,
 .light #create-submit-reason,
 .light #diagnostics-list,
-.light #diagnostics-summary {
+.light #diagnostics-summary,
+.light #manage-actions,
+.light #manage-detail,
+.light #manage-search {
     background: #f8fafb;
     color: #20272b;
+}
+
+.light .manage-dialog,
+.light .identity-dialog,
+.light .task-dialog,
+.light .status-dialog {
+    background: #edf1f3;
+    color: #20272b;
+}
+
+.light .dialog-title {
+    color: #20272b;
+}
+
+.light .dialog-context,
+.light .mode-help,
+.light .field-label {
+    color: #52616a;
+}
+
+.light .identity-dialog Input,
+.light .task-dialog TextArea,
+.light .status-dialog Select {
+    background: #ffffff;
+    color: #20272b;
+}
+
+.light .identity-dialog Input:focus,
+.light .task-dialog TextArea:focus,
+.light .status-dialog Select:focus {
+    background: #e3edf4;
+    color: #20272b;
+}
+
+.light #manage-actions > .option-list--option-disabled {
+    background: #e4e9ec;
 }
 
 .monochrome Screen,
@@ -893,7 +1027,19 @@ Button.-error:focus {
 
 .monochrome #recent-output-scroll,
 .monochrome #command-preview,
-.monochrome #create-submit-reason {
+.monochrome #create-submit-reason,
+.monochrome #manage-actions,
+.monochrome #manage-detail,
+.monochrome #manage-search {
     color: #e6e6e6;
     background: #080808;
+}
+
+.monochrome .manage-dialog,
+.monochrome .identity-dialog,
+.monochrome .task-dialog,
+.monochrome .status-dialog,
+.monochrome #manage-actions > .option-list--option-disabled {
+    color: #e6e6e6;
+    background: #111111;
 }

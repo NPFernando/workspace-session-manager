@@ -17,6 +17,7 @@ from wf_session_manager.models import (
     CreateRequest,
     InputState,
     RuntimeState,
+    TaskState,
     Tool,
 )
 from wf_session_manager.service import SessionService
@@ -28,10 +29,13 @@ from wf_session_manager.tui import (
     DetailScreen,
     DiagnosticsScreen,
     FilterScreen,
+    IdentityOrganizationScreen,
     InteractionMode,
     ManageSessionScreen,
     MoreActionsScreen,
+    NoteScreen,
     OnboardingScreen,
+    StatusScreen,
     WFApp,
     detect_activity,
     display_path,
@@ -59,6 +63,25 @@ async def wait_for_confirmation(pilot: Pilot[object], app: WFApp) -> ConfirmActi
             return app.screen
         await pilot.pause(0.05)
     raise AssertionError("confirmation screen did not open")
+
+
+async def wait_for_manage(pilot: Pilot[object], app: WFApp) -> ManageSessionScreen:
+    for _ in range(40):
+        if isinstance(app.screen, ManageSessionScreen):
+            return app.screen
+        await pilot.pause(0.05)
+    raise AssertionError("manage screen did not open")
+
+
+async def wait_for_identity_validation(
+    pilot: Pilot[object], screen: IdentityOrganizationScreen
+) -> None:
+    for _ in range(40):
+        status = screen.query_one("#identity-name-status", Static)
+        if not status.has_class("checking"):
+            return
+        await pilot.pause(0.05)
+    raise AssertionError("identity validation did not complete")
 
 
 @pytest.mark.asyncio
@@ -180,7 +203,7 @@ async def test_create_dialog_is_keyboard_accessible(service: SessionService) -> 
 
 
 @pytest.mark.asyncio
-async def test_delete_requires_more_menu_and_exact_confirmation(
+async def test_delete_requires_manage_and_exact_confirmation(
     service: SessionService,
     fake_backend: FakeBackend,
 ) -> None:
@@ -189,11 +212,9 @@ async def test_delete_requires_more_menu_and_exact_confirmation(
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.press("d")
         assert isinstance(app.screen, MoreActionsScreen)
-        assert app.focused is app.screen.query_one("#more-cancel", Button)
+        assert app.focused is app.screen.query_one("#manage-actions", OptionList)
 
-        app.screen.query_one("#more-delete", Button).scroll_visible()
-        await pilot.pause()
-        await pilot.click("#more-delete")
+        await pilot.press("d")
         await pilot.pause()
         assert isinstance(app.screen, DeleteSessionScreen)
         assert app.focused is app.screen.query_one("#delete-cancel", Button)
@@ -775,10 +796,8 @@ async def test_manage_requires_cancel_focused_confirmation_for_stop(
         await pilot.press("d")
         assert isinstance(app.screen, ManageSessionScreen)
         assert isinstance(app.screen, MoreActionsScreen)
-        assert app.focused is app.screen.query_one("#more-cancel", Button)
-        app.screen.query_one("#manage-stop", Button).scroll_visible()
-        await pilot.pause()
-        await pilot.click("#manage-stop")
+        assert app.focused is app.screen.query_one("#manage-actions", OptionList)
+        await pilot.press("t")
         await wait_for_confirmation(pilot, app)
         assert app.focused is app.screen.query_one("#confirm-cancel", Button)
         await pilot.press("escape")
@@ -786,7 +805,11 @@ async def test_manage_requires_cancel_focused_confirmation_for_stop(
         assert fake_backend.session_exists(name)
         assert isinstance(app.screen, ManageSessionScreen)
         assert app.interaction_mode is InteractionMode.MANAGE
-        assert app.focused is app.screen.query_one("#manage-stop", Button)
+        options = app.screen.query_one("#manage-actions", OptionList)
+        assert app.focused is options
+        assert options.get_option_at_index(options.highlighted or 0).id == (
+            "manage-action:stop-session"
+        )
 
 
 @pytest.mark.asyncio
@@ -807,13 +830,155 @@ async def test_manage_confirmation_keeps_original_session_target(
 
         app.selected_name = other.name
         app.selected_session_id = other.session_id
-        app.screen.query_one("#manage-stop", Button).press()
+        app.screen.action_choose("stop-session")
         await wait_for_confirmation(pilot, app)
         app.screen.query_one("#confirm-submit", Button).press()
         await pilot.pause()
 
         assert not fake_backend.session_exists(original_name)
         assert fake_backend.session_exists(other_name)
+
+
+@pytest.mark.asyncio
+async def test_manage_fits_all_categories_at_120x35(service: SessionService) -> None:
+    create_managed(service, "managed", Tool.SHELL)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("d")
+        screen = await wait_for_manage(pilot, app)
+        options = screen.query_one("#manage-actions", OptionList)
+        option_ids = {
+            options.get_option_at_index(index).id for index in range(options.option_count)
+        }
+
+        assert options.option_count == 15
+        assert options.max_scroll_y == 0
+        assert {
+            "manage-category:general",
+            "manage-category:runtime",
+            "manage-category:danger",
+            "manage-action:identity",
+            "manage-action:restart",
+            "manage-action:delete",
+        } <= option_ids
+        assert options.get_option_at_index(options.highlighted or 0).id == (
+            "manage-action:identity"
+        )
+
+
+@pytest.mark.asyncio
+async def test_manage_find_is_local_and_cancellable(service: SessionService) -> None:
+    create_managed(service, "managed", Tool.SHELL)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("d", "/")
+        screen = await wait_for_manage(pilot, app)
+        search = screen.query_one("#manage-search", Input)
+        assert app.interaction_mode is InteractionMode.MANAGE
+        assert screen.has_class("finding")
+        assert app.focused is search
+
+        await pilot.press(*"leave tmux")
+        options = screen.query_one("#manage-actions", OptionList)
+        assert options.option_count == 2
+        assert options.get_option_at_index(1).id == "manage-action:remove-metadata"
+
+        await pilot.press("escape")
+        assert not screen.has_class("finding")
+        assert options.option_count == 15
+        assert app.focused is options
+
+        await pilot.press("/", *"identity", "enter")
+        assert not screen.has_class("finding")
+        assert options.option_count == 2
+        assert app.interaction_mode is InteractionMode.MANAGE
+
+
+@pytest.mark.asyncio
+async def test_manage_disabled_actions_explain_stopped_state(service: SessionService) -> None:
+    name = create_managed(service, "stopped", Tool.SHELL)
+    service.stop_session(name)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("d")
+        screen = await wait_for_manage(pilot, app)
+        options = screen.query_one("#manage-actions", OptionList)
+        stop = options.get_option("manage-action:stop-session")
+        logging = options.get_option("manage-action:logging")
+
+        assert stop.disabled
+        assert logging.disabled
+        assert "Unavailable: stopped" in str(stop.prompt)
+
+
+@pytest.mark.asyncio
+async def test_manage_identity_edit_returns_with_filter_and_new_identity(
+    service: SessionService,
+) -> None:
+    original_name = create_managed(service, "original", Tool.SHELL)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("d", "/", *"identity", "enter", "enter")
+        assert isinstance(app.screen, IdentityOrganizationScreen)
+        identity = app.screen
+        identity.query_one("#identity-display-name", Input).value = "Renamed Workflow"
+        identity.query_one("#identity-name", Input).value = "renamed session"
+        await wait_for_identity_validation(pilot, identity)
+        assert not identity.query_one("#identity-submit", Button).disabled
+
+        await pilot.press("ctrl+enter")
+        manage = await wait_for_manage(pilot, app)
+        assert service.store.load(original_name) is None
+        updated = service.get("renamed-session")
+        assert updated.display_name == "Renamed Workflow"
+        assert manage.state.query == "identity"
+        assert manage.query_one("#manage-actions", OptionList).option_count == 2
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen is app.screen_stack[0]
+        assert app.selected_name == "renamed-session"
+
+
+@pytest.mark.asyncio
+async def test_manage_task_status_and_pin_stay_in_workflow(service: SessionService) -> None:
+    name = create_managed(service, "workflow", Tool.SHELL)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("d", "n")
+        assert isinstance(app.screen, NoteScreen)
+        app.screen.query_one("#note-value", TextArea).text = "First line\nSecond line"
+        await pilot.press("ctrl+enter")
+        await wait_for_manage(pilot, app)
+        assert service.get(name).note == "First line\nSecond line"
+
+        await pilot.press("s")
+        assert isinstance(app.screen, StatusScreen)
+        app.screen.query_one("#status-task-state", Select).value = TaskState.BLOCKED.value
+        app.screen.query_one("#status-input-state", Select).value = InputState.REQUIRED.value
+        await pilot.press("ctrl+enter")
+        await wait_for_manage(pilot, app)
+        updated = service.get(name)
+        assert updated.task_state is TaskState.BLOCKED
+        assert updated.input_state is InputState.REQUIRED
+
+        await pilot.press("*")
+        manage = await wait_for_manage(pilot, app)
+        assert service.get(name).pinned
+        pin = manage.query_one("#manage-actions", OptionList).get_option("manage-action:pin")
+        assert "Unpin session" in str(pin.prompt)
+
+
+@pytest.mark.asyncio
+async def test_manage_is_full_screen_at_narrow_width(service: SessionService) -> None:
+    create_managed(service, "narrow-manage", Tool.SHELL)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("d")
+        screen = await wait_for_manage(pilot, app)
+        await pilot.pause()
+        assert screen.has_class("narrow-manage")
+        assert screen.query_one("#more-dialog").region.size == screen.size
 
 
 @pytest.mark.asyncio

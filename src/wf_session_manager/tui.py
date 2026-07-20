@@ -8,7 +8,7 @@ import re
 import shlex
 import socket
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -332,13 +332,42 @@ def animate_modal_open(screen: Screen[Any]) -> None:
 
 
 @dataclass(frozen=True, slots=True)
-class EditResult:
+class OrganizationEditResult:
     name: str
+    display_name: str
     project: str
     tags: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class StatusEditResult:
     task_state: TaskState
     input_state: InputState
-    pinned: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ManageAction:
+    action_id: str
+    category: str
+    label: str
+    description: str
+    shortcut: str
+    enabled: bool = True
+    disabled_reason: str = ""
+    destructive: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ManageListState:
+    query: str = ""
+    highlighted_action: str = "identity"
+    scroll_y: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ManageSelection:
+    action: str
+    state: ManageListState
 
 
 @dataclass(frozen=True, slots=True)
@@ -932,82 +961,186 @@ class CreateFailureScreen(ModalScreen[str | None]):
         self.dismiss("close")
 
 
-class EditSessionScreen(ModalScreen[EditResult | None]):
-    BINDINGS: ClassVar[list[BindingSpec]] = [Binding("escape", "cancel", "Cancel")]
+class IdentityOrganizationScreen(ModalScreen[OrganizationEditResult | None]):
+    BINDINGS: ClassVar[list[BindingSpec]] = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+enter", "submit", "Save"),
+    ]
 
-    def __init__(self, session: SessionView) -> None:
+    def __init__(self, service: SessionService, session: SessionView) -> None:
         super().__init__()
+        self.service = service
         self.session = session
+        self._validation_timer: Timer | None = None
+        self._validation_serial = 0
+        self._validated_result: OrganizationEditResult | None = None
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="edit-dialog", classes="dialog"):
-            yield Label("Edit session", classes="dialog-title")
-            yield Label("Name", classes="field-label")
-            yield Input(value=self.session.name, id="edit-name")
+        with Vertical(id="identity-dialog", classes="dialog identity-dialog"):
+            yield Label("Identity & Organization", classes="dialog-title")
+            yield Static(self.session.name, classes="dialog-context")
+            yield Label("Display name", classes="field-label")
+            yield Input(
+                value=self.session.display_name or self.session.name,
+                max_length=200,
+                id="identity-display-name",
+            )
+            yield Static("", id="identity-display-status", classes="field-status")
+            yield Label("Session ID", classes="field-label")
+            yield Input(value=self.session.name, max_length=200, id="identity-name")
+            yield Static("", id="identity-name-status", classes="field-status")
             yield Label("Project", classes="field-label")
-            yield Input(value=self.session.project, id="edit-project")
-            yield Label("Task state", classes="field-label")
-            yield Select(
-                [(display_state(state.value), state.value) for state in TaskState],
-                value=self.session.task_state.value,
-                allow_blank=False,
-                id="edit-task-state",
-            )
-            yield Label("Input", classes="field-label")
-            yield Select(
-                [(display_state(state.value), state.value) for state in InputState],
-                value=self.session.input_state.value,
-                allow_blank=False,
-                id="edit-input-state",
-            )
+            yield Input(value=self.session.project, max_length=200, id="identity-project")
             yield Label("Tags", classes="field-label")
-            yield Input(value=" ".join(self.session.tags), id="edit-tags")
-            yield Checkbox("Pinned", value=self.session.pinned, id="edit-pinned")
+            yield Input(value=", ".join(self.session.tags), id="identity-tags")
+            yield Static("", id="identity-tags-status", classes="field-status")
             yield Static(
-                "FORM  Tab Next   Shift+Tab Previous   Enter Select   Esc Cancel",
+                "FORM  Tab Next   Shift+Tab Previous   Ctrl+Enter Save   Esc Cancel",
                 classes="mode-help",
             )
             with Horizontal(classes="dialog-actions"):
-                yield Button("Cancel", id="edit-cancel")
-                yield Button("Save", variant="primary", id="edit-submit")
+                yield Button("Cancel", id="identity-cancel")
+                yield Button("Save", variant="primary", id="identity-submit", disabled=True)
 
     def on_mount(self) -> None:
-        self.query_one("#edit-name", Input).focus()
+        animate_modal_open(self)
+        self._schedule_validation()
+        self.query_one("#identity-display-name", Input).focus()
+
+    def _signature(self) -> tuple[str, str, str, str]:
+        return (
+            self.query_one("#identity-name", Input).value,
+            self.query_one("#identity-display-name", Input).value,
+            self.query_one("#identity-project", Input).value,
+            self.query_one("#identity-tags", Input).value,
+        )
+
+    def _schedule_validation(self) -> None:
+        self._validation_serial += 1
+        if self._validation_timer is not None:
+            self._validation_timer.stop()
+        self._validated_result = None
+        self.query_one("#identity-submit", Button).disabled = True
+        status = self.query_one("#identity-name-status", Static)
+        status.update("... Checking...")
+        status.remove_class("valid", "warning", "invalid")
+        status.add_class("checking")
+        serial = self._validation_serial
+        self._validation_timer = self.set_timer(0.2, lambda: self._validate(serial))
+
+    def _validate(self, serial: int) -> None:
+        if serial != self._validation_serial:
+            return
+        signature = self._signature()
+        requested_name, display_name, project, raw_tags = signature
+        try:
+            validation = self.service.validate_rename(self.session.name, requested_name.strip())
+        except WFError as error:
+            normalized = ""
+            name_error = str(error)
+        else:
+            normalized = validation.normalized_name
+            name_error = validation.name_error
+        try:
+            tags = normalize_tags([item for item in re.split(r"[\s,]+", raw_tags) if item])
+        except ValueError as error:
+            tags = []
+            tags_error = str(error)
+        else:
+            tags_error = ""
+        metadata_error = ""
+        if not display_name.strip():
+            metadata_error = "display name is required"
+        elif len(project.strip()) > 200:
+            metadata_error = "project must be 200 characters or fewer"
+
+        name_status = self.query_one("#identity-name-status", Static)
+        name_status.remove_class("checking", "valid", "warning", "invalid")
+        if name_error:
+            name_status.update(f"x {name_error}")
+            name_status.add_class("invalid")
+        elif normalized == self.session.name:
+            name_status.update("+ Session ID unchanged")
+            name_status.add_class("valid")
+        else:
+            name_status.update(f"! tmux/WF session will be renamed to {normalized}")
+            name_status.add_class("warning")
+
+        tags_status = self.query_one("#identity-tags-status", Static)
+        tags_status.remove_class("valid", "invalid")
+        if tags_error:
+            tags_status.update(f"x {tags_error}")
+            tags_status.add_class("invalid")
+        else:
+            tags_status.update("+ Tags are valid" if tags else "")
+            tags_status.add_class("valid")
+
+        display_status = self.query_one("#identity-display-status", Static)
+        display_status.remove_class("valid", "invalid")
+        if metadata_error:
+            display_status.update(f"x {metadata_error}")
+            display_status.add_class("invalid")
+        else:
+            display_status.update("+ Display name is valid")
+            display_status.add_class("valid")
+
+        if not name_error and not tags_error and not metadata_error and normalized:
+            self._validated_result = OrganizationEditResult(
+                name=normalized,
+                display_name=display_name.strip(),
+                project=project.strip(),
+                tags=tags,
+            )
+        if signature == self._signature():
+            self.query_one("#identity-submit", Button).disabled = self._validated_result is None
+
+    @on(Input.Changed)
+    def input_changed(self) -> None:
+        self._schedule_validation()
 
     @on(Button.Pressed)
     def button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "edit-cancel":
+        if event.button.id == "identity-cancel":
             self.dismiss(None)
-        elif event.button.id == "edit-submit":
-            self.dismiss(
-                EditResult(
-                    name=self.query_one("#edit-name", Input).value,
-                    project=self.query_one("#edit-project", Input).value,
-                    tags=self.query_one("#edit-tags", Input).value.split(),
-                    task_state=TaskState(str(self.query_one("#edit-task-state", Select).value)),
-                    input_state=InputState(str(self.query_one("#edit-input-state", Select).value)),
-                    pinned=self.query_one("#edit-pinned", Checkbox).value,
-                )
-            )
+        elif event.button.id == "identity-submit":
+            self.action_submit()
+
+    def action_submit(self) -> None:
+        if self.query_one("#identity-submit", Button).disabled:
+            return
+        if self._validated_result is not None:
+            self.dismiss(self._validated_result)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
 
+EditSessionScreen = IdentityOrganizationScreen
+
+
 class NoteScreen(ModalScreen[str | None]):
-    BINDINGS: ClassVar[list[BindingSpec]] = [Binding("escape", "cancel", "Cancel")]
+    BINDINGS: ClassVar[list[BindingSpec]] = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+enter", "submit", "Save"),
+    ]
 
     def __init__(self, session: SessionView) -> None:
         super().__init__()
         self.session = session
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="note-dialog", classes="dialog small-dialog"):
-            yield Label("Edit task", classes="dialog-title")
+        with Vertical(id="note-dialog", classes="dialog task-dialog"):
+            yield Label("Edit Task", classes="dialog-title")
             yield Static(self.session.name, classes="dialog-context")
-            yield Input(value=self.session.note, id="note-value")
+            yield TextArea(
+                self.session.note,
+                soft_wrap=True,
+                tab_behavior="focus",
+                id="note-value",
+            )
+            yield Static("", id="note-status", classes="field-status")
             yield Static(
-                "FORM  Tab Next   Shift+Tab Previous   Esc Cancel",
+                "FORM  Enter New line   Ctrl+Enter Save   Esc Cancel",
                 classes="mode-help",
             )
             with Horizontal(classes="dialog-actions"):
@@ -1015,120 +1148,439 @@ class NoteScreen(ModalScreen[str | None]):
                 yield Button("Save", variant="primary", id="note-submit")
 
     def on_mount(self) -> None:
-        self.query_one("#note-value", Input).focus()
+        animate_modal_open(self)
+        self.query_one("#note-value", TextArea).focus()
+        self._validate()
+
+    @on(TextArea.Changed, "#note-value")
+    def task_changed(self) -> None:
+        self._validate()
+
+    def _validate(self) -> None:
+        note = self.query_one("#note-value", TextArea).text
+        status = self.query_one("#note-status", Static)
+        button = self.query_one("#note-submit", Button)
+        if len(note) > 2000:
+            status.update(f"x Task is {len(note) - 2000} characters over the limit")
+            status.add_class("invalid")
+            button.disabled = True
+        else:
+            status.remove_class("invalid")
+            status.update(f"{len(note)}/2000 characters")
+            button.disabled = False
 
     @on(Button.Pressed)
     def button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "note-cancel":
             self.dismiss(None)
         elif event.button.id == "note-submit":
-            self.dismiss(self.query_one("#note-value", Input).value)
+            self.action_submit()
+
+    def action_submit(self) -> None:
+        if not self.query_one("#note-submit", Button).disabled:
+            self.dismiss(self.query_one("#note-value", TextArea).text)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
 
-class ManageSessionScreen(ModalScreen[str | None]):
-    BINDINGS: ClassVar[list[BindingSpec]] = [Binding("escape", "cancel", "Cancel")]
+class StatusScreen(ModalScreen[StatusEditResult | None]):
+    BINDINGS: ClassVar[list[BindingSpec]] = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+enter", "submit", "Save"),
+    ]
 
-    def __init__(self, session: SessionView, *, initial_focus_id: str | None = None) -> None:
+    def __init__(self, session: SessionView) -> None:
         super().__init__()
         self.session = session
-        self.initial_focus_id = initial_focus_id
 
     def compose(self) -> ComposeResult:
-        stopped = self.session.runtime is RuntimeState.STOPPED
-        with Vertical(id="more-dialog", classes="dialog manage-dialog"):
-            yield Label("Manage Session", classes="dialog-title")
+        with Vertical(id="status-dialog", classes="dialog small-dialog status-dialog"):
+            yield Label("Task & Input Status", classes="dialog-title")
             yield Static(self.session.name, classes="dialog-context")
-            with VerticalScroll(id="manage-actions"):
-                yield Static("General", classes="manage-section")
-                yield Button("Rename or edit organization", id="manage-edit", compact=True)
-                yield Button("Edit task note", id="manage-note", compact=True)
-                yield Button("Set task and input status", id="manage-status", compact=True)
-                yield Button(
-                    "Disable logging" if self.session.logging_enabled else "Enable logging",
-                    id="manage-logging",
-                    disabled=stopped,
-                    compact=True,
-                )
-                yield Button(
-                    "Unpin" if self.session.pinned else "Pin", id="manage-pin", compact=True
-                )
-                yield Button("Advanced details", id="manage-advanced", compact=True)
-                yield Static("Runtime", classes="manage-section")
-                yield Button("Restart tool", id="manage-restart", compact=True)
-                yield Button(
-                    "Stop command", id="manage-stop-command", disabled=stopped, compact=True
-                )
-                yield Static("Danger zone", classes="manage-section danger-title")
-                yield Button(
-                    "Stop tmux session",
-                    variant="error",
-                    id="manage-stop",
-                    disabled=stopped,
-                    compact=True,
-                )
-                yield Button(
-                    "Remove WF metadata",
-                    variant="error",
-                    id="manage-remove-metadata",
-                    compact=True,
-                )
-                yield Button(
-                    "Delete logs",
-                    variant="error",
-                    id="manage-delete-logs",
-                    compact=True,
-                )
-                yield Button(
-                    "Delete session and metadata",
-                    variant="error",
-                    id="more-delete",
-                    compact=True,
-                )
+            yield Label("Task state", classes="field-label")
+            yield Select(
+                [(display_state(state.value), state.value) for state in TaskState],
+                value=self.session.task_state.value,
+                allow_blank=False,
+                id="status-task-state",
+            )
+            yield Label("User input", classes="field-label")
+            yield Select(
+                [(display_input(state), state.value) for state in InputState],
+                value=self.session.input_state.value,
+                allow_blank=False,
+                id="status-input-state",
+            )
             yield Static(
-                "MANAGE  Tab Move   Enter Select   Esc Close",
+                "FORM  Tab Next   Shift+Tab Previous   Ctrl+Enter Save   Esc Cancel",
                 classes="mode-help",
             )
-            yield Button("Cancel", id="more-cancel")
+            with Horizontal(classes="dialog-actions"):
+                yield Button("Cancel", id="status-cancel")
+                yield Button("Save", variant="primary", id="status-submit")
 
     def on_mount(self) -> None:
         animate_modal_open(self)
-        focus = self.query_one("#more-cancel", Button)
-        if self.initial_focus_id:
-            matches = self.query(f"#{self.initial_focus_id}")
-            if matches:
-                candidate = matches.first(Button)
-                if not candidate.disabled:
-                    focus = candidate
-        focus.focus()
+        self.query_one("#status-task-state", Select).focus()
 
     @on(Button.Pressed)
     def button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "more-cancel":
+        if event.button.id == "status-cancel":
             self.dismiss(None)
-            return
-        actions = {
-            "manage-edit": "edit",
-            "manage-note": "note",
-            "manage-status": "edit",
-            "manage-logging": "logging",
-            "manage-pin": "pin",
-            "manage-advanced": "advanced",
-            "manage-restart": "restart",
-            "manage-stop-command": "stop-command",
-            "manage-stop": "stop-session",
-            "manage-remove-metadata": "remove-metadata",
-            "manage-delete-logs": "delete-logs",
-            "more-delete": "delete",
-        }
-        action = actions.get(event.button.id or "")
-        if action:
-            self.dismiss(action)
+        elif event.button.id == "status-submit":
+            self.action_submit()
+
+    def action_submit(self) -> None:
+        self.dismiss(
+            StatusEditResult(
+                task_state=TaskState(str(self.query_one("#status-task-state", Select).value)),
+                input_state=InputState(str(self.query_one("#status-input-state", Select).value)),
+            )
+        )
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+def session_manage_actions(session: SessionView) -> tuple[ManageAction, ...]:
+    stopped = session.runtime is RuntimeState.STOPPED
+    stopped_reason = "Session is stopped"
+    return (
+        ManageAction(
+            "identity",
+            "General",
+            "Identity & organization",
+            "Rename the session ID or update its display name, project, and tags.",
+            "e",
+        ),
+        ManageAction("task", "General", "Edit task", "Update the session task note.", "n"),
+        ManageAction(
+            "status",
+            "General",
+            "Set task and input status",
+            "Set task progress and whether user input is required.",
+            "s",
+        ),
+        ManageAction(
+            "pin",
+            "General",
+            "Unpin session" if session.pinned else "Pin session",
+            "Remove this session from Pinned."
+            if session.pinned
+            else "Keep this session in Pinned.",
+            "*",
+        ),
+        ManageAction(
+            "logging",
+            "General",
+            "Disable logging" if session.logging_enabled else "Enable logging",
+            "Disable sanitized persistent output logging."
+            if session.logging_enabled
+            else "Enable sanitized, owner-only, size-limited output logging.",
+            "g",
+            enabled=not stopped,
+            disabled_reason=stopped_reason if stopped else "",
+        ),
+        ManageAction(
+            "advanced",
+            "General",
+            "Advanced details",
+            "Inspect raw identifiers and runtime metadata.",
+            "a",
+        ),
+        ManageAction(
+            "restart",
+            "Runtime",
+            "Restart tool",
+            "Restart the configured tool, recreating the tmux session if needed.",
+            "r",
+        ),
+        ManageAction(
+            "stop-command",
+            "Runtime",
+            "Stop command",
+            "Send Ctrl+C to the active pane while retaining the tmux session.",
+            "x",
+            enabled=not stopped,
+            disabled_reason=stopped_reason if stopped else "",
+        ),
+        ManageAction(
+            "stop-session",
+            "Danger",
+            "Stop tmux session",
+            "Stop tmux while retaining WF metadata and sanitized logs.",
+            "t",
+            enabled=not stopped,
+            disabled_reason=stopped_reason if stopped else "",
+            destructive=True,
+        ),
+        ManageAction(
+            "remove-metadata",
+            "Danger",
+            "Remove WF metadata",
+            "Leave tmux running but remove this session from managed WF views.",
+            "m",
+            destructive=True,
+        ),
+        ManageAction(
+            "delete-logs",
+            "Danger",
+            "Delete sanitized logs",
+            "Permanently remove persisted sanitized output logs.",
+            "l",
+            destructive=True,
+        ),
+        ManageAction(
+            "delete",
+            "Danger",
+            "Delete session and metadata",
+            "Stop tmux and permanently remove metadata and logs.",
+            "d",
+            destructive=True,
+        ),
+    )
+
+
+class ManageSessionScreen(ModalScreen[ManageSelection | None]):
+    BINDINGS: ClassVar[list[BindingSpec]] = [
+        Binding("escape", "cancel", "Close"),
+        Binding("/", "find", "Find"),
+        Binding("ctrl+u", "clear_find", "Clear", show=False),
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
+        Binding("e", "choose('identity')", "Identity", show=False),
+        Binding("n", "choose('task')", "Task", show=False),
+        Binding("s", "choose('status')", "Status", show=False),
+        Binding("asterisk", "choose('pin')", "Pin", show=False),
+        Binding("g", "choose('logging')", "Logging", show=False),
+        Binding("a", "choose('advanced')", "Advanced", show=False),
+        Binding("r", "choose('restart')", "Restart", show=False),
+        Binding("x", "choose('stop-command')", "Stop command", show=False),
+        Binding("t", "choose('stop-session')", "Stop tmux", show=False),
+        Binding("m", "choose('remove-metadata')", "Remove metadata", show=False),
+        Binding("l", "choose('delete-logs')", "Delete logs", show=False),
+        Binding("d", "choose('delete')", "Delete", show=False),
+    ]
+
+    def __init__(self, session: SessionView, *, state: ManageListState | None = None) -> None:
+        super().__init__()
+        self.session = session
+        self.state = state or ManageListState()
+        self.actions = session_manage_actions(session)
+        self._actions_by_id = {action.action_id: action for action in self.actions}
+        self._query = self.state.query
+        self._query_before = self._query
+        self._highlighted_action = self.state.highlighted_action
+        self._finding = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="more-dialog", classes="dialog manage-dialog"):
+            yield Label("Manage Session", classes="dialog-title")
+            yield Static(self.session.name, classes="dialog-context")
+            yield Input(placeholder="Find actions", compact=True, id="manage-search")
+            yield OptionList(id="manage-actions")
+            yield Static("", id="manage-detail")
+            yield Static(
+                "MANAGE  Up/Down or j/k Navigate   Enter Select   / Find   Esc Close",
+                id="manage-help",
+                classes="mode-help",
+            )
+            with Horizontal(id="manage-close-row"):
+                yield Button("Close", id="more-cancel", compact=True)
+
+    def on_mount(self) -> None:
+        animate_modal_open(self)
+        self.set_class(self.size.width < 100, "narrow-manage")
+        self._render_actions()
+        options = self.query_one("#manage-actions", OptionList)
+        self.call_after_refresh(options.scroll_to, y=self.state.scroll_y, animate=False, force=True)
+        options.focus()
+
+    def on_resize(self, event: events.Resize) -> None:
+        self.set_class(event.size.width < 100, "narrow-manage")
+
+    def _matching_actions(self) -> tuple[ManageAction, ...]:
+        query = self._query.casefold().strip()
+        if not query:
+            return self.actions
+        return tuple(
+            action
+            for action in self.actions
+            if query
+            in " ".join(
+                (action.category, action.label, action.description, action.disabled_reason)
+            ).casefold()
+        )
+
+    def _action_prompt(self, action: ManageAction) -> Text:
+        marker = "! " if action.destructive else "  "
+        if action.enabled:
+            status = action.shortcut
+        elif action.disabled_reason == "Session is stopped":
+            status = "Unavailable: stopped"
+        else:
+            status = "Unavailable"
+        available = 56 if self.size.width >= 100 else max(24, self.size.width - 22)
+        if len(action.label) <= available:
+            label = action.label
+        elif getattr(self.app, "ascii_only", False):
+            label = f"{action.label[: available - 3]}..."
+        else:
+            label = f"{action.label[: available - 1]}…"
+        prompt = Text(f"{marker}{label}")
+        padding = max(2, 40 - len(label))
+        prompt.append(" " * padding)
+        prompt.append(status, "dim" if action.enabled else "#7f8a90")
+        if action.destructive:
+            danger_color = (
+                "#b33b47" if getattr(self.app, "ui_theme", "dark") == "light" else "#ef8a91"
+            )
+            prompt.stylize(danger_color, 0, len(marker) + len(label))
+        return prompt
+
+    def _render_actions(self) -> None:
+        options = self.query_one("#manage-actions", OptionList)
+        old_scroll = options.scroll_offset.y
+        options.clear_options()
+        matches = self._matching_actions()
+        for category in ("General", "Runtime", "Danger"):
+            category_actions = [action for action in matches if action.category == category]
+            if not category_actions:
+                continue
+            header = Text(category.upper(), style="bold #8fa0a9")
+            if category == "Danger":
+                danger_color = (
+                    "#a9323e" if getattr(self.app, "ui_theme", "dark") == "light" else "#d9757d"
+                )
+                header.stylize(f"bold {danger_color}")
+            options.add_option(
+                Option(header, id=f"manage-category:{category.casefold()}", disabled=True)
+            )
+            for action in category_actions:
+                options.add_option(
+                    Option(
+                        self._action_prompt(action),
+                        id=f"manage-action:{action.action_id}",
+                        disabled=not action.enabled,
+                    )
+                )
+        if not matches:
+            options.add_option(Option("No matching actions", id="manage-empty", disabled=True))
+
+        option_ids = {
+            options.get_option_at_index(index).id for index in range(options.option_count)
+        }
+        target_id = f"manage-action:{self._highlighted_action}"
+        if target_id not in option_ids or not self._actions_by_id[self._highlighted_action].enabled:
+            target = next((action for action in matches if action.enabled), None)
+            if target is not None:
+                self._highlighted_action = target.action_id
+                target_id = f"manage-action:{target.action_id}"
+        if target_id in option_ids:
+            options.highlighted = options.get_option_index(target_id)
+            self._render_detail(self._actions_by_id[self._highlighted_action])
+        else:
+            self.query_one("#manage-detail", Static).update("No actions match this filter.")
+        self.call_after_refresh(options.scroll_to, y=old_scroll, animate=False, force=True)
+
+    def _render_detail(self, action: ManageAction) -> None:
+        detail = Text(action.description)
+        if not action.enabled and action.disabled_reason:
+            detail.append(f"\nUnavailable: {action.disabled_reason}", "#d9a441")
+        elif action.destructive:
+            detail.append("\nProtected confirmation required.", "#d9757d")
+        self.query_one("#manage-detail", Static).update(detail)
+
+    def _current_state(self, action_id: str | None = None) -> ManageListState:
+        return ManageListState(
+            query=self._query,
+            highlighted_action=action_id or self._highlighted_action,
+            scroll_y=self.query_one("#manage-actions", OptionList).scroll_offset.y,
+        )
+
+    @on(OptionList.OptionHighlighted, "#manage-actions")
+    def option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        option_id = event.option.id or ""
+        if not option_id.startswith("manage-action:"):
+            return
+        self._highlighted_action = option_id.removeprefix("manage-action:")
+        self._render_detail(self._actions_by_id[self._highlighted_action])
+
+    @on(OptionList.OptionSelected, "#manage-actions")
+    def option_selected(self, event: OptionList.OptionSelected) -> None:
+        option_id = event.option.id or ""
+        if option_id.startswith("manage-action:"):
+            self.action_choose(option_id.removeprefix("manage-action:"))
+
+    @on(Input.Changed, "#manage-search")
+    def search_changed(self, event: Input.Changed) -> None:
+        if self._finding:
+            self._query = event.value
+            self._render_actions()
+
+    @on(Input.Submitted, "#manage-search")
+    def search_submitted(self) -> None:
+        self._exit_find(commit=True)
+
+    @on(Button.Pressed, "#more-cancel")
+    def close_button(self) -> None:
+        self.dismiss(None)
+
+    def action_find(self) -> None:
+        if self._finding:
+            return
+        self._finding = True
+        self._query_before = self._query
+        self.add_class("finding")
+        search = self.query_one("#manage-search", Input)
+        search.value = self._query
+        search.focus()
+        self.query_one("#manage-help", Static).update(
+            "FIND  Type to filter   Enter Apply   Ctrl+U Clear   Esc Cancel"
+        )
+
+    def _exit_find(self, *, commit: bool) -> None:
+        if not commit:
+            self._query = self._query_before
+            with self.prevent(Input.Changed):
+                self.query_one("#manage-search", Input).value = self._query
+            self._render_actions()
+        self._finding = False
+        self.remove_class("finding")
+        self.query_one("#manage-help", Static).update(
+            "MANAGE  Up/Down or j/k Navigate   Enter Select   / Find   Esc Close"
+        )
+        self.query_one("#manage-actions", OptionList).focus()
+
+    def action_clear_find(self) -> None:
+        if self._finding:
+            self.query_one("#manage-search", Input).value = ""
+
+    def action_cursor_down(self) -> None:
+        if not self._finding:
+            self.query_one("#manage-actions", OptionList).action_cursor_down()
+
+    def action_cursor_up(self) -> None:
+        if not self._finding:
+            self.query_one("#manage-actions", OptionList).action_cursor_up()
+
+    def action_choose(self, action_id: str) -> None:
+        if self._finding:
+            return
+        action = self._actions_by_id[action_id]
+        if not action.enabled:
+            self.notify(
+                action.disabled_reason, title=f"{action.label} unavailable", severity="warning"
+            )
+            return
+        self.dismiss(ManageSelection(action_id, self._current_state(action_id)))
+
+    def action_cancel(self) -> None:
+        if self._finding:
+            self._exit_find(commit=False)
+        else:
+            self.dismiss(None)
 
 
 MoreActionsScreen = ManageSessionScreen
@@ -1179,11 +1631,19 @@ class DeleteSessionScreen(ModalScreen[bool]):
 class ConfirmActionScreen(ModalScreen[bool]):
     BINDINGS: ClassVar[list[BindingSpec]] = [Binding("escape", "cancel", "Cancel")]
 
-    def __init__(self, title: str, session_name: str, consequence: str) -> None:
+    def __init__(
+        self,
+        title: str,
+        session_name: str,
+        consequence: str,
+        *,
+        confirm_label: str = "Confirm",
+    ) -> None:
         super().__init__()
         self.confirm_title = title
         self.session_name = session_name
         self.consequence = consequence
+        self.confirm_label = confirm_label
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-dialog", classes="dialog danger-dialog small-dialog"):
@@ -1196,7 +1656,7 @@ class ConfirmActionScreen(ModalScreen[bool]):
             )
             with Horizontal(classes="dialog-actions"):
                 yield Button("Cancel", id="confirm-cancel")
-                yield Button("Confirm", variant="error", id="confirm-submit")
+                yield Button(self.confirm_label, variant="error", id="confirm-submit")
 
     def on_mount(self) -> None:
         animate_modal_open(self)
@@ -2041,8 +2501,13 @@ class WFApp(App[str | None]):
 
         self.filter_query = context.filter_query
         self.filters = context.filters if filters is None else filters
-        self.selected_name = context.selected_name
-        self.selected_session_id = context.selected_session_id
+        selection_is_visible = any(
+            session.name == context.selected_name
+            and session.session_id == context.selected_session_id
+            for session in self.visible_sessions
+        )
+        self.selected_name = context.selected_name if selection_is_visible else None
+        self.selected_session_id = context.selected_session_id if selection_is_visible else None
         search = self.query_one("#search", Input)
         with self.prevent(Input.Changed):
             search.value = context.search_value
@@ -2899,13 +3364,21 @@ class WFApp(App[str | None]):
         if session:
             self._begin_overlay(InteractionMode.FORM)
             self.push_screen(
-                EditSessionScreen(session),
-                lambda result, target=session: self._edit_session(result, target),
+                IdentityOrganizationScreen(self.service, session),
+                lambda result, target=session: self._save_identity(result, target),
             )
 
-    def _edit_session(self, result: EditResult | None, session: SessionView) -> None:
-        self._restore_dashboard_mode()
-        if result is None or session is None:
+    def _save_identity(
+        self,
+        result: OrganizationEditResult | None,
+        session: SessionView,
+        manage_state: ManageListState | None = None,
+    ) -> None:
+        if result is None:
+            if manage_state is None:
+                self._restore_dashboard_mode()
+            else:
+                self._return_to_manage(session, manage_state)
             return
         try:
             updated = session
@@ -2913,19 +3386,25 @@ class WFApp(App[str | None]):
                 updated = self.service.rename(session.name, result.name)
             updated = self.service.organize(
                 updated.name,
+                display_name=result.display_name,
                 tags=result.tags,
-                state=result.task_state,
-                input_state=result.input_state,
                 project=result.project,
-                pinned=result.pinned,
             )
         except WFError as error:
             self.notify(str(error), title="Save failed", severity="error")
+            if manage_state is None:
+                self._restore_dashboard_mode()
+            else:
+                self._return_to_manage(session, manage_state)
             return
+        if manage_state is None:
+            self._restore_dashboard_mode()
         self.selected_name = updated.name
         self.selected_session_id = updated.session_id
-        self._notify_success("Session details updated")
+        self._notify_success("Identity and organization updated")
         self.refresh_sessions()
+        if manage_state is not None:
+            self._return_to_manage(updated, manage_state)
 
     def action_note(self) -> None:
         session = self._selected()
@@ -2936,17 +3415,58 @@ class WFApp(App[str | None]):
                 lambda note, target=session: self._save_note(note, target),
             )
 
-    def _save_note(self, note: str | None, session: SessionView) -> None:
-        self._restore_dashboard_mode()
-        if note is None or session is None:
+    def _save_note(
+        self,
+        note: str | None,
+        session: SessionView,
+        manage_state: ManageListState | None = None,
+    ) -> None:
+        if note is None:
+            if manage_state is None:
+                self._restore_dashboard_mode()
+            else:
+                self._return_to_manage(session, manage_state)
             return
         try:
-            self.service.update_note(session.name, note)
+            updated = self.service.update_note(session.name, note)
         except WFError as error:
             self.notify(str(error), title="Save failed", severity="error")
+            if manage_state is None:
+                self._restore_dashboard_mode()
+            else:
+                self._return_to_manage(session, manage_state)
             return
+        if manage_state is None:
+            self._restore_dashboard_mode()
         self._notify_success("Task updated")
         self.refresh_sessions()
+        if manage_state is not None:
+            self._return_to_manage(updated, manage_state)
+
+    def _save_status(
+        self,
+        result: StatusEditResult | None,
+        session: SessionView,
+        manage_state: ManageListState,
+    ) -> None:
+        if result is None:
+            self._return_to_manage(session, manage_state)
+            return
+        try:
+            updated = self.service.organize(
+                session.name,
+                state=result.task_state,
+                input_state=result.input_state,
+            )
+        except WFError as error:
+            self.notify(str(error), title="Status update failed", severity="error")
+            self._return_to_manage(session, manage_state)
+            return
+        self.selected_name = updated.name
+        self.selected_session_id = updated.session_id
+        self._notify_success("Task and input status updated")
+        self.refresh_sessions()
+        self._return_to_manage(updated, manage_state)
 
     def action_logs(self) -> None:
         session = self._selected()
@@ -2981,7 +3501,7 @@ class WFApp(App[str | None]):
         self,
         session: SessionView,
         *,
-        initial_focus_id: str | None = None,
+        state: ManageListState | None = None,
     ) -> None:
         current = self._current_session(session)
         if current is None:
@@ -2994,8 +3514,8 @@ class WFApp(App[str | None]):
             return
         self._set_interaction_mode(InteractionMode.MANAGE)
         self.push_screen(
-            ManageSessionScreen(current, initial_focus_id=initial_focus_id),
-            lambda action, target=current: self._manage_action(target, action),
+            ManageSessionScreen(current, state=state),
+            lambda selection, target=current: self._manage_action(target, selection),
         )
 
     def action_more_actions(self) -> None:
@@ -3014,28 +3534,42 @@ class WFApp(App[str | None]):
             None,
         )
 
-    def _manage_action(self, session: SessionView, action: str | None) -> None:
-        if action is None:
+    def _manage_action(self, session: SessionView, selection: ManageSelection | None) -> None:
+        if selection is None:
             self._restore_dashboard_mode()
             return
-        if action == "edit" or action == "status":
+        action = selection.action
+        state = selection.state
+        if action == "identity":
             self._set_interaction_mode(InteractionMode.FORM)
-            self.call_after_refresh(self._open_edit_screen, session)
-        elif action == "note":
+            self.call_after_refresh(self._open_identity_screen, session, state)
+        elif action == "task":
             self._set_interaction_mode(InteractionMode.FORM)
-            self.call_after_refresh(self._open_note_screen, session)
+            self.call_after_refresh(self._open_note_screen, session, state)
+        elif action == "status":
+            self._set_interaction_mode(InteractionMode.FORM)
+            self.call_after_refresh(self._open_status_screen, session, state)
         elif action == "pin":
-            self._restore_dashboard_mode()
-            self._toggle_pin(session)
+            try:
+                updated = self.service.organize(session.name, pinned=not session.pinned)
+            except WFError as error:
+                self.notify(str(error), severity="warning")
+                self._return_to_manage(session, state)
+                return
+            self.selected_name = updated.name
+            self.selected_session_id = updated.session_id
+            self._notify_success("Session unpinned" if session.pinned else "Session pinned")
+            self.refresh_sessions()
+            self._return_to_manage(updated, state)
         elif action == "advanced":
             self._set_interaction_mode(InteractionMode.FORM)
-            self.call_after_refresh(self._open_advanced_screen, session)
+            self.call_after_refresh(self._open_advanced_screen, session, state)
         elif action == "logging":
-            self._restore_dashboard_mode()
             try:
                 updated = self.service.set_logging(session.name, not session.logging_enabled)
             except (WFError, OSError) as error:
                 self.notify(str(error), title="Logging update failed", severity="error")
+                self._return_to_manage(session, state)
                 return
             self.selected_name = updated.name
             self.selected_session_id = updated.session_id
@@ -3043,41 +3577,77 @@ class WFApp(App[str | None]):
                 "Logging enabled" if updated.logging_enabled else "Logging disabled"
             )
             self.refresh_sessions()
+            self._return_to_manage(updated, state)
         else:
             self._set_interaction_mode(InteractionMode.CONFIRMATION)
-            self.call_after_refresh(self._open_manage_confirmation, session, action)
+            self.call_after_refresh(self._open_manage_confirmation, session, action, state)
 
-    def _open_edit_screen(self, session: SessionView) -> None:
+    def _return_to_manage(self, session: SessionView, state: ManageListState) -> None:
+        if self._mode_context is not None:
+            self._mode_context = replace(
+                self._mode_context,
+                selected_name=session.name,
+                selected_session_id=session.session_id,
+            )
+        self._set_interaction_mode(InteractionMode.MANAGE)
+        self.call_after_refresh(self._open_manage_screen, session, state=state)
+
+    def _open_identity_screen(self, session: SessionView, state: ManageListState) -> None:
         current = self._current_session(session)
         if current is None:
             self._restore_dashboard_mode()
             return
         self.push_screen(
-            EditSessionScreen(current),
-            lambda result, target=current: self._edit_session(result, target),
+            IdentityOrganizationScreen(self.service, current),
+            lambda result, target=current, context=state: self._save_identity(
+                result, target, context
+            ),
         )
 
-    def _open_note_screen(self, session: SessionView) -> None:
+    def _open_note_screen(self, session: SessionView, state: ManageListState) -> None:
         current = self._current_session(session)
         if current is None:
             self._restore_dashboard_mode()
             return
         self.push_screen(
             NoteScreen(current),
-            lambda note, target=current: self._save_note(note, target),
+            lambda note, target=current, context=state: self._save_note(note, target, context),
         )
 
-    def _open_advanced_screen(self, session: SessionView) -> None:
+    def _open_status_screen(self, session: SessionView, state: ManageListState) -> None:
+        current = self._current_session(session)
+        if current is None:
+            self._restore_dashboard_mode()
+            return
+        self.push_screen(
+            StatusScreen(current),
+            lambda result, target=current, context=state: self._save_status(
+                result, target, context
+            ),
+        )
+
+    def _open_advanced_screen(
+        self, session: SessionView, state: ManageListState | None = None
+    ) -> None:
         current = self._current_session(session)
         if current is None:
             self._restore_dashboard_mode()
             return
         self.push_screen(
             MessageScreen("Advanced Details", advanced_document(current)),
-            lambda _result: self._restore_dashboard_mode(),
+            lambda _result, target=current, context=state: (
+                self._restore_dashboard_mode()
+                if context is None
+                else self._return_to_manage(target, context)
+            ),
         )
 
-    def _open_manage_confirmation(self, session: SessionView, action: str) -> None:
+    def _open_manage_confirmation(
+        self,
+        session: SessionView,
+        action: str,
+        state: ManageListState,
+    ) -> None:
         current = self._current_session(session)
         if current is None:
             self._restore_dashboard_mode()
@@ -3089,30 +3659,37 @@ class WFApp(App[str | None]):
                 "restart": (
                     "Restart Tool",
                     "The current pane command will be replaced and restarted.",
+                    "Restart Tool",
                 ),
                 "stop-command": (
                     "Stop Command",
                     "WF will send Ctrl+C to the active pane. The tmux session remains available.",
+                    "Stop Command",
                 ),
                 "stop-session": (
                     "Stop tmux Session",
                     "The tmux session will stop. WF metadata and sanitized logs are retained.",
+                    "Stop Session",
                 ),
                 "remove-metadata": (
                     "Remove WF Metadata",
                     "The tmux session remains running but disappears from managed WF views.",
+                    "Remove Metadata",
                 ),
                 "delete-logs": (
                     "Delete Logs",
                     "Persisted sanitized logs will be permanently removed.",
+                    "Delete Logs",
                 ),
             }
-            title, consequence = confirmations[action]
-            screen = ConfirmActionScreen(title, current.name, consequence)
+            title, consequence, confirm_label = confirmations[action]
+            screen = ConfirmActionScreen(
+                title, current.name, consequence, confirm_label=confirm_label
+            )
         self.push_screen(
             screen,
-            lambda confirmed, selected=action, target=current: self._manage_confirmation_result(
-                target, selected, confirmed
+            lambda confirmed, selected=action, target=current, context=state: (
+                self._manage_confirmation_result(target, selected, confirmed, context)
             ),
         )
 
@@ -3121,22 +3698,10 @@ class WFApp(App[str | None]):
         session: SessionView,
         action: str,
         confirmed: bool,
+        state: ManageListState,
     ) -> None:
         if not confirmed:
-            focus_ids = {
-                "restart": "manage-restart",
-                "stop-command": "manage-stop-command",
-                "stop-session": "manage-stop",
-                "remove-metadata": "manage-remove-metadata",
-                "delete-logs": "manage-delete-logs",
-                "delete": "more-delete",
-            }
-            self._set_interaction_mode(InteractionMode.MANAGE)
-            self.call_after_refresh(
-                self._open_manage_screen,
-                session,
-                initial_focus_id=focus_ids[action],
-            )
+            self._return_to_manage(session, state)
             return
         self._restore_dashboard_mode()
         if action == "delete":

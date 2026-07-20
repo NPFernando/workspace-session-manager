@@ -21,9 +21,11 @@ session identity, highlighted option, focus, and scroll position. Cancel restore
 another command may run. App-level bindings are unavailable while a modal or full-screen workflow is
 active, so keystrokes cannot open conflicting screens or leak into the dashboard.
 
-Manage callbacks retain the exact name and tmux session ID captured when the workflow opened. A
-background refresh or selection change cannot redirect a protected action. Canceling a nested
-confirmation reopens Manage with the originating action focused.
+Manage is a searchable action browser with separate General, Runtime, and Danger categories.
+Identity and organization, task text, and task/input status are edited in separate forms. Manage
+callbacks retain the exact name and tmux session ID captured when the workflow opened, so a
+background refresh or selection change cannot redirect an operation. Canceling a nested form or
+confirmation reopens Manage with its query, scroll position, and originating action restored.
 
 ## Session creation
 

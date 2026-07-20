@@ -10,7 +10,7 @@ tmux sessions. Release installation and cutover remain separate approval-gated o
 ## Highlights
 
 - Grouped Textual dashboard with exclusive interaction modes, structured filters, and responsive layouts
-- Distinct Overview, Status, Activity, Recent Output, and protected Manage panels
+- Distinct Overview, Status, Activity, Recent Output, and protected Manage workflows
 - Persistent detached sessions through tmux
 - Claude, Codex, Hermes, and shell profiles with strict TOML validation
 - Separate runtime, task, agent, input, and alert states with notes, projects, tags, and pinning
@@ -93,7 +93,7 @@ hidden unless `list --all` is requested.
 | `Enter` | Attach, or open details at 80-99 columns |
 | `Up`/`Down`, `j`/`k` | Navigate sessions and quick actions |
 | `c` | Create a session |
-| `e` | Edit name, project, tags, task/input state, and pin |
+| `e` | Edit identity and organization |
 | `n` | Edit the task description |
 | `l` | Open the sanitized log view |
 | `*` | Toggle pin |
@@ -108,11 +108,12 @@ hidden unless `list --all` is requested.
 | `q` | Quit |
 
 The create dialog validates names and directories, detects duplicate sessions and Git projects,
-shows the exact command, and keeps Create disabled until required fields are valid. `d` opens Manage;
-stop, metadata removal, log deletion, and complete deletion always require a separate confirmation
-with Cancel focused by default. Canceling a protected confirmation returns to the originating Manage
-action. Modal workflows suspend Search and restore its query, selection, focus, and scroll state when
-they close.
+shows the exact command, and keeps Create disabled until required fields are valid. `d` opens a
+searchable Manage action browser grouped into General, Runtime, and Danger sections. Identity,
+task, and status edits use focused forms; stop, metadata removal, log deletion, and complete deletion
+always require a separate confirmation with Cancel focused by default. Canceling a nested form or
+confirmation returns to the originating Manage action. Modal workflows suspend Search and restore
+its query, selection, focus, and scroll state when they close.
 
 ## Configuration
 

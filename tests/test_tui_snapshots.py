@@ -15,6 +15,8 @@ from wf_session_manager.tui import (
     ConfirmActionScreen,
     CreateSessionScreen,
     DiagnosticsScreen,
+    IdentityOrganizationScreen,
+    StatusScreen,
     WFApp,
 )
 
@@ -314,10 +316,16 @@ def test_palette_mode_snapshot(
     assert snap_compare(app, terminal_size=(120, 35), run_before=open_palette)
 
 
-def test_manage_mode_snapshot(
+@pytest.mark.parametrize(
+    "terminal_size",
+    [(160, 45), (120, 35), (100, 30), (80, 24)],
+    ids=["160x45", "120x35", "100x30", "80x24"],
+)
+def test_manage_responsive_snapshot(
     snap_compare: SnapCompare,
     service: SessionService,
     fake_backend: FakeBackend,
+    terminal_size: tuple[int, int],
 ) -> None:
     app = populated_app(service, fake_backend)
 
@@ -325,7 +333,104 @@ def test_manage_mode_snapshot(
         await pilot.press("d")
         await pilot.pause()
 
-    assert snap_compare(app, terminal_size=(100, 30), run_before=open_manage)
+    assert snap_compare(app, terminal_size=terminal_size, run_before=open_manage)
+
+
+def test_manage_filtered_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def filter_manage(pilot: Pilot) -> None:
+        await pilot.press("d", "/", *"owner-only", "enter")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=filter_manage)
+
+
+def test_manage_disabled_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+    stopped = next(
+        session.name
+        for session in service.list_sessions()
+        if "astrology-pancha-pakshi" in session.name
+    )
+    service.stop_session(stopped)
+
+    async def open_manage(pilot: Pilot) -> None:
+        await pilot.press("d")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=open_manage)
+
+
+@pytest.mark.parametrize("theme", ["light", "monochrome"])
+def test_manage_theme_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    theme: str,
+) -> None:
+    app = populated_app(service, fake_backend, monochrome=theme == "monochrome")
+    app.ui_theme = theme
+
+    async def open_manage(pilot: Pilot) -> None:
+        await pilot.press("d")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=open_manage)
+
+
+def test_manage_ascii_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WF_ASCII", "1")
+    app = populated_app(service, fake_backend)
+
+    async def open_manage(pilot: Pilot) -> None:
+        await pilot.press("d")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=open_manage)
+
+
+def test_identity_form_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def open_identity(pilot: Pilot) -> None:
+        await pilot.press("d", "e")
+        await pilot.pause(0.25)
+        assert isinstance(app.screen, IdentityOrganizationScreen)
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=open_identity)
+
+
+def test_status_form_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def open_status(pilot: Pilot) -> None:
+        await pilot.press("d", "s")
+        await pilot.pause()
+        assert isinstance(app.screen, StatusScreen)
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=open_status)
 
 
 def test_create_form_snapshot(
@@ -417,10 +522,7 @@ def test_destructive_confirmation_snapshot(
 
     async def open_confirmation(pilot: Pilot) -> None:
         await pilot.press("d")
-        stop_button = app.screen.query_one("#manage-stop", Button)
-        stop_button.scroll_visible()
-        await pilot.pause()
-        stop_button.press()
+        app.screen.action_choose("stop-session")
         for _ in range(40):
             await pilot.pause(0.05)
             if isinstance(app.screen, ConfirmActionScreen):

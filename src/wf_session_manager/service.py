@@ -119,6 +119,16 @@ class CreateValidation:
         return not self.errors
 
 
+@dataclass(frozen=True, slots=True)
+class RenameValidation:
+    normalized_name: str
+    name_error: str = ""
+
+    @property
+    def valid(self) -> bool:
+        return not self.name_error
+
+
 def slugify_name(value: str) -> str:
     ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
     normalized = re.sub(r"[^a-z0-9]+", "-", ascii_value.lower())
@@ -436,6 +446,22 @@ class SessionService:
             tool_error=tool_error,
         )
 
+    def validate_rename(self, current_name: str, requested_name: str) -> RenameValidation:
+        record = self._managed_record(current_name)
+        normalized = ""
+        name_error = ""
+        try:
+            normalized = normalized_session_name(record.tool, requested_name)
+        except WFError as error:
+            name_error = str(error)
+        if (
+            normalized
+            and normalized != current_name
+            and (self.backend.session_exists(normalized) or self.store.load(normalized) is not None)
+        ):
+            name_error = f"session already exists: {normalized}"
+        return RenameValidation(normalized_name=normalized, name_error=name_error)
+
     def create(self, request: CreateRequest, *, dry_run: bool = False) -> SessionView:
         validation = self.validate_create(
             request.tool,
@@ -625,6 +651,7 @@ class SessionService:
         self,
         name: str,
         *,
+        display_name: str | None = None,
         tags: list[str] | None = None,
         state: TaskState | None = None,
         input_state: InputState | None = None,
@@ -633,6 +660,8 @@ class SessionService:
     ) -> SessionView:
         record = self._managed_record(name)
         updates: dict[str, object] = {"updated_at": utc_now()}
+        if display_name is not None:
+            updates["display_name"] = display_name
         if tags is not None:
             updates["tags"] = tags
         if state is not None:

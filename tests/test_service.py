@@ -222,6 +222,30 @@ def test_create_collision_uses_final_normalized_name(
     assert without_prefix.normalized_name == "api-refactor"
 
 
+def test_rename_validation_and_display_name_update(
+    service: SessionService,
+    tmp_path: Path,
+) -> None:
+    current = service.create(CreateRequest(name="current", tool=Tool.CLAUDE, cwd=tmp_path))
+    service.create(CreateRequest(name="existing", tool=Tool.CLAUDE, cwd=tmp_path))
+
+    valid = service.validate_rename(current.name, "api_refactor")
+    assert valid.valid
+    assert valid.normalized_name == "claude-api-refactor"
+
+    duplicate = service.validate_rename(current.name, "existing")
+    assert not duplicate.valid
+    assert duplicate.normalized_name == "claude-existing"
+    assert "already exists" in duplicate.name_error
+
+    unchanged = service.validate_rename(current.name, current.name)
+    assert unchanged.valid
+    assert unchanged.normalized_name == current.name
+
+    updated = service.organize(current.name, display_name="API Refactor")
+    assert updated.display_name == "API Refactor"
+
+
 def test_project_detection_uses_metadata_and_never_names_home_ubuntu(
     service: SessionService,
 ) -> None:
