@@ -7,6 +7,7 @@ from threading import Event
 import pytest
 from textual.command import CommandPalette
 from textual.containers import VerticalScroll
+from textual.pilot import Pilot
 from textual.widgets import Button, Input, OptionList, Select, Static, Switch, TextArea
 
 from conftest import FakeBackend
@@ -42,6 +43,22 @@ from wf_session_manager.tui import (
 
 def create_managed(service: SessionService, name: str, tool: Tool) -> str:
     return service.create(CreateRequest(name=name, tool=tool, cwd=Path("/tmp"))).name
+
+
+async def wait_for_create_validation(pilot: Pilot[object], screen: CreateSessionScreen) -> None:
+    for _ in range(40):
+        if screen._validated_signature == screen._signature():
+            return
+        await pilot.pause(0.05)
+    raise AssertionError("create-session validation did not complete")
+
+
+async def wait_for_confirmation(pilot: Pilot[object], app: WFApp) -> ConfirmActionScreen:
+    for _ in range(40):
+        if isinstance(app.screen, ConfirmActionScreen):
+            return app.screen
+        await pilot.pause(0.05)
+    raise AssertionError("confirmation screen did not open")
 
 
 @pytest.mark.asyncio
@@ -337,17 +354,17 @@ async def test_create_form_validates_duplicates_and_directory_inline(
 
         app.screen.query_one("#create-name", Input).value = "existing"
         app.screen.query_one("#create-cwd", Input).value = str(project)
-        await pilot.pause(0.25)
+        await wait_for_create_validation(pilot, app.screen)
         assert submit.disabled
         assert "already exists" in str(app.screen.query_one("#create-name-status", Static).content)
 
         app.screen.query_one("#create-name", Input).value = "new-work"
-        await pilot.pause(0.25)
+        await wait_for_create_validation(pilot, app.screen)
         assert not submit.disabled
         assert app.screen.query_one("#create-project", Input).value == "detected-project"
 
         app.screen.query_one("#create-cwd", Input).value = str(project / "missing")
-        await pilot.pause(0.25)
+        await wait_for_create_validation(pilot, app.screen)
         assert submit.disabled
         assert app.screen.query_one("#create-name", Input).value == "new-work"
 
@@ -364,7 +381,7 @@ async def test_create_form_uses_latest_normalized_name_value(
         form.query_one("#create-name", Input).value = "_"
         form.query_one("#create-name", Input).value = "api-refactor"
         form.query_one("#create-cwd", Input).value = str(tmp_path)
-        await pilot.pause(0.25)
+        await wait_for_create_validation(pilot, form)
         status = str(form.query_one("#create-name-status", Static).content)
         assert "Available as claude-api-refactor" in status
         assert not form.query_one("#create-submit", Button).disabled
@@ -537,7 +554,7 @@ async def test_home_directory_does_not_become_ubuntu_project(
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("c")
         app.screen.query_one("#create-name", Input).value = "home-task"
-        await pilot.pause(0.25)
+        await wait_for_create_validation(pilot, app.screen)
         assert app.screen.query_one("#create-project", Input).value == ""
         assert "Project not detected" in str(
             app.screen.query_one("#create-project-status", Static).content
@@ -575,7 +592,7 @@ async def test_ctrl_enter_requires_current_validation_and_creates_incrementally(
         assert isinstance(app.screen, CreateSessionScreen)
 
         app.screen.query_one("#create-name", Input).value = "api_refactor"
-        await pilot.pause(0.25)
+        await wait_for_create_validation(pilot, app.screen)
         assert not app.screen.query_one("#create-submit", Button).disabled
         render_calls = 0
         original_render = app._render_options
@@ -622,7 +639,7 @@ async def test_prefix_can_be_disabled_without_changing_the_backend(
         await pilot.press("c")
         app.screen.query_one("#create-name", Input).value = "api_refactor"
         app.screen.query_one("#create-prefix", Switch).value = False
-        await pilot.pause(0.25)
+        await wait_for_create_validation(pilot, app.screen)
         assert "Available as api-refactor" in str(
             app.screen.query_one("#create-name-status", Static).content
         )
@@ -650,7 +667,7 @@ async def test_failed_startup_is_actionable_and_leaves_no_metadata(
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("c")
         app.screen.query_one("#create-name", Input).value = "will-fail"
-        await pilot.pause(0.25)
+        await wait_for_create_validation(pilot, app.screen)
         await pilot.press("ctrl+enter")
         await pilot.pause()
 
@@ -762,8 +779,7 @@ async def test_manage_requires_cancel_focused_confirmation_for_stop(
         app.screen.query_one("#manage-stop", Button).scroll_visible()
         await pilot.pause()
         await pilot.click("#manage-stop")
-        await pilot.pause()
-        assert isinstance(app.screen, ConfirmActionScreen)
+        await wait_for_confirmation(pilot, app)
         assert app.focused is app.screen.query_one("#confirm-cancel", Button)
         await pilot.press("escape")
         await pilot.pause()
@@ -791,11 +807,9 @@ async def test_manage_confirmation_keeps_original_session_target(
 
         app.selected_name = other.name
         app.selected_session_id = other.session_id
-        app.screen.query_one("#manage-stop", Button).scroll_visible()
-        await pilot.pause()
-        await pilot.click("#manage-stop")
-        await pilot.pause()
-        await pilot.click("#confirm-submit")
+        app.screen.query_one("#manage-stop", Button).press()
+        await wait_for_confirmation(pilot, app)
+        app.screen.query_one("#confirm-submit", Button).press()
         await pilot.pause()
 
         assert not fake_backend.session_exists(original_name)

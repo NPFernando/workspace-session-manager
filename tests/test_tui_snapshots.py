@@ -417,10 +417,11 @@ def test_destructive_confirmation_snapshot(
 
     async def open_confirmation(pilot: Pilot) -> None:
         await pilot.press("d")
-        app.screen.query_one("#manage-stop", Button).scroll_visible()
+        stop_button = app.screen.query_one("#manage-stop", Button)
+        stop_button.scroll_visible()
         await pilot.pause()
-        await pilot.click("#manage-stop")
-        for _ in range(20):
+        stop_button.press()
+        for _ in range(40):
             await pilot.pause(0.05)
             if isinstance(app.screen, ConfirmActionScreen):
                 break
