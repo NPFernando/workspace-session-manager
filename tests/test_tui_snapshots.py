@@ -11,7 +11,7 @@ from textual.widgets import Button, Input, LoadingIndicator, Static
 from conftest import FakeBackend
 from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
 from wf_session_manager.service import SessionService
-from wf_session_manager.tui import DiagnosticsScreen, WFApp
+from wf_session_manager.tui import CreateSessionScreen, DiagnosticsScreen, WFApp
 
 SnapCompare = Callable[..., bool]
 FUTURE_ACTIVITY = datetime(2099, 1, 1, tzinfo=UTC)
@@ -291,7 +291,7 @@ def test_create_form_snapshot(
     async def enter_valid_name(pilot: Pilot) -> None:
         await pilot.press("c")
         app.screen.query_one("#create-name", Input).value = "api-refactor"
-        await pilot.pause()
+        await pilot.pause(0.25)
 
     assert snap_compare(app, terminal_size=(120, 35), run_before=enter_valid_name)
 
@@ -307,9 +307,27 @@ def test_create_validation_error_snapshot(
         await pilot.press("c")
         app.screen.query_one("#create-name", Input).value = "astrology-website"
         app.screen.query_one("#create-cwd", Input).value = "/missing/wf-directory"
-        await pilot.pause()
+        await pilot.pause(0.25)
 
     assert snap_compare(app, terminal_size=(120, 35), run_before=enter_invalid_values)
+
+
+def test_create_advanced_options_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def open_advanced_options(pilot: Pilot) -> None:
+        await pilot.press("c")
+        await pilot.pause()
+        assert isinstance(app.screen, CreateSessionScreen)
+        app.screen._set_advanced(True)
+        app.screen.query_one("#create-advanced-toggle", Button).focus()
+        await pilot.pause(0.25)
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=open_advanced_options)
 
 
 def test_usage_limit_warning_snapshot(

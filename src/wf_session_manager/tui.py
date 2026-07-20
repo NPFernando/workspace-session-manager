@@ -9,6 +9,7 @@ import shlex
 import socket
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from time import perf_counter
 from typing import Any, ClassVar
@@ -19,6 +20,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
+from textual.timer import Timer
 from textual.widgets import (
     Button,
     Checkbox,
@@ -29,6 +31,7 @@ from textual.widgets import (
     Select,
     Static,
     Switch,
+    TextArea,
 )
 from textual.widgets.option_list import Option
 
@@ -47,7 +50,7 @@ from wf_session_manager.models import (
     Tool,
     normalize_tags,
 )
-from wf_session_manager.service import SessionService
+from wf_session_manager.service import SessionService, normalized_session_name
 
 BindingSpec = Binding | tuple[str, str] | tuple[str, str, str]
 RECENT_WINDOW = timedelta(hours=24)
@@ -335,7 +338,13 @@ class EditResult:
     pinned: bool
 
 
-class CreateSessionScreen(ModalScreen[CreateRequest | None]):
+@dataclass(frozen=True, slots=True)
+class CreateFormResult:
+    request: CreateRequest
+    start_attached: bool = False
+
+
+class CreateSessionScreen(ModalScreen[CreateFormResult | None]):
     BINDINGS: ClassVar[list[BindingSpec]] = [
         Binding("escape", "cancel", "Cancel"),
         Binding("ctrl+enter", "submit", "Create"),
@@ -353,8 +362,14 @@ class CreateSessionScreen(ModalScreen[CreateRequest | None]):
         self.default_tool = default_tool
         self._detected_project = ""
         self._touched: set[str] = set()
-        self._validating = False
         self._advanced = False
+        self._advanced_focus_id: str | None = None
+        self._validation_timer: Timer | None = None
+        self._validation_serial = 0
+        self._validated_signature: tuple[object, ...] | None = None
+        self._validated_request: CreateRequest | None = None
+        self._normalized_name = ""
+        self._project_user_edited = False
 
     def _recent_directories(self) -> list[tuple[str, str]]:
         directories = [self.default_cwd]
@@ -362,190 +377,450 @@ class CreateSessionScreen(ModalScreen[CreateRequest | None]):
             for session in self.service.list_sessions():
                 if session.cwd not in directories:
                     directories.append(session.cwd)
-        return [(display_path(path), str(path)) for path in directories[:8]]
+        repository_roots = {Path.home() / "workspace" / "projects"}
+        try:
+            self.default_cwd.parent.relative_to(Path.home())
+        except ValueError:
+            pass
+        else:
+            repository_roots.add(self.default_cwd.parent)
+        detected_repositories: list[Path] = []
+        for root in repository_roots:
+            try:
+                children = sorted(root.iterdir())
+            except OSError:
+                continue
+            for child in children:
+                try:
+                    is_repository = child.is_dir() and (child / ".git").exists()
+                except OSError:
+                    continue
+                if is_repository and child not in directories:
+                    detected_repositories.append(child)
+        options: list[tuple[str, str]] = []
+        for index, path in enumerate(directories[:8]):
+            kind = "Current directory" if index == 0 else "Recently used"
+            options.append((f"{kind}: {display_path(path)}", str(path)))
+        for path in detected_repositories[:5]:
+            options.append((f"Git repository: {display_path(path)}", str(path)))
+        options.append(("Browse or enter another path", "__browse__"))
+        return options
 
     def compose(self) -> ComposeResult:
+        disclosure = ">" if getattr(self.app, "ascii_only", False) else "▸"
         with Vertical(id="create-dialog", classes="dialog create-dialog"):
             yield Label("Create Session", classes="dialog-title")
-            with VerticalScroll(id="create-form"):
+            with Vertical(id="create-basic"):
                 with Horizontal(classes="form-row"):
                     yield Label("Tool", classes="field-label")
                     yield Select(
                         [(TOOL_LABELS[tool], tool.value) for tool in Tool],
                         value=self.default_tool.value,
                         allow_blank=False,
+                        compact=True,
                         id="create-tool",
                     )
                 yield Static("", id="create-tool-status", classes="field-status")
                 with Horizontal(classes="form-row"):
                     yield Label("Session name", classes="field-label")
-                    yield Input(placeholder="api-refactor", id="create-name")
+                    yield Input(
+                        placeholder="api_refactor",
+                        compact=True,
+                        max_length=200,
+                        id="create-name",
+                    )
                 yield Static("", id="create-name-status", classes="field-status")
-                with Horizontal(classes="form-row"):
+                with Horizontal(classes="form-row task-row"):
                     yield Label("Task", classes="field-label")
-                    yield Input(placeholder="Improve API authentication", id="create-note")
+                    yield TextArea(
+                        placeholder="Improve API authentication",
+                        compact=True,
+                        soft_wrap=True,
+                        tab_behavior="focus",
+                        id="create-note",
+                    )
                 with Horizontal(classes="form-row"):
                     yield Label("Working directory", classes="field-label")
-                    yield Input(value=display_path(self.default_cwd), id="create-cwd")
+                    yield Input(value=display_path(self.default_cwd), compact=True, id="create-cwd")
                     yield Select(
                         self._recent_directories(),
-                        value=str(self.default_cwd),
-                        allow_blank=False,
+                        prompt="Recent",
+                        allow_blank=True,
+                        compact=True,
                         id="create-recent-dir",
                     )
                 yield Static("", id="create-cwd-status", classes="field-status")
                 with Horizontal(classes="form-row"):
                     yield Label("Project", classes="field-label")
-                    yield Input(placeholder="api-platform", id="create-project")
+                    yield Input(
+                        placeholder="Optional",
+                        compact=True,
+                        max_length=200,
+                        id="create-project",
+                    )
+                    yield Button("Use home workspace", id="create-home-project", compact=True)
+                yield Static("", id="create-project-status", classes="field-status")
                 with Horizontal(id="logging-row"):
                     yield Label("Logging", classes="field-label")
                     yield Switch(value=True, id="create-logging")
-                    yield Static("Sanitized, owner-only, size-limited", id="logging-hint")
-                yield Button("Advanced options", id="create-advanced-toggle")
-                with Vertical(id="create-advanced", classes="collapsed"):
-                    with Horizontal(classes="form-row"):
-                        yield Label("Tags", classes="field-label")
-                        yield Input(placeholder="backend, urgent", id="create-tags")
-                    yield Static("", id="create-tags-status", classes="field-status")
-                    yield Static(
-                        "Command arguments, environment profiles, retention, and tmux options "
-                        "use the validated project configuration.",
-                        classes="advanced-hint",
+                    yield Static("Enabled", id="logging-state")
+                yield Static("", id="logging-hint")
+                yield Button(
+                    f"{disclosure} Advanced options",
+                    id="create-advanced-toggle",
+                    compact=True,
+                )
+            with (
+                VerticalScroll(id="create-advanced", classes="collapsed"),
+                Vertical(id="create-advanced-content"),
+            ):
+                with Horizontal(classes="form-row"):
+                    yield Label("Tags", classes="field-label")
+                    yield Input(placeholder="backend, urgent", compact=True, id="create-tags")
+                yield Static("", id="create-tags-status", classes="field-status")
+                with Horizontal(classes="form-row"):
+                    yield Label("Command arguments", classes="field-label")
+                    yield Input(
+                        value="From tool configuration",
+                        compact=True,
+                        disabled=True,
+                        id="create-command-args",
                     )
+                yield Static(
+                    "Edit the tool profile in config.toml to change arguments.",
+                    classes="field-help",
+                )
+                with Horizontal(classes="form-row"):
+                    yield Label("Environment", classes="field-label")
+                    yield Input(
+                        value="Default profile",
+                        compact=True,
+                        disabled=True,
+                        id="create-environment",
+                    )
+                with Horizontal(classes="form-row"):
+                    yield Label("Log retention", classes="field-label")
+                    yield Input(
+                        value="Size-limited",
+                        compact=True,
+                        disabled=True,
+                        id="create-retention",
+                    )
+                with Horizontal(classes="form-row"):
+                    yield Label("Executable", classes="field-label")
+                    yield Input(compact=True, disabled=True, id="create-executable")
+                with Horizontal(classes="form-row"):
+                    yield Label("tmux window", classes="field-label")
+                    yield Input(value="main", compact=True, disabled=True, id="create-window-name")
+                with Horizontal(classes="form-row"):
+                    yield Label("Initial status", classes="field-label")
+                    yield Select(
+                        [(display_state(state.value), state.value) for state in TaskState],
+                        value=TaskState.IN_PROGRESS.value,
+                        allow_blank=False,
+                        compact=True,
+                        id="create-task-state",
+                    )
+                with Horizontal(classes="form-row"):
+                    yield Label("Startup", classes="field-label")
+                    yield Select(
+                        [("Start detached", "detached"), ("Start and attach", "attached")],
+                        value="detached",
+                        allow_blank=False,
+                        compact=True,
+                        id="create-startup",
+                    )
+                with Horizontal(classes="form-row"):
+                    yield Label("Tool prefix", classes="field-label")
+                    yield Switch(value=True, id="create-prefix")
+                    yield Static("Automatic", id="prefix-state")
             with Horizontal(classes="preview-row"):
                 yield Label("Command", classes="field-label")
                 yield Static("", id="command-preview")
-            yield Static("Enter a session name to continue.", id="create-submit-reason")
             yield Static(
                 "FORM  Tab Next   Shift+Tab Previous   Ctrl+Enter Create   Esc Cancel",
                 id="create-form-help",
             )
+            yield Static("", id="create-summary")
+            yield Static("Enter a session name to continue.", id="create-submit-reason")
             with Horizontal(classes="dialog-actions"):
                 yield Button("Cancel", id="create-cancel")
                 yield Button("Create Session", variant="primary", id="create-submit", disabled=True)
 
     def on_mount(self) -> None:
         animate_modal_open(self)
-        self._validate()
+        self.set_class(self.size.width < 100, "narrow-form")
+        self.set_class(self.size.width < 120 or self.size.height < 35, "compact-form")
+        self._touched.update(("tool", "cwd"))
+        log_root = "WF state/logs"
+        if self.service:
+            try:
+                self.service.paths.logs_dir.relative_to(Path.home())
+            except ValueError:
+                log_root = "$WF_STATE/logs"
+            else:
+                log_root = display_path(self.service.paths.logs_dir)
+        self.query_one("#logging-hint", Static).update(
+            f"Output is sanitized, owner-only, and size-limited.\nStorage: {log_root}/"
+        )
+        self._schedule_validation()
         self.query_one("#create-name", Input).focus()
+
+    def on_resize(self, event: events.Resize) -> None:
+        self.set_class(event.size.width < 100, "narrow-form")
+        self.set_class(event.size.width < 120 or event.size.height < 35, "compact-form")
 
     def _parse_tags(self) -> list[str]:
         value = self.query_one("#create-tags", Input).value
         return normalize_tags([item for item in re.split(r"[\s,]+", value) if item])
 
-    def _validate(self) -> None:
-        if self._validating:
+    def _signature(self) -> tuple[object, ...]:
+        return (
+            self.query_one("#create-tool", Select).value,
+            self.query_one("#create-name", Input).value,
+            self.query_one("#create-cwd", Input).value,
+            self.query_one("#create-project", Input).value,
+            self.query_one("#create-note", TextArea).text,
+            self.query_one("#create-tags", Input).value,
+            self.query_one("#create-logging", Switch).value,
+            self.query_one("#create-prefix", Switch).value,
+            self.query_one("#create-task-state", Select).value,
+            self.query_one("#create-startup", Select).value,
+        )
+
+    def _schedule_validation(self) -> None:
+        self._validation_serial += 1
+        if self._validation_timer is not None:
+            self._validation_timer.stop()
+        self._validated_signature = None
+        self._validated_request = None
+        self.query_one("#create-submit", Button).disabled = True
+        for field in ("name", "cwd"):
+            if field in self._touched:
+                self._render_field_status(f"#create-{field}-status", "checking", "Checking...")
+        self._render_readiness()
+        serial = self._validation_serial
+        self._validation_timer = self.set_timer(0.2, lambda: self._validate(serial))
+
+    def _validate(self, serial: int | None = None) -> None:
+        if serial is not None and serial != self._validation_serial:
             return
-        self._validating = True
+        signature = self._signature()
         tool = Tool(str(self.query_one("#create-tool", Select).value))
         cwd = Path(self.query_one("#create-cwd", Input).value).expanduser()
         name = self.query_one("#create-name", Input).value.strip()
-        try:
-            if self.service:
-                validation = self.service.validate_create(tool, name, cwd)
-                command = validation.command
-                name_error = validation.name_error
-                cwd_error = validation.cwd_error
-                tool_error = validation.tool_error
-                project_input = self.query_one("#create-project", Input)
-                if validation.detected_project and (
-                    not project_input.value or project_input.value == self._detected_project
-                ):
-                    self._detected_project = validation.detected_project
-                    project_input.value = validation.detected_project
-            else:
-                validation = None
-                command = (tool.value,)
-                name_error = "" if name else "session name must contain a letter or digit"
-                cwd_error = "" if cwd.is_dir() else f"working directory does not exist: {cwd}"
-                tool_error = ""
-            tag_error = ""
+        automatic_prefix = self.query_one("#create-prefix", Switch).value
+        if self.service:
+            validation = self.service.validate_create(
+                tool, name, cwd, automatic_prefix=automatic_prefix
+            )
+            command = validation.command
+            name_error = validation.name_error
+            cwd_error = validation.cwd_error
+            tool_error = validation.tool_error
+            detected_project = validation.detected_project
+            resolved_cwd = validation.cwd
+            normalized = validation.normalized_name
+        else:
             try:
-                self._parse_tags()
+                normalized = normalized_session_name(tool, name, automatic_prefix=automatic_prefix)
+                name_error = ""
+            except WFError as error:
+                normalized = ""
+                name_error = str(error)
+            resolved_cwd = cwd.resolve() if cwd.is_dir() else None
+            cwd_error = "" if resolved_cwd else f"working directory does not exist: {cwd}"
+            tool_error = ""
+            detected_project = ""
+            command = (tool.value,)
+
+        project_input = self.query_one("#create-project", Input)
+        if not self._project_user_edited and project_input.value in ("", self._detected_project):
+            self._detected_project = detected_project
+            with self.prevent(Input.Changed):
+                project_input.value = detected_project
+        self.query_one("#create-home-project", Button).display = bool(
+            resolved_cwd and resolved_cwd == Path.home().resolve()
+        )
+        project_status = self.query_one("#create-project-status", Static)
+        project_status.update(
+            f"Detected project: {detected_project}" if detected_project else "Project not detected"
+        )
+        project_status.set_class(bool(detected_project), "valid")
+
+        tag_error = ""
+        try:
+            tags = self._parse_tags()
+        except ValueError as validation_error:
+            tags = []
+            tag_error = str(validation_error)
+
+        self.query_one("#command-preview", Static).update(shlex.join(command))
+        with self.prevent(Input.Changed):
+            self.query_one("#create-executable", Input).value = command[0] if command else ""
+        signature = self._signature()
+        self._normalized_name = normalized
+        self._render_name_status(name, normalized, name_error)
+        self._render_field_status(
+            "#create-cwd-status",
+            "invalid" if cwd_error else "valid",
+            cwd_error or f"Directory exists: {display_path(resolved_cwd or cwd)}",
+            visible="cwd" in self._touched,
+        )
+        self._render_field_status(
+            "#create-tool-status",
+            "invalid" if tool_error else "valid",
+            tool_error or "Available",
+        )
+        self._render_field_status(
+            "#create-tags-status",
+            "invalid" if tag_error else "valid",
+            tag_error or "Tags are valid",
+            visible="tags" in self._touched,
+        )
+        errors = [issue for issue in (name_error, cwd_error, tool_error, tag_error) if issue]
+        request: CreateRequest | None = None
+        if not errors and resolved_cwd is not None:
+            try:
+                request = CreateRequest(
+                    name=name,
+                    display_name=name,
+                    tool=tool,
+                    cwd=resolved_cwd,
+                    project=project_input.value.strip(),
+                    note=self.query_one("#create-note", TextArea).text.strip(),
+                    tags=tags,
+                    task_state=TaskState(str(self.query_one("#create-task-state", Select).value)),
+                    logging_enabled=self.query_one("#create-logging", Switch).value,
+                    automatic_prefix=automatic_prefix,
+                )
             except ValueError as validation_error:
-                tag_error = str(validation_error)
-            self._render_field_status(
-                "#create-tags-status",
-                tag_error,
-                "Tags are valid",
-                touched="tags" in self._touched,
-            )
-            self.query_one("#command-preview", Static).update(shlex.join(command))
-            normalized = validation.normalized_name if validation else name
-            self._render_field_status(
-                "#create-name-status",
-                name_error,
-                f"Available as {normalized}" if normalized else "",
-                touched="name" in self._touched,
-            )
-            self._render_field_status(
-                "#create-cwd-status",
-                cwd_error,
-                "Directory exists",
-                touched="cwd" in self._touched,
-            )
-            self._render_field_status(
-                "#create-tool-status",
-                tool_error,
-                "Tool is available",
-                touched=bool(tool_error),
-            )
-            errors = [issue for issue in (name_error, cwd_error, tool_error, tag_error) if issue]
-            submit = self.query_one("#create-submit", Button)
-            submit.disabled = bool(errors)
-            reason = self.query_one("#create-submit-reason", Static)
-            if errors:
-                reason.display = True
-                reason.update(f"Create unavailable: {errors[0]}")
-                reason.add_class("invalid")
-            else:
-                reason.display = False
-                reason.update("Ready to create. Ctrl+Enter also submits.")
-                reason.remove_class("invalid")
-        finally:
-            self._validating = False
+                errors.append(str(validation_error))
+        if signature == self._signature():
+            self._validated_signature = signature
+            self._validated_request = request
+            self.query_one("#create-submit", Button).disabled = request is None
+        self._render_readiness(errors)
 
     def _render_field_status(
-        self, selector: str, error: str, success: str, *, touched: bool
+        self,
+        selector: str,
+        state: str,
+        message: str,
+        *,
+        visible: bool = True,
     ) -> None:
         target = self.query_one(selector, Static)
-        target.display = touched or bool(error)
-        if not touched:
+        target.display = visible
+        target.remove_class("valid", "warning", "invalid", "checking")
+        if not visible:
             target.update("")
-            target.remove_class("valid", "invalid")
-        elif error:
-            target.update(Text.assemble(("x ", "bold red"), error))
-            target.remove_class("valid")
-            target.add_class("invalid")
+            return
+        markers = {"valid": "+", "warning": "!", "invalid": "x", "checking": "..."}
+        target.update(f"{markers.get(state, '')} {message}".strip())
+        target.add_class(state)
+
+    def _render_name_status(self, entered: str, normalized: str, error: str) -> None:
+        if "name" not in self._touched:
+            self._render_field_status("#create-name-status", "neutral", "", visible=False)
+            return
+        if error:
+            self._render_field_status("#create-name-status", "invalid", error)
+            return
+        message = Text()
+        changed = entered.strip() != normalized
+        if changed:
+            message.append("! Normalized for tmux/WF\n", "#e9b44c")
+        message.append(f"Display name  {entered.strip()}\n", "dim")
+        message.append(f"+ Available as {normalized}", "#72c78e")
+        target = self.query_one("#create-name-status", Static)
+        target.display = True
+        target.remove_class("valid", "warning", "invalid", "checking")
+        target.add_class("warning" if changed else "valid")
+        target.update(message)
+
+    def _render_readiness(self, errors: list[str] | None = None) -> None:
+        summary = self.query_one("#create-summary", Static)
+        reason = self.query_one("#create-submit-reason", Static)
+        request = self._validated_request
+        if request is not None and self._normalized_name:
+            summary.update(
+                labeled_values(
+                    [
+                        ("Ready", "to create"),
+                        ("Tool", TOOL_LABELS[request.tool]),
+                        ("Session", self._normalized_name),
+                        ("Directory", display_path(request.cwd)),
+                        ("Command", str(self.query_one("#command-preview", Static).content)),
+                        ("Logging", "Enabled" if request.logging_enabled else "Disabled"),
+                    ]
+                )
+            )
+            summary.display = True
+            reason.display = False
+            return
+        summary.display = False
+        reason.display = True
+        reason.remove_class("invalid")
+        if "name" not in self._touched or not self.query_one("#create-name", Input).value:
+            reason.update("Enter a session name to continue.")
+        elif errors:
+            reason.update(f"Create Session unavailable: {errors[0]}")
+            reason.add_class("invalid")
         else:
-            target.update(Text.assemble(("+ ", "bold green"), success))
-            target.remove_class("invalid")
-            target.add_class("valid")
+            reason.update("Checking validation...")
 
     @on(Select.Changed, "#create-tool")
     def tool_changed(self) -> None:
         self._touched.add("tool")
-        self._validate()
+        self._schedule_validation()
 
     @on(Select.Changed, "#create-recent-dir")
     def recent_directory_changed(self, event: Select.Changed) -> None:
-        if event.value is not Select.BLANK:
+        if event.value is not Select.NULL:
+            if str(event.value) == "__browse__":
+                self.query_one("#create-cwd", Input).focus()
+                self.query_one("#create-recent-dir", Select).value = Select.NULL
+                return
             selected = display_path(Path(str(event.value)))
             if self.query_one("#create-cwd", Input).value == selected:
                 return
             self._touched.add("cwd")
             self.query_one("#create-cwd", Input).value = selected
+            self.query_one("#create-recent-dir", Select).value = Select.NULL
+
+    @on(Select.Changed, "#create-task-state, #create-startup")
+    def advanced_select_changed(self) -> None:
+        self._schedule_validation()
 
     @on(Input.Changed)
     def input_changed(self, event: Input.Changed) -> None:
-        if event.input.id and event.input.id.startswith("create-"):
+        if event.input.id in {"create-name", "create-cwd", "create-project", "create-tags"}:
             if event.input.id == "create-name":
                 self._touched.add("name")
             elif event.input.id == "create-cwd":
                 self._touched.add("cwd")
             elif event.input.id == "create-tags":
                 self._touched.add("tags")
-            self._validate()
+            elif event.input.id == "create-project":
+                self._project_user_edited = True
+            self._schedule_validation()
+
+    @on(TextArea.Changed, "#create-note")
+    def task_changed(self) -> None:
+        self._schedule_validation()
+
+    @on(Switch.Changed, "#create-logging, #create-prefix")
+    def switch_changed(self, event: Switch.Changed) -> None:
+        if event.switch.id == "create-logging":
+            self.query_one("#logging-state", Static).update(
+                "Enabled" if event.value else "Disabled"
+            )
+        else:
+            self.query_one("#prefix-state", Static).update(
+                "Automatic" if event.value else "Disabled"
+            )
+        self._schedule_validation()
 
     @on(Button.Pressed)
     def button_pressed(self, event: Button.Pressed) -> None:
@@ -553,10 +828,11 @@ class CreateSessionScreen(ModalScreen[CreateRequest | None]):
             self.dismiss(None)
             return
         if event.button.id == "create-advanced-toggle":
-            self._advanced = not self._advanced
-            advanced = self.query_one("#create-advanced", Vertical)
-            advanced.set_class(not self._advanced, "collapsed")
-            event.button.label = "Hide advanced options" if self._advanced else "Advanced options"
+            self._set_advanced(not self._advanced)
+            return
+        if event.button.id == "create-home-project":
+            self.query_one("#create-project", Input).value = "Home workspace"
+            self._project_user_edited = True
             return
         if event.button.id != "create-submit":
             return
@@ -564,25 +840,93 @@ class CreateSessionScreen(ModalScreen[CreateRequest | None]):
 
     def action_submit(self) -> None:
         button = self.query_one("#create-submit", Button)
-        if button.disabled:
+        if button.disabled or self._validated_signature != self._signature():
             return
-        try:
-            request = CreateRequest(
-                name=self.query_one("#create-name", Input).value,
-                tool=Tool(str(self.query_one("#create-tool", Select).value)),
-                cwd=Path(self.query_one("#create-cwd", Input).value).expanduser(),
-                project=self.query_one("#create-project", Input).value.strip(),
-                note=self.query_one("#create-note", Input).value.strip(),
-                tags=self._parse_tags(),
-                logging_enabled=self.query_one("#create-logging", Switch).value,
+        request = self._validated_request
+        if request is None:
+            return
+        self.dismiss(
+            CreateFormResult(
+                request=request,
+                start_attached=str(self.query_one("#create-startup", Select).value) == "attached",
             )
-        except ValueError as error:
-            self.notify(str(error), title="Cannot create session", severity="error")
-            return
-        self.dismiss(request)
+        )
+
+    def _set_advanced(self, expanded: bool) -> None:
+        focused = self.app.focused
+        advanced = self.query_one("#create-advanced", VerticalScroll)
+        if not expanded and focused is not None and advanced in focused.ancestors:
+            self._advanced_focus_id = focused.id
+        self._advanced = expanded
+        advanced.set_class(not expanded, "collapsed")
+        self.query_one("#create-dialog").set_class(expanded, "advanced")
+        toggle = self.query_one("#create-advanced-toggle", Button)
+        if getattr(self.app, "ascii_only", False):
+            toggle.label = "v Advanced options" if expanded else "> Advanced options"
+        else:
+            toggle.label = "▾ Advanced options" if expanded else "▸ Advanced options"
+        if not expanded and focused is not None and advanced in focused.ancestors:
+            toggle.focus()
+        elif expanded and self._advanced_focus_id:
+            self.call_after_refresh(self.query_one(f"#{self._advanced_focus_id}").focus)
 
     def action_cancel(self) -> None:
+        if self._advanced:
+            self._set_advanced(False)
+            self.query_one("#create-advanced-toggle", Button).focus()
+            return
         self.dismiss(None)
+
+
+class CreateFailureScreen(ModalScreen[str | None]):
+    BINDINGS: ClassVar[list[BindingSpec]] = [Binding("escape", "close", "Close")]
+
+    def __init__(self, session_name: str, error: str, *, metadata_exists: bool) -> None:
+        super().__init__()
+        self.session_name = session_name
+        self.error = error
+        self.metadata_exists = metadata_exists
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="create-failure-dialog", classes="dialog small-dialog danger-dialog"):
+            yield Label("Session Startup Failed", classes="dialog-title danger-title")
+            yield Static(
+                f"{self.session_name} was not started.\n\n{self.error}",
+                classes="confirm-copy",
+            )
+            yield Static(
+                "WF preserved the validated request. Retry after correcting the environment, "
+                "or inspect the failure details.",
+                classes="dialog-context",
+            )
+            with Horizontal(classes="dialog-actions failure-actions"):
+                yield Button("Retry", variant="primary", id="create-failure-retry")
+                yield Button("Open Details", id="create-failure-details")
+                yield Button(
+                    "Remove Metadata",
+                    variant="error",
+                    id="create-failure-remove",
+                    disabled=not self.metadata_exists,
+                )
+                yield Button("Close", id="create-failure-close")
+
+    def on_mount(self) -> None:
+        animate_modal_open(self)
+        self.query_one("#create-failure-close", Button).focus()
+
+    @on(Button.Pressed)
+    def button_pressed(self, event: Button.Pressed) -> None:
+        actions = {
+            "create-failure-retry": "retry",
+            "create-failure-details": "details",
+            "create-failure-remove": "remove",
+            "create-failure-close": "close",
+        }
+        if event.button.id in actions:
+            self.dismiss(actions[event.button.id])
+
+    def action_close(self) -> None:
+        self.dismiss("close")
 
 
 class EditSessionScreen(ModalScreen[EditResult | None]):
@@ -1374,6 +1718,28 @@ def inspector_document(session: SessionView, output: str, truncated: bool) -> Te
     return text
 
 
+class InteractionMode(StrEnum):
+    NORMAL = "normal"
+    SEARCH = "search"
+    FILTER = "filter"
+    FORM = "form"
+    PALETTE = "command_palette"
+    MANAGE = "manage"
+    CONFIRMATION = "confirmation"
+
+
+@dataclass(frozen=True, slots=True)
+class CreateModeContext:
+    mode: InteractionMode
+    searching: bool
+    search_value: str
+    selected_name: str | None
+    selected_session_id: str | None
+    highlighted_option_id: str | None
+    scroll_y: int
+    focused_id: str | None
+
+
 class WFApp(App[str | None]):
     """Operational session dashboard; it returns the selected attach target."""
 
@@ -1426,6 +1792,9 @@ class WFApp(App[str | None]):
         self._option_sessions: dict[str, SessionView] = {}
         self._option_actions: dict[str, str] = {}
         self._alerts: dict[tuple[str, str], ActivityNotice] = {}
+        self.interaction_mode = InteractionMode.NORMAL
+        self._create_mode_context: CreateModeContext | None = None
+        self._failed_create_result: CreateFormResult | None = None
         self.output_mode = "summary"
         self.tmux_connected = True
         self.refresh_error = ""
@@ -1664,6 +2033,7 @@ class WFApp(App[str | None]):
         haystack = " ".join(
             (
                 session.name,
+                session.display_name,
                 session.tool.value,
                 session.runtime.value,
                 session.task_state.value,
@@ -1923,6 +2293,8 @@ class WFApp(App[str | None]):
             ("Ownership", "Managed by WF" if session.owned else "Read only"),
             ("Tags", ", ".join(session.tags)),
         ]
+        if session.display_name and session.display_name != session.name:
+            overview_values.insert(0, ("Display name", session.display_name))
         status_values = [
             ("Runtime", display_state(session.runtime.value)),
             ("Task", display_state(session.task_state.value)),
@@ -1996,6 +2368,7 @@ class WFApp(App[str | None]):
 
     def _finish_search(self) -> None:
         self.remove_class("searching")
+        self.interaction_mode = InteractionMode.NORMAL
         self.query_one("#sessions", OptionList).focus()
         self._render_header()
         self._render_action_bar()
@@ -2003,6 +2376,7 @@ class WFApp(App[str | None]):
     def action_search(self) -> None:
         self._search_before = self.filter_query
         self.add_class("searching")
+        self.interaction_mode = InteractionMode.SEARCH
         search = self.query_one("#search", Input)
         search.value = self.filter_query
         search.focus()
@@ -2058,6 +2432,25 @@ class WFApp(App[str | None]):
         self.action_open()
 
     def action_create(self, tool: Tool = Tool.CLAUDE) -> None:
+        options = self.query_one("#sessions", OptionList)
+        highlighted_option_id: str | None = None
+        if options.highlighted is not None:
+            highlighted_option_id = options.get_option_at_index(options.highlighted).id
+        focused = self.focused
+        self._create_mode_context = CreateModeContext(
+            mode=self.interaction_mode,
+            searching=self.has_class("searching"),
+            search_value=self.query_one("#search", Input).value,
+            selected_name=self.selected_name,
+            selected_session_id=self.selected_session_id,
+            highlighted_option_id=highlighted_option_id,
+            scroll_y=options.scroll_offset.y,
+            focused_id=focused.id if focused is not None else None,
+        )
+        self.remove_class("searching")
+        self.add_class("form-active")
+        self.interaction_mode = InteractionMode.FORM
+        self._render_action_bar()
         self.push_screen(
             CreateSessionScreen(self.default_cwd, self.service, tool), self._create_session
         )
@@ -2076,18 +2469,166 @@ class WFApp(App[str | None]):
             return
         self.exit(target.name)
 
-    def _create_session(self, request: CreateRequest | None) -> None:
-        if request is None:
+    def _restore_create_mode(self) -> None:
+        context = self._create_mode_context
+        self._create_mode_context = None
+        self.remove_class("form-active")
+        if context is None:
+            self.interaction_mode = InteractionMode.NORMAL
+            self._render_action_bar()
             return
-        try:
-            session = self.service.create(request)
-        except WFError as error:
-            self.notify(str(error), title="Create failed", severity="error")
-            return
+        self.selected_name = context.selected_name
+        self.selected_session_id = context.selected_session_id
+        search = self.query_one("#search", Input)
+        search.value = context.search_value
+        if context.searching:
+            self.add_class("searching")
+            self.interaction_mode = InteractionMode.SEARCH
+        else:
+            self.interaction_mode = context.mode
+        options = self.query_one("#sessions", OptionList)
+        option_ids = {
+            options.get_option_at_index(index).id for index in range(options.option_count)
+        }
+        highlighted_option_id = context.highlighted_option_id
+        if highlighted_option_id is not None and highlighted_option_id in option_ids:
+            options.highlighted = options.get_option_index(highlighted_option_id)
+        self.call_after_refresh(options.scroll_to, y=context.scroll_y, animate=False, force=True)
+        focus_target = self.query_one(f"#{context.focused_id}") if context.focused_id else options
+        self.call_after_refresh(focus_target.focus)
+        self._render_header()
+        self._render_action_bar()
+
+    def _insert_created_session(self, session: SessionView) -> None:
+        self.sessions.insert(0, session)
+        self.visible_sessions.append(session)
+        options = self.query_one("#sessions", OptionList)
+        option_ids = {
+            options.get_option_at_index(index).id for index in range(options.option_count)
+        }
+        self._rendering_options = True
+        for option_id in ("quick:diagnostics", "heading:maintenance"):
+            if option_id in option_ids:
+                options.remove_option(option_id)
+        self._option_actions.pop("quick:diagnostics", None)
+        if "heading:detached" not in option_ids:
+            options.add_option(self._heading_option("Detached"))
+        option_id = f"session:{session.session_id}"
+        prompt = session_row(
+            session,
+            self._row_width(),
+            ascii_only=self.ascii_only,
+            notice=self._notice_for(session),
+        )
+        self._option_sessions[option_id] = session
+        options.add_option(Option(prompt, id=option_id))
+        created_index = options.option_count - 1
+        options.add_option(self._heading_option("Maintenance"))
+        options.add_option(self._quick_option("Diagnostics", "diagnostics", ">"))
+        self._rendering_options = False
         self.selected_name = session.name
         self.selected_session_id = session.session_id
+        self._expected_option_id = option_id
+        options.highlighted = created_index
+        self._select_option(option_id)
+        self.call_after_refresh(options.scroll_to_highlight)
+        if self.motion != "off":
+            self.call_after_refresh(
+                self._highlight_created_session, session.name, session.session_id
+            )
+        self.last_refreshed_at = datetime.now(UTC)
+        self._render_header()
+        self._render_action_bar()
+
+    def _highlight_created_session(self, name: str, session_id: str) -> None:
+        session = next(
+            (item for item in self.sessions if item.name == name and item.session_id == session_id),
+            None,
+        )
+        option_id = f"session:{session_id}"
+        if session is None or option_id not in self._option_sessions:
+            return
+        prompt = session_row(
+            session,
+            self._row_width(),
+            ascii_only=self.ascii_only,
+            notice=self._notice_for(session),
+        )
+        prompt.stylize("on #243d55")
+        self.query_one("#sessions", OptionList).replace_option_prompt(option_id, prompt)
+        self.set_timer(0.5, lambda: self._restore_session_row(name, session_id))
+
+    def _create_session(self, result: CreateFormResult | None) -> None:
+        if result is None:
+            self._restore_create_mode()
+            return
+        self._attempt_create(result)
+
+    def _attempt_create(self, result: CreateFormResult) -> None:
+        try:
+            session = self.service.create(result.request)
+        except WFError as error:
+            self._failed_create_result = result
+            try:
+                session_name = normalized_session_name(
+                    result.request.tool,
+                    result.request.name,
+                    automatic_prefix=result.request.automatic_prefix,
+                )
+                metadata_exists = self.service.store.load(session_name) is not None
+            except WFError:
+                session_name = result.request.name
+                metadata_exists = False
+            self.interaction_mode = InteractionMode.CONFIRMATION
+            self.notify(
+                f"{error}\nRetry, open details, or remove partial metadata if present.",
+                title="Session startup failed",
+                severity="error",
+                timeout=0,
+            )
+            self.push_screen(
+                CreateFailureScreen(
+                    session_name,
+                    str(error),
+                    metadata_exists=metadata_exists,
+                ),
+                self._creation_failure_action,
+            )
+            return
+        self._failed_create_result = None
+        self._restore_create_mode()
+        self._insert_created_session(session)
         self._notify_success(f"Session created: {session.name}", title="Session ready")
-        self.refresh_sessions()
+        if result.start_attached:
+            self.exit(session.name)
+
+    def _creation_failure_action(self, action: str | None) -> None:
+        result = self._failed_create_result
+        if action == "retry" and result is not None:
+            self.interaction_mode = InteractionMode.FORM
+            self._attempt_create(result)
+            return
+        if action == "remove" and result is not None:
+            try:
+                session_name = normalized_session_name(
+                    result.request.tool,
+                    result.request.name,
+                    automatic_prefix=result.request.automatic_prefix,
+                )
+                self.service.remove_metadata(session_name)
+                self._notify_success(f"Metadata removed: {session_name}")
+            except WFError as error:
+                self.notify(str(error), title="Metadata removal failed", severity="error")
+        self._failed_create_result = None
+        self._restore_create_mode()
+        if action == "details" and result is not None:
+            self.push_screen(
+                MessageScreen(
+                    "Startup Failure Details",
+                    "The tool process did not start. No active session was adopted or renamed.\n\n"
+                    "Run System Diagnostics, verify the configured executable, and retry creation.",
+                )
+            )
 
     def action_edit(self) -> None:
         session = self._selected()

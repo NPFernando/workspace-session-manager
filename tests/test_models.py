@@ -10,7 +10,14 @@ from wf_session_manager.service import normalized_session_name, slugify_name
 
 def test_slugify_and_tool_prefix() -> None:
     assert slugify_name(" API Refactor! ") == "api-refactor"
+    assert slugify_name("api_refactor") == "api-refactor"
     assert normalized_session_name(Tool.CLAUDE, "API Refactor") == "claude-api-refactor"
+    assert normalized_session_name(Tool.CLAUDE, "api_refactor") == "claude-api-refactor"
+    assert normalized_session_name(Tool.CLAUDE, "claude-api-refactor") == ("claude-api-refactor")
+    assert (
+        normalized_session_name(Tool.CLAUDE, "api-refactor", automatic_prefix=False)
+        == "api-refactor"
+    )
     assert normalized_session_name(Tool.CODEX, "codex-review") == "codex-review"
     assert normalized_session_name(Tool.SHELL, "Diagnostics") == "diagnostics"
 
@@ -90,6 +97,7 @@ def test_schema_v1_metadata_is_normalized_without_a_file_migration(
     assert record.task_state is current
     assert record.input_state is InputState.NONE
     assert "state" not in record.model_dump()
+    assert record.display_name == ""
 
 
 def test_output_is_bounded_by_lines_and_utf8_bytes() -> None:

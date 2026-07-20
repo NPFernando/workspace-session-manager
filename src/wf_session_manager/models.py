@@ -146,6 +146,7 @@ class SessionMetadata(BaseModel):
     owner: Literal["wf-session-manager"] = "wf-session-manager"
     tmux_session_id: str
     name: str
+    display_name: Annotated[str, Field(max_length=200)] = ""
     tool: Tool
     cwd: Path
     project: Annotated[str, Field(max_length=200)] = ""
@@ -214,6 +215,7 @@ class SessionView(BaseModel):
 
     model_config = ConfigDict(frozen=True)
     name: str
+    display_name: str = ""
     session_id: str
     tool: Tool
     cwd: Path
@@ -252,6 +254,7 @@ class CreateRequest(BaseModel):
     """Validated request shared by CLI and TUI."""
 
     name: str
+    display_name: Annotated[str, Field(max_length=200)] = ""
     tool: Tool
     cwd: Path
     project: Annotated[str, Field(max_length=200)] = ""
@@ -260,6 +263,7 @@ class CreateRequest(BaseModel):
     task_state: TaskState = TaskState.IN_PROGRESS
     input_state: InputState = InputState.NONE
     logging_enabled: bool = False
+    automatic_prefix: bool = True
 
     @field_validator("tags")
     @classmethod

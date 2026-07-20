@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import stat
+import tomllib
 import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -119,15 +121,15 @@ class CreateValidation:
 
 def slugify_name(value: str) -> str:
     ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
-    normalized = re.sub(r"[^a-z0-9_-]+", "-", ascii_value.lower())
-    return re.sub(r"-{2,}", "-", normalized).strip("-_")[:80]
+    normalized = re.sub(r"[^a-z0-9]+", "-", ascii_value.lower())
+    return re.sub(r"-{2,}", "-", normalized).strip("-")[:80]
 
 
-def normalized_session_name(tool: Tool, requested: str) -> str:
+def normalized_session_name(tool: Tool, requested: str, *, automatic_prefix: bool = True) -> str:
     purpose = slugify_name(requested)
     if not purpose:
         raise WFError("session name must contain a letter or digit")
-    if tool is Tool.SHELL:
+    if not automatic_prefix or tool is Tool.SHELL:
         return purpose
     if purpose == tool.value or purpose.startswith(f"{tool.value}-"):
         return purpose
@@ -218,6 +220,7 @@ class SessionService:
         legacy = None if owned else self.legacy.read(session.name)
         return SessionView(
             name=session.name,
+            display_name=record.display_name if owned and record else "",
             session_id=session.session_id,
             tool=record.tool
             if owned and record
@@ -273,6 +276,7 @@ class SessionService:
         profile = self.config.tools[record.tool]
         return SessionView(
             name=record.name,
+            display_name=record.display_name,
             session_id=record.tmux_session_id,
             tool=record.tool,
             cwd=record.cwd,
@@ -344,29 +348,68 @@ class SessionService:
         )
 
     def detect_project(self, cwd: Path) -> str:
-        """Detect a Git worktree name without invoking Git or reading repository content."""
+        """Detect a project without turning the user's home directory into a project."""
         try:
             current = cwd.expanduser().resolve(strict=True)
         except OSError:
             return ""
         if not current.is_dir():
             return ""
+        try:
+            home = Path.home().resolve(strict=True)
+        except OSError:
+            home = Path.home()
+        if current == home:
+            return ""
         for candidate in (current, *current.parents):
             marker = candidate / ".git"
             if marker.is_dir() or marker.is_file():
                 return candidate.name
-        return ""
 
-    def validate_create(self, tool: Tool, requested_name: str, cwd: Path) -> CreateValidation:
+        for candidate in (current, *current.parents):
+            pyproject = candidate / "pyproject.toml"
+            if pyproject.is_file():
+                try:
+                    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+                    project = data.get("project", {})
+                    if isinstance(project, dict) and isinstance(project.get("name"), str):
+                        return str(project["name"]).strip()
+                except (OSError, tomllib.TOMLDecodeError):
+                    pass
+                return candidate.name
+            package_json = candidate / "package.json"
+            if package_json.is_file():
+                try:
+                    data = json.loads(package_json.read_text(encoding="utf-8"))
+                    if isinstance(data, dict) and isinstance(data.get("name"), str):
+                        return str(data["name"]).strip()
+                except (OSError, json.JSONDecodeError):
+                    pass
+                return candidate.name
+
+        return current.name
+
+    def validate_create(
+        self,
+        tool: Tool,
+        requested_name: str,
+        cwd: Path,
+        *,
+        automatic_prefix: bool = True,
+    ) -> CreateValidation:
         name_error = ""
         cwd_error = ""
         tool_error = ""
         normalized = ""
         resolved: Path | None = None
         try:
-            normalized = normalized_session_name(tool, requested_name)
+            normalized = normalized_session_name(
+                tool, requested_name, automatic_prefix=automatic_prefix
+            )
         except WFError as error:
             name_error = str(error)
+        if len(requested_name.strip()) > 200:
+            name_error = "display name must be 200 characters or fewer"
         if normalized and (
             self.backend.session_exists(normalized) or self.store.load(normalized) is not None
         ):
@@ -394,7 +437,12 @@ class SessionService:
         )
 
     def create(self, request: CreateRequest, *, dry_run: bool = False) -> SessionView:
-        validation = self.validate_create(request.tool, request.name, request.cwd)
+        validation = self.validate_create(
+            request.tool,
+            request.name,
+            request.cwd,
+            automatic_prefix=request.automatic_prefix,
+        )
         if not validation.valid or validation.cwd is None:
             message = validation.errors[0] if validation.errors else "invalid session request"
             if message.startswith("session already exists"):
@@ -417,6 +465,7 @@ class SessionService:
             now = utc_now()
             return SessionView(
                 name=name,
+                display_name=request.display_name or request.name.strip(),
                 session_id="dry-run",
                 tool=request.tool,
                 cwd=cwd,
@@ -446,6 +495,7 @@ class SessionService:
         record = SessionMetadata(
             tmux_session_id=session.session_id,
             name=name,
+            display_name=request.display_name or request.name.strip(),
             tool=request.tool,
             cwd=cwd,
             project=request.project,

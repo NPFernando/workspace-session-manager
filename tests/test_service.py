@@ -1,4 +1,5 @@
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 
@@ -42,6 +43,7 @@ def test_managed_lifecycle(
     )
     created = service.create(request)
     assert created.name == "claude-api-refactor"
+    assert created.display_name == "API Refactor"
     assert created.owned
     assert fake_backend.created_commands[-1] == (("/bin/bash", "-l"), ("/bin/true",))
 
@@ -202,6 +204,34 @@ def test_create_validation_detects_duplicate_directory_and_git_project(
     assert not missing.valid
     assert not missing.name_error
     assert missing.cwd_error
+
+
+def test_create_collision_uses_final_normalized_name(
+    service: SessionService,
+    tmp_path: Path,
+) -> None:
+    service.create(CreateRequest(name="api_refactor", tool=Tool.CLAUDE, cwd=tmp_path))
+    duplicate = service.validate_create(Tool.CLAUDE, "api-refactor", tmp_path)
+    assert duplicate.normalized_name == "claude-api-refactor"
+    assert "already exists" in duplicate.name_error
+
+    without_prefix = service.validate_create(
+        Tool.CLAUDE, "api-refactor", tmp_path, automatic_prefix=False
+    )
+    assert without_prefix.valid
+    assert without_prefix.normalized_name == "api-refactor"
+
+
+def test_project_detection_uses_metadata_and_never_names_home_ubuntu(
+    service: SessionService,
+) -> None:
+    with TemporaryDirectory(prefix="wf-project-", dir="/var/tmp") as directory:
+        project = Path(directory)
+        (project / "pyproject.toml").write_text(
+            '[project]\nname = "metadata-project"\n', encoding="utf-8"
+        )
+        assert service.detect_project(project) == "metadata-project"
+    assert service.detect_project(Path.home()) == ""
 
 
 def test_diagnostics_classifies_environment_facts_as_information(

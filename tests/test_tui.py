@@ -5,7 +5,8 @@ from pathlib import Path
 from threading import Event
 
 import pytest
-from textual.widgets import Button, Input, OptionList, Select, Static
+from textual.containers import VerticalScroll
+from textual.widgets import Button, Input, OptionList, Select, Static, Switch, TextArea
 
 from conftest import FakeBackend
 from wf_session_manager.errors import TmuxError
@@ -19,11 +20,13 @@ from wf_session_manager.models import (
 from wf_session_manager.service import SessionService
 from wf_session_manager.tui import (
     ConfirmActionScreen,
+    CreateFailureScreen,
     CreateSessionScreen,
     DeleteSessionScreen,
     DetailScreen,
     DiagnosticsScreen,
     FilterScreen,
+    InteractionMode,
     ManageSessionScreen,
     MoreActionsScreen,
     OnboardingScreen,
@@ -331,17 +334,17 @@ async def test_create_form_validates_duplicates_and_directory_inline(
 
         app.screen.query_one("#create-name", Input).value = "existing"
         app.screen.query_one("#create-cwd", Input).value = str(project)
-        await pilot.pause()
+        await pilot.pause(0.25)
         assert submit.disabled
         assert "already exists" in str(app.screen.query_one("#create-name-status", Static).content)
 
         app.screen.query_one("#create-name", Input).value = "new-work"
-        await pilot.pause()
+        await pilot.pause(0.25)
         assert not submit.disabled
         assert app.screen.query_one("#create-project", Input).value == "detected-project"
 
         app.screen.query_one("#create-cwd", Input).value = str(project / "missing")
-        await pilot.pause()
+        await pilot.pause(0.25)
         assert submit.disabled
         assert app.screen.query_one("#create-name", Input).value == "new-work"
 
@@ -358,10 +361,225 @@ async def test_create_form_uses_latest_normalized_name_value(
         form.query_one("#create-name", Input).value = "_"
         form.query_one("#create-name", Input).value = "api-refactor"
         form.query_one("#create-cwd", Input).value = str(tmp_path)
-        await pilot.pause()
+        await pilot.pause(0.25)
         status = str(form.query_one("#create-name-status", Static).content)
         assert "Available as claude-api-refactor" in status
         assert not form.query_one("#create-submit", Button).disabled
+
+
+@pytest.mark.asyncio
+async def test_create_suspends_and_restores_search_mode(service: SessionService) -> None:
+    create_managed(service, "first", Tool.CLAUDE)
+    create_managed(service, "second", Tool.CODEX)
+    app = WFApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("/")
+        await pilot.press("c", "o", "d", "e", "x")
+        visible_before = [session.name for session in app.visible_sessions]
+        app.action_create()
+        await pilot.pause()
+
+        assert isinstance(app.screen, CreateSessionScreen)
+        assert app.interaction_mode is InteractionMode.FORM
+        assert not app.has_class("searching")
+        assert app.filter_query == "codex"
+        assert app.query_one("#search", Input).value == "codex"
+        assert app.query_one("#search-mode").display is False
+        assert app.query_one("#action-bar").display is False
+        assert app.screen.query_one("#create-form-help").display is True
+        assert len(app.screen.query("#create-form-help")) == 1
+
+        await pilot.click("#create-cancel")
+        await pilot.pause()
+        assert app.interaction_mode is InteractionMode.SEARCH
+        assert app.has_class("searching")
+        assert app.filter_query == "codex"
+        assert [session.name for session in app.visible_sessions] == visible_before
+        assert app.focused is app.query_one("#search", Input)
+        assert app.query_one("#action-bar").display is True
+
+
+@pytest.mark.asyncio
+async def test_basic_create_form_fits_without_scrolling(
+    service: SessionService,
+    tmp_path: Path,
+) -> None:
+    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("c")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, CreateSessionScreen)
+        assert not isinstance(screen.query_one("#create-basic"), VerticalScroll)
+        assert screen.query_one("#create-advanced").display is False
+        assert screen.query_one(".dialog-actions").region.bottom <= 35
+
+
+@pytest.mark.asyncio
+async def test_advanced_options_preserve_values_and_focus(
+    service: SessionService,
+) -> None:
+    app = WFApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("c")
+        await pilot.click("#create-advanced-toggle")
+        tags = app.screen.query_one("#create-tags", Input)
+        tags.value = "backend, urgent"
+        tags.focus()
+        await pilot.pause()
+
+        app.screen.action_cancel()
+        await pilot.pause()
+        assert isinstance(app.screen, CreateSessionScreen)
+        assert app.screen.query_one("#create-advanced").display is False
+        assert tags.value == "backend, urgent"
+
+        await pilot.click("#create-advanced-toggle")
+        await pilot.pause()
+        assert app.screen.query_one("#create-advanced").display is True
+        assert app.focused is tags
+        assert tags.value == "backend, urgent"
+
+
+@pytest.mark.asyncio
+async def test_home_directory_does_not_become_ubuntu_project(
+    service: SessionService,
+) -> None:
+    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=Path.home())
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("c")
+        app.screen.query_one("#create-name", Input).value = "home-task"
+        await pilot.pause(0.25)
+        assert app.screen.query_one("#create-project", Input).value == ""
+        assert "Project not detected" in str(
+            app.screen.query_one("#create-project-status", Static).content
+        )
+        assert app.screen.query_one("#create-home-project", Button).display is True
+
+
+@pytest.mark.asyncio
+async def test_recent_directory_selection_updates_working_directory(
+    service: SessionService,
+    tmp_path: Path,
+) -> None:
+    recent = tmp_path / "recent-project"
+    recent.mkdir()
+    service.create(CreateRequest(name="recent", tool=Tool.SHELL, cwd=recent))
+    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("c")
+        app.screen.query_one("#create-recent-dir", Select).value = str(recent)
+        await pilot.pause()
+        assert app.screen.query_one("#create-cwd", Input).value == display_path(recent)
+
+
+@pytest.mark.asyncio
+async def test_ctrl_enter_requires_current_validation_and_creates_incrementally(
+    service: SessionService,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
+    async with app.run_test(size=(120, 35)) as pilot:
+        base_screen = app.screen
+        await pilot.press("c")
+        await pilot.press("ctrl+enter")
+        assert isinstance(app.screen, CreateSessionScreen)
+
+        app.screen.query_one("#create-name", Input).value = "api_refactor"
+        await pilot.pause(0.25)
+        assert not app.screen.query_one("#create-submit", Button).disabled
+        render_calls = 0
+        original_render = app._render_options
+
+        def tracked_render() -> None:
+            nonlocal render_calls
+            render_calls += 1
+            original_render()
+
+        monkeypatch.setattr(app, "_render_options", tracked_render)
+        await pilot.press("ctrl+enter")
+        await pilot.pause()
+
+        assert app.screen is base_screen
+        assert render_calls == 0
+        assert app.selected_name == "claude-api-refactor"
+        assert service.get("claude-api-refactor").display_name == "api_refactor"
+        created = service.get("claude-api-refactor")
+        option = app.query_one("#sessions", OptionList).get_option(f"session:{created.session_id}")
+        assert any("#243d55" in str(span.style) for span in option.prompt.spans)
+
+
+@pytest.mark.asyncio
+async def test_multiline_task_enter_does_not_submit(
+    service: SessionService,
+) -> None:
+    app = WFApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("c")
+        task = app.screen.query_one("#create-note", TextArea)
+        task.focus()
+        await pilot.press("a", "enter", "b")
+        assert isinstance(app.screen, CreateSessionScreen)
+        assert task.text == "a\nb"
+
+
+@pytest.mark.asyncio
+async def test_prefix_can_be_disabled_without_changing_the_backend(
+    service: SessionService,
+    tmp_path: Path,
+) -> None:
+    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("c")
+        app.screen.query_one("#create-name", Input).value = "api_refactor"
+        app.screen.query_one("#create-prefix", Switch).value = False
+        await pilot.pause(0.25)
+        assert "Available as api-refactor" in str(
+            app.screen.query_one("#create-name-status", Static).content
+        )
+
+
+@pytest.mark.asyncio
+async def test_failed_startup_is_actionable_and_leaves_no_metadata(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    notifications: list[tuple[str, dict[str, object]]] = []
+
+    def fail_start(*args: object, **kwargs: object) -> None:
+        raise TmuxError("isolated startup failed")
+
+    monkeypatch.setattr(fake_backend, "create_session", fail_start)
+    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda message, **kwargs: notifications.append((message, kwargs)),
+    )
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("c")
+        app.screen.query_one("#create-name", Input).value = "will-fail"
+        await pilot.pause(0.25)
+        await pilot.press("ctrl+enter")
+        await pilot.pause()
+
+        assert service.store.load("claude-will-fail") is None
+        assert not fake_backend.session_exists("claude-will-fail")
+        assert isinstance(app.screen, CreateFailureScreen)
+        assert app.interaction_mode is InteractionMode.CONFIRMATION
+        assert app.screen.query_one("#create-failure-remove", Button).disabled
+        assert app.focused is app.screen.query_one("#create-failure-close", Button)
+        assert notifications
+        message, options = notifications[-1]
+        assert "Retry" in message
+        assert options["title"] == "Session startup failed"
+        assert options["timeout"] == 0
+        await pilot.click("#create-failure-close")
+        await pilot.pause()
+        assert app.interaction_mode is InteractionMode.NORMAL
 
 
 @pytest.mark.asyncio

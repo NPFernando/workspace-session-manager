@@ -29,6 +29,11 @@ Screen {
     display: block;
 }
 
+.form-active #search-mode,
+.form-active #action-bar {
+    display: none;
+}
+
 #search-label {
     width: 9;
     height: 3;
@@ -364,23 +369,45 @@ ModalScreen {
 
 .create-dialog {
     width: 72;
-    height: 34;
+    height: auto;
     max-height: 94%;
     padding-bottom: 0;
 }
 
-#create-form {
+#create-dialog.advanced {
+    height: 94%;
+}
+
+#create-basic {
+    height: auto;
+}
+
+#create-advanced {
     height: 1fr;
+    min-height: 8;
     scrollbar-color: #47545c;
     scrollbar-background: #181d21;
 }
 
 .form-row {
+    height: 1;
+    margin-bottom: 0;
+}
+
+.task-row {
     height: 3;
 }
 
+.task-row TextArea {
+    width: 1fr;
+    height: 3;
+    border: tall #3a464e;
+    background: #11161a;
+}
+
 .field-status {
-    height: 1;
+    height: auto;
+    min-height: 1;
     margin-left: 18;
     color: #82919a;
 }
@@ -394,18 +421,41 @@ ModalScreen {
     color: #ef6b73;
 }
 
+.field-status.warning {
+    color: #e9b44c;
+}
+
+.field-status.checking {
+    color: #82919a;
+}
+
 .form-row .field-label,
 .preview-row .field-label,
 .validation-row .field-label {
     width: 18;
-    height: 3;
+    height: 1;
     margin-top: 0;
-    padding-top: 1;
+    padding-top: 0;
 }
 
 .form-row Input,
-.form-row Select {
+.form-row Select,
+.form-row TextArea {
     width: 1fr;
+}
+
+.create-dialog Input,
+.create-dialog Select {
+    height: 1;
+    border: none;
+    background: #11161a;
+}
+
+.create-dialog Input:focus,
+.create-dialog Select:focus {
+    border: none;
+    background: #162433;
+    color: #eef3f6;
 }
 
 #create-cwd {
@@ -417,13 +467,21 @@ ModalScreen {
     margin-left: 1;
 }
 
+#create-home-project {
+    display: none;
+    width: 20;
+    min-width: 20;
+    height: 1;
+    margin-left: 1;
+}
+
 .preview-row {
-    height: auto;
-    min-height: 2;
+    height: 1;
+    min-height: 1;
 }
 
 .preview-row .field-label {
-    height: 2;
+    height: 1;
     padding-top: 0;
 }
 
@@ -520,24 +578,32 @@ Button.-error:focus {
 }
 
 #logging-row {
-    height: 3;
-    margin-top: 1;
+    height: 1;
+    margin-top: 0;
 }
 
 #logging-row .field-label {
     width: 18;
-    height: 3;
+    height: 1;
     margin-top: 0;
-    padding-top: 1;
+    padding-top: 0;
 }
 
 #create-logging {
-    width: 10;
+    width: 8;
+    height: 1;
+}
+
+#logging-state,
+#prefix-state {
+    width: 1fr;
+    height: 1;
+    color: #cbd3d8;
 }
 
 #logging-hint {
-    width: 1fr;
-    padding-top: 1;
+    height: 2;
+    margin-left: 18;
     color: #82919a;
 }
 
@@ -552,8 +618,18 @@ Button.-error:focus {
 }
 
 #create-submit-reason {
-    margin-top: 1;
+    margin-top: 0;
     color: #82919a;
+}
+
+#create-summary {
+    display: none;
+    height: auto;
+    max-height: 6;
+    margin-top: 1;
+    padding: 0 1;
+    border-left: solid #3e6d55;
+    background: #121a17;
 }
 
 #create-form-help {
@@ -562,28 +638,60 @@ Button.-error:focus {
     text-align: right;
 }
 
-.short #create-form-help {
-    display: none;
-}
-
 #create-advanced-toggle {
-    width: 24;
-    min-width: 24;
+    width: 26;
+    min-width: 26;
+    height: 1;
+    min-height: 1;
     margin-left: 18;
+    border: none;
+    background: transparent;
+    color: #9eabb3;
+    text-align: left;
 }
 
-#create-advanced {
-    height: auto;
+#create-advanced-toggle:focus {
+    border: none;
+    background: #1d2a34;
+    color: #7db7ee;
 }
 
 #create-advanced.collapsed {
     display: none;
 }
 
-.advanced-hint {
-    height: auto;
+.field-help {
+    height: 1;
     margin-left: 18;
     color: #82919a;
+}
+
+#create-advanced-content {
+    height: auto;
+}
+
+.narrow-form {
+    align: left top;
+}
+
+.narrow-form .create-dialog {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: none;
+}
+
+.compact-form .create-dialog {
+    height: 100%;
+    max-height: 100%;
+}
+
+.compact-form #create-basic {
+    height: 1fr;
+    overflow-y: auto;
+    scrollbar-color: #47545c;
+    scrollbar-background: #181d21;
 }
 
 .dialog-actions {
@@ -595,6 +703,19 @@ Button.-error:focus {
 
 .dialog-actions Button {
     margin-left: 1;
+}
+
+.create-dialog .dialog-actions {
+    margin-top: 0;
+}
+
+.failure-actions {
+    height: auto;
+    min-height: 3;
+}
+
+#create-failure-dialog {
+    width: 72;
 }
 
 #more-dialog Button,
