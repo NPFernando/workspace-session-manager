@@ -19,6 +19,17 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def normalize_tags(values: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for value in values:
+        tag = value.strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,31}", tag):
+            raise ValueError(f"invalid tag: {value!r}")
+        if tag not in cleaned:
+            cleaned.append(tag)
+    return cleaned
+
+
 class Tool(StrEnum):
     CLAUDE = "claude"
     CODEX = "codex"
@@ -104,6 +115,7 @@ class TmuxSession(BaseModel):
     cwd: Path
     current_command: str
     wf_owner: str | None = None
+    logging_enabled: bool = False
     last_activity_at: datetime | None = None
     pane_dead: bool = False
     pane_dead_status: int | None = None
@@ -162,14 +174,7 @@ class SessionMetadata(BaseModel):
     @field_validator("tags")
     @classmethod
     def valid_tags(cls, values: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        for value in values:
-            tag = value.strip().lower()
-            if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,31}", tag):
-                raise ValueError(f"invalid tag: {value!r}")
-            if tag not in cleaned:
-                cleaned.append(tag)
-        return cleaned
+        return normalize_tags(values)
 
     @property
     def state(self) -> TaskState:
@@ -214,6 +219,7 @@ class SessionView(BaseModel):
     pinned: bool = False
     owned: bool = False
     legacy_metadata: bool = False
+    logging_enabled: bool = False
     last_active_at: datetime | None = None
 
     @property
@@ -241,6 +247,12 @@ class CreateRequest(BaseModel):
     tags: Annotated[list[str], Field(max_length=12)] = Field(default_factory=list)
     task_state: TaskState = TaskState.IN_PROGRESS
     input_state: InputState = InputState.NONE
+    logging_enabled: bool = False
+
+    @field_validator("tags")
+    @classmethod
+    def valid_tags(cls, values: list[str]) -> list[str]:
+        return normalize_tags(values)
 
 
 class HealthStatus(StrEnum):
@@ -253,6 +265,7 @@ class HealthCheck(BaseModel):
     name: str
     status: HealthStatus
     detail: str
+    corrective_action: str = ""
 
 
 class DoctorReport(BaseModel):
@@ -261,3 +274,6 @@ class DoctorReport(BaseModel):
     @property
     def healthy(self) -> bool:
         return not any(check.status is HealthStatus.FAIL for check in self.checks)
+
+    def count(self, status: HealthStatus) -> int:
+        return sum(check.status is status for check in self.checks)

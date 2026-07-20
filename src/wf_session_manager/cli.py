@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -77,6 +79,23 @@ def abort(error: Exception) -> None:
     raise typer.Exit(1)
 
 
+def run_classic() -> None:
+    """Replace this process with the installer-preserved classic launcher."""
+    classic = Path.home() / ".local" / "libexec" / "wf-classic"
+    try:
+        details = classic.stat(follow_symlinks=False)
+    except OSError as error:
+        raise WFError(f"classic launcher is unavailable: {classic}") from error
+    if (
+        not stat.S_ISREG(details.st_mode)
+        or details.st_uid != os.getuid()
+        or details.st_mode & 0o077
+        or not os.access(classic, os.X_OK)
+    ):
+        raise WFError(f"refusing unsafe classic launcher: {classic}")
+    os.execv(classic, [str(classic)])  # noqa: S606 - validated owner-only executable
+
+
 def run_tui(runtime: Runtime) -> None:
     try:
         result = WFApp(runtime.service()).run()
@@ -97,8 +116,17 @@ def root(
         Path | None,
         typer.Option("--config", help="Use a specific TOML configuration file."),
     ] = None,
+    classic: Annotated[
+        bool,
+        typer.Option("--classic", help="Run the preserved classic launcher."),
+    ] = False,
 ) -> None:
     """Open the session manager when no subcommand is supplied."""
+    if classic:
+        try:
+            run_classic()
+        except WFError as error:
+            abort(error)
     try:
         runtime = build_runtime(config)
     except WFError as error:
@@ -189,6 +217,10 @@ def create(
     project: Annotated[str, typer.Option("--project")] = "",
     note: Annotated[str, typer.Option("--note")] = "",
     tag: Annotated[list[str] | None, typer.Option("--tag")] = None,
+    logging: Annotated[
+        bool,
+        typer.Option("--logging/--no-logging", help="Persist sanitized, size-limited output."),
+    ] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     attach: Annotated[bool, typer.Option("--attach")] = False,
 ) -> None:
@@ -200,6 +232,7 @@ def create(
         project=project,
         note=note,
         tags=tag or [],
+        logging_enabled=logging,
     )
     service = runtime_from_context(context).service()
     try:

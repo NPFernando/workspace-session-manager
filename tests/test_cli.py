@@ -21,6 +21,29 @@ def test_version() -> None:
     assert result.stdout.startswith("WF ")
 
 
+def test_classic_launcher_requires_owner_only_executable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    classic = tmp_path / ".local" / "libexec" / "wf-classic"
+    classic.parent.mkdir(parents=True)
+    classic.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    classic.chmod(0o700)
+    executed: list[tuple[Path, list[str]]] = []
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(
+        cli.os,
+        "execv",
+        lambda path, args: executed.append((Path(path), args)),
+    )
+    cli.run_classic()
+    assert executed == [(classic, [str(classic)])]
+
+    classic.chmod(0o755)
+    with pytest.raises(cli.WFError, match="unsafe classic"):
+        cli.run_classic()
+
+
 def test_json_list(
     service: SessionService,
     fake_backend: FakeBackend,

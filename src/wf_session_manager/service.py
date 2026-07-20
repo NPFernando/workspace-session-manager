@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 import unicodedata
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -38,7 +40,7 @@ from wf_session_manager.models import (
     utc_now,
 )
 from wf_session_manager.paths import AppPaths
-from wf_session_manager.security import bounded_output
+from wf_session_manager.security import BoundedOutput, bounded_output, redact_text
 from wf_session_manager.store import MetadataStore
 
 
@@ -61,6 +63,24 @@ class SessionBackend(Protocol):
 
     def capture_pane(self, name: str, lines: int, expected_id: str | None = None) -> str: ...
 
+    def send_interrupt(self, name: str, expected_id: str | None = None) -> None: ...
+
+    def restart_session(
+        self,
+        name: str,
+        cwd: Path,
+        shell_command: Sequence[str],
+        agent_command: Sequence[str] | None,
+        expected_id: str | None = None,
+    ) -> None: ...
+
+    def set_logging(
+        self,
+        name: str,
+        log_path: Path | None,
+        expected_id: str | None = None,
+    ) -> None: ...
+
     def attach(self, name: str, expected_id: str | None = None) -> int: ...
 
     def rename_session(
@@ -76,6 +96,19 @@ class SessionBackend(Protocol):
     def get_option(self, name: str, option: str, expected_id: str | None = None) -> str | None: ...
 
     def unset_option(self, name: str, option: str, expected_id: str | None = None) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class CreateValidation:
+    normalized_name: str
+    cwd: Path | None
+    detected_project: str
+    command: tuple[str, ...]
+    errors: tuple[str, ...]
+
+    @property
+    def valid(self) -> bool:
+        return not self.errors
 
 
 def slugify_name(value: str) -> str:
@@ -148,12 +181,16 @@ class SessionService:
 
     def list_sessions(self, *, include_unmanaged: bool = False) -> list[SessionView]:
         owned_records = self.store.load_all()
-        views = [
-            self._merge(session, owned_records.get(session.name))
-            for session in self.backend.list_sessions()
-        ]
+        live_sessions = self.backend.list_sessions()
+        live_names = {session.name for session in live_sessions}
+        views = [self._merge(session, owned_records.get(session.name)) for session in live_sessions]
         if not include_unmanaged:
             views = [view for view in views if view.owned]
+            views.extend(
+                self._stopped(record)
+                for name, record in owned_records.items()
+                if name not in live_names
+            )
         minimum = datetime.min.replace(tzinfo=UTC)
         return sorted(
             views,
@@ -212,6 +249,7 @@ class SessionService:
             pinned=record.pinned if owned and record else legacy.pinned if legacy else False,
             owned=owned,
             legacy_metadata=legacy is not None,
+            logging_enabled=session.logging_enabled,
             last_active_at=max(
                 filter(
                     None,
@@ -225,6 +263,30 @@ class SessionService:
             ),
         )
 
+    def _stopped(self, record: SessionMetadata) -> SessionView:
+        profile = self.config.tools[record.tool]
+        return SessionView(
+            name=record.name,
+            session_id=record.tmux_session_id,
+            tool=record.tool,
+            cwd=record.cwd,
+            current_command=Path(profile.command[0]).name,
+            runtime=RuntimeState.STOPPED,
+            attached=False,
+            attached_clients=0,
+            windows=0,
+            created_at=record.created_at,
+            project=record.project,
+            note=record.note,
+            tags=record.tags,
+            task_state=record.task_state,
+            input_state=record.input_state,
+            pinned=record.pinned,
+            owned=True,
+            logging_enabled=False,
+            last_active_at=record.last_attached_at or record.updated_at,
+        )
+
     def get(self, name: str, *, include_unmanaged: bool = False) -> SessionView:
         for session in self.list_sessions(include_unmanaged=include_unmanaged):
             if session.name == name:
@@ -233,6 +295,13 @@ class SessionService:
 
     def inspect(self, name: str) -> SessionDetails:
         session = self.get(name)
+        if session.runtime is RuntimeState.STOPPED:
+            preview = self._read_log(name, self.config.preview_lines, self.config.preview_bytes)
+            return SessionDetails(
+                session=session,
+                preview=preview.text,
+                preview_truncated=preview.truncated,
+            )
         output = self.backend.capture_pane(
             name, self.config.preview_lines + 1, expected_id=session.session_id
         )
@@ -250,32 +319,81 @@ class SessionService:
     def logs(self, name: str) -> SessionDetails:
         """Return a larger, still bounded and sanitized pane capture."""
         session = self.get(name)
-        output = self.backend.capture_pane(
-            name, self.config.log_lines + 1, expected_id=session.session_id
-        )
-        preview = bounded_output(
-            output,
-            max_lines=self.config.log_lines,
-            max_bytes=self.config.log_bytes,
-        )
+        persisted = self._read_log(name, self.config.log_lines, self.config.log_bytes)
+        if persisted.text or session.runtime is RuntimeState.STOPPED:
+            preview = persisted
+        else:
+            output = self.backend.capture_pane(
+                name, self.config.log_lines + 1, expected_id=session.session_id
+            )
+            preview = bounded_output(
+                output,
+                max_lines=self.config.log_lines,
+                max_bytes=self.config.log_bytes,
+            )
         return SessionDetails(
             session=session,
             preview=preview.text,
             preview_truncated=preview.truncated,
         )
 
-    def create(self, request: CreateRequest, *, dry_run: bool = False) -> SessionView:
-        name = normalized_session_name(request.tool, request.name)
-        if self.backend.session_exists(name):
-            raise SessionExistsError(f"session already exists: {name}")
-
+    def detect_project(self, cwd: Path) -> str:
+        """Detect a Git worktree name without invoking Git or reading repository content."""
         try:
-            cwd = request.cwd.expanduser().resolve(strict=True)
-        except OSError as error:
-            raise WFError(f"working directory does not exist: {request.cwd}") from error
-        if not cwd.is_dir():
-            raise WFError(f"working directory is not a directory: {cwd}")
+            current = cwd.expanduser().resolve(strict=True)
+        except OSError:
+            return ""
+        if not current.is_dir():
+            return ""
+        for candidate in (current, *current.parents):
+            marker = candidate / ".git"
+            if marker.is_dir() or marker.is_file():
+                return candidate.name
+        return ""
 
+    def validate_create(self, tool: Tool, requested_name: str, cwd: Path) -> CreateValidation:
+        errors: list[str] = []
+        normalized = ""
+        resolved: Path | None = None
+        try:
+            normalized = normalized_session_name(tool, requested_name)
+        except WFError as error:
+            errors.append(str(error))
+        if normalized and (
+            self.backend.session_exists(normalized) or self.store.load(normalized) is not None
+        ):
+            errors.append(f"session already exists: {normalized}")
+        try:
+            resolved = cwd.expanduser().resolve(strict=True)
+            if not resolved.is_dir():
+                errors.append(f"working directory is not a directory: {resolved}")
+                resolved = None
+        except OSError:
+            errors.append(f"working directory does not exist: {cwd}")
+        profile = self.config.tools[tool]
+        if not profile.enabled:
+            errors.append(f"{tool.value} is disabled in configuration")
+        elif not command_available(profile.command):
+            errors.append(f"command not found: {profile.command[0]}")
+        return CreateValidation(
+            normalized_name=normalized,
+            cwd=resolved,
+            detected_project=self.detect_project(resolved) if resolved else "",
+            command=profile.command,
+            errors=tuple(errors),
+        )
+
+    def create(self, request: CreateRequest, *, dry_run: bool = False) -> SessionView:
+        validation = self.validate_create(request.tool, request.name, request.cwd)
+        if not validation.valid or validation.cwd is None:
+            message = validation.errors[0] if validation.errors else "invalid session request"
+            if message.startswith("session already exists"):
+                raise SessionExistsError(message)
+            if message.startswith("command not found") or "disabled in configuration" in message:
+                raise ToolUnavailableError(message)
+            raise WFError(message)
+        name = validation.normalized_name
+        cwd = validation.cwd
         profile = self.config.tools[request.tool]
         shell_profile = self.config.tools[Tool.SHELL]
         if not profile.enabled:
@@ -304,6 +422,7 @@ class SessionService:
                 task_state=request.task_state,
                 input_state=request.input_state,
                 owned=True,
+                logging_enabled=request.logging_enabled,
                 last_active_at=now,
             )
 
@@ -325,26 +444,94 @@ class SessionService:
             task_state=request.task_state,
             input_state=request.input_state,
         )
+        log_path = self._log_path(record)
         try:
-            self.store.save(record)
-        except StateError:
+            if request.logging_enabled:
+                self._prepare_log(log_path)
+                self.backend.set_logging(name, log_path, expected_id=session.session_id)
+            self.store.save_new(record)
+        except Exception:
             self.backend.kill_session(name, expected_id=session.session_id)
+            self._delete_log_path(log_path)
             raise
         return self.get(name)
 
-    def _owned_record(self, name: str) -> SessionMetadata:
-        session = self.backend.get_session(name)
+    def _log_path(self, record: SessionMetadata) -> Path:
+        return self.paths.logs_dir / f"{record.record_id}.log"
+
+    def _prepare_log(self, path: Path) -> None:
+        self.paths.logs_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.paths.logs_dir, 0o700)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(path, flags, 0o600)
+        try:
+            details = os.fstat(descriptor)
+            if not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid():
+                raise StateError("refusing unsafe log file")
+            os.fchmod(descriptor, 0o600)
+        finally:
+            os.close(descriptor)
+
+    def _delete_log_path(self, path: Path) -> None:
+        if not path.exists():
+            return
+        if path.is_symlink():
+            raise StateError(f"refusing symlinked log: {path.name}")
+        details = path.stat()
+        if not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid():
+            raise StateError(f"refusing unsafe log: {path.name}")
+        try:
+            path.unlink()
+        except OSError as error:
+            raise StateError(f"unable to delete log for {path.name}: {error}") from error
+
+    def _read_log(self, name: str, max_lines: int, max_bytes: int) -> BoundedOutput:
         record = self.store.load(name)
+        if record is None:
+            return bounded_output("", max_lines=max_lines, max_bytes=max_bytes)
+        path = self._log_path(record)
+        if not path.exists() or path.is_symlink():
+            return bounded_output("", max_lines=max_lines, max_bytes=max_bytes)
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            descriptor = os.open(path, flags)
+            try:
+                details = os.fstat(descriptor)
+                if not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid():
+                    raise StateError(f"refusing unsafe log: {path.name}")
+                os.lseek(descriptor, max(0, details.st_size - max_bytes * 2), os.SEEK_SET)
+                content = os.read(descriptor, max_bytes * 2).decode("utf-8", errors="replace")
+            finally:
+                os.close(descriptor)
+        except OSError as error:
+            raise StateError(f"unable to read log for {name}: {error}") from error
+        return bounded_output(content, max_lines=max_lines, max_bytes=max_bytes)
+
+    def _managed_record(self, name: str, *, require_live: bool = False) -> SessionMetadata:
+        record = self.store.load(name)
+        if record is None:
+            raise OwnershipError(
+                f"refusing to modify {name}: it was not created by this WF installation"
+            )
+        try:
+            session = self.backend.get_session(name)
+        except SessionNotFoundError:
+            if require_live:
+                raise
+            return record
         marker = self.backend.get_option(name, "@wf_owner", expected_id=session.session_id)
-        if (
-            record is None
-            or record.tmux_session_id != session.session_id
-            or marker != "wf-session-manager"
-        ):
+        if record.tmux_session_id != session.session_id or marker != "wf-session-manager":
             raise OwnershipError(
                 f"refusing to modify {name}: it was not created by this WF installation"
             )
         return record
+
+    def _owned_record(self, name: str) -> SessionMetadata:
+        return self._managed_record(name, require_live=True)
 
     def attach(self, name: str) -> int:
         self.get(name)
@@ -356,8 +543,13 @@ class SessionService:
 
     def resume_target(self) -> SessionView:
         sessions = self.list_sessions()
-        detached = [session for session in sessions if not session.attached]
-        candidates = detached or sessions
+        detached = [session for session in sessions if session.runtime is RuntimeState.DETACHED]
+        live = [
+            session
+            for session in sessions
+            if session.runtime in {RuntimeState.ATTACHED, RuntimeState.DETACHED}
+        ]
+        candidates = detached or live
         if not candidates:
             raise SessionNotFoundError("no tmux sessions are available")
         return candidates[0]
@@ -365,7 +557,7 @@ class SessionService:
     def update_note(self, name: str, note: str) -> SessionView:
         if len(note) > 2000:
             raise WFError("note cannot exceed 2000 characters")
-        record = self._owned_record(name)
+        record = self._managed_record(name)
         self.store.save(record.model_copy(update={"note": note, "updated_at": utc_now()}))
         return self.get(name)
 
@@ -379,7 +571,7 @@ class SessionService:
         project: str | None = None,
         pinned: bool | None = None,
     ) -> SessionView:
-        record = self._owned_record(name)
+        record = self._managed_record(name)
         updates: dict[str, object] = {"updated_at": utc_now()}
         if tags is not None:
             updates["tags"] = tags
@@ -396,23 +588,146 @@ class SessionService:
         return self.get(name)
 
     def rename(self, old_name: str, requested_name: str) -> SessionView:
-        record = self._owned_record(old_name)
+        record = self._managed_record(old_name)
         new_name = normalized_session_name(record.tool, requested_name)
         if old_name == new_name:
             return self.get(old_name)
-        self.backend.rename_session(old_name, new_name, expected_id=record.tmux_session_id)
+        if self.backend.session_exists(new_name) or self.store.load(new_name) is not None:
+            raise SessionExistsError(f"session already exists: {new_name}")
+        live = self.backend.session_exists(old_name)
+        if live:
+            self.backend.rename_session(old_name, new_name, expected_id=record.tmux_session_id)
         updated = record.model_copy(update={"name": new_name, "updated_at": utc_now()})
         try:
             self.store.replace(old_name, updated)
         except StateError:
-            self.backend.rename_session(new_name, old_name, expected_id=record.tmux_session_id)
+            if live:
+                self.backend.rename_session(new_name, old_name, expected_id=record.tmux_session_id)
             raise
         return self.get(new_name)
 
     def delete(self, name: str) -> None:
-        record = self._owned_record(name)
-        self.backend.kill_session(name, expected_id=record.tmux_session_id)
+        record = self._managed_record(name)
+        if self.backend.session_exists(name):
+            if self.get(name).logging_enabled:
+                self.backend.set_logging(name, None, expected_id=record.tmux_session_id)
+            self.backend.kill_session(name, expected_id=record.tmux_session_id)
         self.store.delete(name)
+        self._delete_log_path(self._log_path(record))
+
+    def stop_command(self, name: str) -> None:
+        record = self._owned_record(name)
+        self.backend.send_interrupt(name, expected_id=record.tmux_session_id)
+
+    def stop_session(self, name: str) -> SessionView:
+        record = self._owned_record(name)
+        session = self.get(name)
+        if session.logging_enabled:
+            self.backend.set_logging(name, None, expected_id=record.tmux_session_id)
+        self.backend.kill_session(name, expected_id=record.tmux_session_id)
+        self.store.save(record.model_copy(update={"updated_at": utc_now()}))
+        return self.get(name)
+
+    def restart(self, name: str) -> SessionView:
+        record = self._managed_record(name)
+        profile = self.config.tools[record.tool]
+        shell_profile = self.config.tools[Tool.SHELL]
+        if not command_available(profile.command):
+            raise ToolUnavailableError(f"command not found: {profile.command[0]}")
+        if not command_available(shell_profile.command):
+            raise ToolUnavailableError(f"shell command not found: {shell_profile.command[0]}")
+        agent_command = None if record.tool is Tool.SHELL else profile.command
+        if self.backend.session_exists(name):
+            was_logging = self.get(name).logging_enabled
+            if was_logging:
+                self.backend.set_logging(name, None, expected_id=record.tmux_session_id)
+            try:
+                self.backend.restart_session(
+                    name,
+                    record.cwd,
+                    shell_profile.command,
+                    agent_command,
+                    expected_id=record.tmux_session_id,
+                )
+            except Exception:
+                if was_logging:
+                    self.backend.set_logging(
+                        name,
+                        self._log_path(record),
+                        expected_id=record.tmux_session_id,
+                    )
+                raise
+            if was_logging:
+                self.backend.set_logging(
+                    name,
+                    self._log_path(record),
+                    expected_id=record.tmux_session_id,
+                )
+        else:
+            session = self.backend.create_session(
+                name=name,
+                cwd=record.cwd,
+                shell_command=shell_profile.command,
+                agent_command=agent_command,
+            )
+            record = record.model_copy(
+                update={"tmux_session_id": session.session_id, "updated_at": utc_now()}
+            )
+            try:
+                self.store.save(record)
+            except Exception:
+                self.backend.kill_session(name, expected_id=session.session_id)
+                raise
+        return self.get(name)
+
+    def set_logging(self, name: str, enabled: bool) -> SessionView:
+        record = self._owned_record(name)
+        path = self._log_path(record)
+        if enabled:
+            self._prepare_log(path)
+            self.backend.set_logging(name, path, expected_id=record.tmux_session_id)
+        else:
+            self.backend.set_logging(name, None, expected_id=record.tmux_session_id)
+        return self.get(name)
+
+    def delete_logs(self, name: str) -> SessionView:
+        record = self._managed_record(name)
+        live = self.backend.session_exists(name)
+        was_logging = live and self.get(name).logging_enabled
+        if was_logging:
+            self.backend.set_logging(name, None, expected_id=record.tmux_session_id)
+        self._delete_log_path(self._log_path(record))
+        if was_logging:
+            path = self._log_path(record)
+            self._prepare_log(path)
+            self.backend.set_logging(name, path, expected_id=record.tmux_session_id)
+        return self.get(name)
+
+    def remove_metadata(self, name: str) -> None:
+        record = self._managed_record(name)
+        live = self.backend.session_exists(name)
+        was_logging = live and self.get(name).logging_enabled
+        if live:
+            if was_logging:
+                self.backend.set_logging(name, None, expected_id=record.tmux_session_id)
+            self.backend.unset_option(name, "@wf_owner", expected_id=record.tmux_session_id)
+        try:
+            self.store.delete(name)
+        except StateError:
+            if live:
+                self.backend.set_option(
+                    name,
+                    "@wf_owner",
+                    "wf-session-manager",
+                    expected_id=record.tmux_session_id,
+                )
+                if was_logging:
+                    self.backend.set_logging(
+                        name,
+                        self._log_path(record),
+                        expected_id=record.tmux_session_id,
+                    )
+            raise
 
     def doctor(self) -> DoctorReport:
         checks: list[HealthCheck] = []
@@ -421,13 +736,29 @@ class SessionService:
                 HealthCheck(name="tmux", status=HealthStatus.PASS, detail=self.backend.version())
             )
         except WFError as error:
-            checks.append(HealthCheck(name="tmux", status=HealthStatus.FAIL, detail=str(error)))
+            checks.append(
+                HealthCheck(
+                    name="tmux",
+                    status=HealthStatus.FAIL,
+                    detail=str(error),
+                    corrective_action="Install tmux or verify the configured tmux socket.",
+                )
+            )
 
         for tool, profile in self.config.tools.items():
             available = command_available(profile.command)
             status = HealthStatus.PASS if available else HealthStatus.WARN
             detail = shutil.which(profile.command[0]) or f"not found: {profile.command[0]}"
-            checks.append(HealthCheck(name=f"tool:{tool.value}", status=status, detail=detail))
+            checks.append(
+                HealthCheck(
+                    name=f"tool:{tool.value}",
+                    status=status,
+                    detail=detail,
+                    corrective_action="Install the tool or disable its profile in config.toml."
+                    if not available
+                    else "",
+                )
+            )
 
         errors = self.store.validation_errors()
         checks.append(
@@ -435,6 +766,9 @@ class SessionService:
                 name="state",
                 status=HealthStatus.FAIL if errors else HealthStatus.PASS,
                 detail="; ".join(errors) if errors else str(self.paths.state_dir),
+                corrective_action="Repair or remove the invalid owner-only metadata file."
+                if errors
+                else "",
             )
         )
         unmanaged = sum(not session.owned for session in self.list_sessions(include_unmanaged=True))
@@ -453,6 +787,68 @@ class SessionService:
                 name="legacy-readonly",
                 status=HealthStatus.PASS if readable_legacy else HealthStatus.WARN,
                 detail=", ".join(readable_legacy) or "no legacy state directories found",
+                corrective_action=(
+                    "No action is required unless classic metadata should be imported."
+                )
+                if not readable_legacy
+                else "",
+            )
+        )
+        disk_root = (
+            self.paths.state_dir if self.paths.state_dir.exists() else self.paths.state_dir.parent
+        )
+        usage = shutil.disk_usage(disk_root)
+        available_percent = int((usage.free / usage.total) * 100) if usage.total else 0
+        disk_status = (
+            HealthStatus.FAIL
+            if available_percent < 2
+            else HealthStatus.WARN
+            if available_percent < 10
+            else HealthStatus.PASS
+        )
+        checks.append(
+            HealthCheck(
+                name="disk-space",
+                status=disk_status,
+                detail=f"{available_percent}% available",
+                corrective_action="Free disk space before creating sessions or enabling logs."
+                if disk_status is not HealthStatus.PASS
+                else "",
             )
         )
         return DoctorReport(checks=checks)
+
+    def export_doctor_report(self, report: DoctorReport) -> Path:
+        self.paths.diagnostics_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.paths.diagnostics_dir, 0o700)
+        destination = (
+            self.paths.diagnostics_dir / f"wf-diagnostics-{utc_now():%Y%m%d-%H%M%S-%f}.txt"
+        )
+        lines = ["WF privacy-safe diagnostics", f"Generated: {utc_now().isoformat()}", ""]
+        for check in report.checks:
+            detail = redact_text(check.detail)
+            lines.append(f"{check.status.value.upper():<4} {check.name}: {detail}")
+            if check.corrective_action:
+                lines.append(f"     Action: {check.corrective_action}")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(destination, flags, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write("\n".join(lines))
+            stream.write("\n")
+        return destination
+
+    def onboarding_seen(self) -> bool:
+        return self.paths.onboarding_file.is_file() and not self.paths.onboarding_file.is_symlink()
+
+    def mark_onboarding_seen(self) -> None:
+        self.paths.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.paths.state_dir, 0o700)
+        flags = os.O_WRONLY | os.O_CREAT
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(self.paths.onboarding_file, flags, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as marker:
+            marker.write("seen\n")
+        os.chmod(self.paths.onboarding_file, 0o600)

@@ -4,6 +4,26 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 
 ## [Unreleased]
 
+### Added
+
+- Centered diagnostics, create-session, filtering, onboarding, help, and protected management flows
+- Inline create validation, duplicate detection, Git project discovery, recent directories, logging
+  controls, and exact command previews
+- Optional owner-only sanitized tmux logging with bounded log and pane views
+- Structured usage-limit activity warnings, advanced details, diagnostics export, and stopped-session
+  recovery
+- Dark, light, monochrome, `NO_COLOR`, and ASCII presentation modes
+- Snapshot coverage for dialogs, validation failures, usage warnings, destructive confirmation, light
+  mode, and inventories of 50 and 200 sessions
+
+### Changed
+
+- Rebuilt the inspector into Overview, Status, Activity, Recent Output, and Actions containers
+- Made session grouping canonical so a session appears only once; recent activity is now a filter
+- Renamed `d More` to `d Manage` and separated ordinary operations from protected operations
+- Refined 160, 120, 100, and 80-column layouts, fixed-width tool badges, activity times, and headers
+- Restored `--classic` only as a guarded compatibility bridge to an owner-only preserved executable
+
 ## [0.2.0] - 2026-07-20
 
 ### Added
@@ -36,7 +56,7 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 - Classic retirement verifies the archived executable payload before deletion and writes a relocatable
   archive checksum
 - Textual filtering clears hidden selections and renders explicit empty or no-match states
-- Removed the user-facing classic bridge from the Textual application and Typer CLI
+- Removed classic actions from the Textual application and normal Typer command surface
 
 ## [0.1.0] - 2026-07-19
 

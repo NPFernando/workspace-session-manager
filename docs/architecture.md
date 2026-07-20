@@ -36,8 +36,8 @@ This protects legacy sessions, manually created sessions, stale metadata, and na
 session exits.
 
 After validation, WF carries the expected tmux ID into the backend operation and targets `$session_id`
-for attach, pane capture, rename, option changes, and deletion. It does not validate an ID and then
-return to the reusable name for the final command.
+for attach, pane capture, rename, option changes, logging, restart, stop, and deletion. It does not
+validate an ID and then return to the reusable name for the final command.
 
 ## Adoption
 
@@ -81,9 +81,14 @@ tmux and are combined conservatively with WF's last-attach timestamp.
 Outside tmux, WF runs `tmux attach-session`. Inside tmux, it runs `tmux switch-client`. tmux owns the
 long-running process, so closing SSH does not terminate the session.
 
-## Preview privacy
+## Output and logging
 
-Pane previews are captured on demand and never persisted by the new application. ANSI, OSC, and
-control sequences are stripped; common token/password forms are redacted; local home paths are
-shortened; and output is bounded by both lines and UTF-8 bytes after sanitization. Input-required
-status is explicit metadata and is never inferred from arbitrary pane output.
+Pane previews are captured on demand. ANSI, OSC, DCS, clipboard, title, and control sequences are
+stripped; common token/password forms are redacted; local home paths are shortened; and output is
+bounded by both lines and UTF-8 bytes after sanitization. Optional persistent logging uses tmux
+`pipe-pane` with an argument-array command that invokes WF's sanitizer and writes owner-only rotating
+files. Logging state is a tmux option and is never enabled for an unmanaged session.
+
+Input-required status remains explicit metadata and is never inferred from arbitrary pane output.
+Conservative activity detectors may surface recognized usage-limit text in the inspector without
+changing runtime, task, or input state.

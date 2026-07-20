@@ -23,8 +23,9 @@ verifies that the tmux session remained alive throughout.
 ## Visual regression
 
 `pytest-textual-snapshot` records deterministic SVG frames for wide, medium, narrow, empty, warning,
-failure, monochrome, and long-content states. Reviewed before/after frames at `160x45`, `120x35`,
-`100x30`, and `80x24` are stored under `docs/screenshots/`.
+failure, usage-limit, diagnostics, create, validation-error, destructive-confirmation, dark, light,
+monochrome, long-content, 50-session, and 200-session states. Reviewed before/after frames at
+`160x45`, `120x35`, `100x30`, and `80x24` are stored under `docs/screenshots/`.
 
 ## Manual TUI matrix
 
@@ -47,3 +48,7 @@ Check at least:
 - retirement archive payload corruption and relocatable checksum verification
 - sanitized pane output containing ANSI, IP, home path, and test token patterns
 - zero-result searches and empty inventories with no hidden actionable selection
+- create validation failure with values preserved and Create disabled
+- Cancel-focused confirmation for every protected Manage operation
+- dark, light, monochrome, `NO_COLOR`, and `WF_ASCII=1` rendering
+- output and session-list scroll position preservation across background refresh

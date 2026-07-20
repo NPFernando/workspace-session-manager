@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +27,7 @@ TMUX_FORMAT = "\x1f".join(
         "#{pane_current_path}",
         "#{pane_current_command}",
         "#{@wf_owner}",
+        "#{@wf_logging}",
         "#{pane_dead}",
         "#{pane_dead_status}",
     )
@@ -120,7 +122,7 @@ class TmuxBackend:
             if not line:
                 continue
             fields = line.split(FIELD_SEPARATOR)
-            if len(fields) != 11:
+            if len(fields) != 12:
                 raise TmuxError("tmux returned an unexpected session record")
             (
                 session_id,
@@ -132,6 +134,7 @@ class TmuxBackend:
                 cwd,
                 command,
                 owner,
+                logging,
                 pane_dead,
                 pane_dead_status,
             ) = fields
@@ -146,6 +149,7 @@ class TmuxBackend:
                         cwd=Path(cwd or "/"),
                         current_command=command,
                         wf_owner=owner or None,
+                        logging_enabled=logging == "1",
                         last_activity_at=datetime.fromtimestamp(int(activity), tz=UTC),
                         pane_dead=pane_dead == "1",
                         pane_dead_status=int(pane_dead_status) if pane_dead_status else None,
@@ -207,10 +211,7 @@ class TmuxBackend:
                 expected_id=created_id or None,
             )
             if agent_command:
-                command_line = shlex.join(agent_command)
-                target = f"{created_id}:" if created_id else f"={name}:"
-                self._run("send-keys", "-t", target, "-l", "--", command_line)
-                self._run("send-keys", "-t", target, "Enter")
+                self._send_command(created_id or f"={name}", agent_command)
             session = self.get_session(name)
             if created_id and session.session_id != created_id:
                 raise TmuxError("tmux session ID changed during creation")
@@ -254,6 +255,57 @@ class TmuxBackend:
             "-S",
             f"-{lines}",
         ).stdout
+
+    def _send_command(self, target: str, command: Sequence[str]) -> None:
+        command_line = shlex.join(command)
+        self._run("send-keys", "-t", f"{target}:", "-l", "--", command_line)
+        self._run("send-keys", "-t", f"{target}:", "Enter")
+
+    def send_interrupt(self, name: str, expected_id: str | None = None) -> None:
+        target = self._session_target(name, expected_id)
+        self._run("send-keys", "-t", f"{target}:", "C-c")
+
+    def restart_session(
+        self,
+        name: str,
+        cwd: Path,
+        shell_command: Sequence[str],
+        agent_command: Sequence[str] | None,
+        expected_id: str | None = None,
+    ) -> None:
+        target = self._session_target(name, expected_id)
+        self._run(
+            "respawn-pane",
+            "-k",
+            "-t",
+            f"{target}:",
+            "-c",
+            str(cwd),
+            "--",
+            *shell_command,
+        )
+        if agent_command:
+            self._send_command(target, agent_command)
+
+    def set_logging(
+        self,
+        name: str,
+        log_path: Path | None,
+        expected_id: str | None = None,
+    ) -> None:
+        target = self._session_target(name, expected_id)
+        pane_target = f"{target}:"
+        if log_path is None:
+            self._run("pipe-pane", "-t", pane_target)
+            self.unset_option(name, "@wf_logging", expected_id=expected_id)
+            return
+        command = shlex.join((sys.executable, "-m", "wf_session_manager.log_sink", str(log_path)))
+        self._run("pipe-pane", "-o", "-t", pane_target, "--", command)
+        try:
+            self.set_option(name, "@wf_logging", "1", expected_id=expected_id)
+        except Exception:
+            self._run("pipe-pane", "-t", pane_target)
+            raise
 
     def attach(self, name: str, expected_id: str | None = None) -> int:
         target = self._session_target(name, expected_id)

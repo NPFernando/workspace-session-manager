@@ -32,6 +32,18 @@ class AppPaths:
         return self.state_dir / "migrations"
 
     @property
+    def logs_dir(self) -> Path:
+        return self.state_dir / "logs"
+
+    @property
+    def onboarding_file(self) -> Path:
+        return self.state_dir / ".onboarding-v1"
+
+    @property
+    def diagnostics_dir(self) -> Path:
+        return self.cache_dir / "diagnostics"
+
+    @property
     def migration_lock_file(self) -> Path:
         return self.state_dir / ".migration.lock"
 

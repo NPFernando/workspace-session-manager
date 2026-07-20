@@ -26,9 +26,10 @@ owner-only files with no symlink path component.
 
 ## Destructive operations
 
-Rename, metadata edits, pinning, and deletion require ownership proof. CLI deletion requires typing
-the exact session name unless `--yes` is supplied. The TUI exposes deletion only through More Actions,
-then requires a second exact-name confirmation whose default focus is Cancel.
+Rename, metadata edits, pinning, logging, restart, stop, and deletion require ownership proof. CLI
+deletion requires typing the exact session name unless `--yes` is supplied. The TUI exposes stop,
+metadata removal, log deletion, and complete deletion only through Manage, then requires a separate
+confirmation whose default focus is Cancel. Complete deletion also requires the exact session name.
 WF never sends `sudo` and has no system-wide install path. The standalone SSH-hook migration script
 defaults to a dry run, requires a literal match with the assessed hook, creates a backup, and changes
 the profile only with its separate approval flag.
@@ -44,10 +45,16 @@ refuse existing destinations instead of replacing them.
 
 ## Pane output
 
-Preview and log captures use exact tmux IDs. Sanitization removes CSI, OSC, and control characters
-before Rich or Textual sees the content, then redacts common credentials, IP addresses, and the local
-home path. The sanitized result is bounded by configured line and byte limits and is never persisted.
-WF does not infer input-required state from captured output.
+Preview and log captures use exact tmux IDs. Sanitization removes CSI, OSC, DCS, clipboard, title,
+and control sequences before Rich or Textual sees the content, then redacts common credentials, IP
+addresses, and the local home path. Rendered results are bounded by configured line and UTF-8 byte
+limits. Optional persistent logging is disabled or enabled explicitly per managed session and writes
+only through WF's owner-only, size-limited sanitizer process. WF does not infer input-required state
+from arbitrary captured output; narrowly recognized operational warnings such as usage limits are
+shown as possible activity notices without changing task metadata.
+
+The compatibility `--classic` bridge executes only a regular, owner-owned executable under the
+owner-only `~/.local/libexec` directory. It is not exposed as a dashboard action.
 
 Classic retirement verifies both the archive topology and the extracted executable hash before
 deleting the preservation copy. The archive checksum references only its basename and is verified at

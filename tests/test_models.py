@@ -43,6 +43,25 @@ def test_preview_is_sanitized_redacted_and_bounded() -> None:
     assert bounded_preview(source, 2).splitlines()[-1] == "last"
 
 
+def test_clipboard_title_and_control_sequences_are_removed() -> None:
+    source = (
+        "before\x1b]0;secret title\x07"
+        "\x1b]52;c;Y2xpcGJvYXJk\x1b\\"
+        "\x1bPignored-device-control\x1b\\after"
+        "\x9d8;hidden hyperlink\x9c"
+        "\x90hidden-c1-device-control\x9c"
+    )
+    clean = redact_text(source)
+    assert "\x1b" not in clean
+    assert "secret title" not in clean
+    assert "Y2xpcGJvYXJk" not in clean
+    assert "ignored-device-control" not in clean
+    assert "hidden hyperlink" not in clean
+    assert "hidden-c1-device-control" not in clean
+    assert "before" in clean
+    assert "after" in clean
+
+
 @pytest.mark.parametrize(
     ("legacy", "current"),
     [

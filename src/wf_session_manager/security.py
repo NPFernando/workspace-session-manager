@@ -6,9 +6,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-ANSI_CSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-ANSI_OSC = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
-CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+ANSI_CSI = re.compile(r"(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]")
+ANSI_OSC = re.compile(r"(?:\x1b\]|\x9d).*?(?:\x07|\x1b\\|\x9c)", re.DOTALL)
+ANSI_STRING = re.compile(r"(?:\x1b[P\^_X]|[\x90\x98\x9e\x9f]).*?(?:\x07|\x1b\\|\x9c)", re.DOTALL)
+CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 JWT = re.compile(r"\b[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{10,}\b")
 OPENAI_KEY = re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b")
 KEY_VALUE = re.compile(
@@ -20,7 +21,7 @@ IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 def sanitize_terminal(text: str) -> str:
     """Remove terminal control sequences before rendering untrusted pane output."""
-    return CONTROL.sub("", ANSI_OSC.sub("", ANSI_CSI.sub("", text)))
+    return CONTROL.sub("", ANSI_STRING.sub("", ANSI_OSC.sub("", ANSI_CSI.sub("", text))))
 
 
 def redact_text(text: str, home: Path | None = None) -> str:

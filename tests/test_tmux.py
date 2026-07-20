@@ -44,6 +44,7 @@ def test_list_sessions_parses_machine_format() -> None:
             "/srv/api",
             "claude",
             "",
+            "1",
             "0",
             "",
         )
@@ -54,6 +55,7 @@ def test_list_sessions_parses_machine_format() -> None:
     assert sessions[0].attached
     assert sessions[0].cwd.as_posix() == "/srv/api"
     assert sessions[0].last_activity_at is not None
+    assert sessions[0].logging_enabled
     assert not sessions[0].pane_dead
     assert runner.calls[0][:2] == ("tmux", "list-sessions")
 
@@ -110,6 +112,7 @@ def live_session_line(session_id: str = "$3", name: str = "claude-api") -> str:
             "1",
             "/srv/api",
             "claude",
+            "",
             "",
             "0",
             "",
@@ -186,6 +189,42 @@ def test_expected_id_mismatch_never_runs_final_tmux_command() -> None:
     with pytest.raises(TmuxError, match="expected tmux ID \\$original"):
         TmuxBackend(runner).kill_session("claude-api", expected_id="$original")
     assert runner.calls == [("tmux", "list-sessions", "-F", TMUX_FORMAT)]
+
+
+def test_interrupt_restart_and_logging_use_exact_pane_target(tmp_path: Path) -> None:
+    interrupt_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
+    TmuxBackend(interrupt_runner).send_interrupt("claude-api", expected_id="$3")
+    assert interrupt_runner.calls[-1] == ("tmux", "send-keys", "-t", "$3:", "C-c")
+
+    restart_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
+    TmuxBackend(restart_runner).restart_session(
+        "claude-api",
+        tmp_path,
+        ("/bin/bash", "-l"),
+        ("codex", "--quiet"),
+        expected_id="$3",
+    )
+    assert (
+        "tmux",
+        "respawn-pane",
+        "-k",
+        "-t",
+        "$3:",
+        "-c",
+        str(tmp_path),
+        "--",
+        "/bin/bash",
+        "-l",
+    ) in restart_runner.calls
+    assert restart_runner.calls[-1] == ("tmux", "send-keys", "-t", "$3:", "Enter")
+
+    logging_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
+    log_path = tmp_path / "session.log"
+    TmuxBackend(logging_runner).set_logging("claude-api", log_path, expected_id="$3")
+    pipe_call = next(call for call in logging_runner.calls if "pipe-pane" in call)
+    assert pipe_call[:6] == ("tmux", "pipe-pane", "-o", "-t", "$3:", "--")
+    assert "wf_session_manager.log_sink" in pipe_call[-1]
+    assert str(log_path) in pipe_call[-1]
 
 
 def test_named_socket_is_applied_to_every_tmux_command() -> None:

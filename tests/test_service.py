@@ -6,6 +6,9 @@ from conftest import FakeBackend
 from wf_session_manager.errors import OwnershipError, StateError, TmuxError, ToolUnavailableError
 from wf_session_manager.models import (
     CreateRequest,
+    DoctorReport,
+    HealthCheck,
+    HealthStatus,
     InputState,
     RuntimeState,
     SessionMetadata,
@@ -90,7 +93,7 @@ def test_state_failure_rolls_back_only_new_session(
     def fail_save(record: SessionMetadata) -> None:
         raise StateError(f"cannot save {record.name}")
 
-    monkeypatch.setattr(service.store, "save", fail_save)
+    monkeypatch.setattr(service.store, "save_new", fail_save)
     with pytest.raises(StateError):
         service.create(CreateRequest(name="rollback", tool=Tool.SHELL, cwd=tmp_path))
     assert not fake_backend.session_exists("rollback")
@@ -172,3 +175,134 @@ def test_logs_are_sanitized_and_report_truncation(
     assert details.preview_truncated
     assert "private" not in details.preview
     assert len(details.preview.splitlines()) == service.config.log_lines
+
+
+def test_create_validation_detects_duplicate_directory_and_git_project(
+    service: SessionService,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "api-platform"
+    nested = project / "src"
+    nested.mkdir(parents=True)
+    (project / ".git").mkdir()
+    validation = service.validate_create(Tool.CLAUDE, "api", nested)
+    assert validation.valid
+    assert validation.normalized_name == "claude-api"
+    assert validation.cwd == nested
+    assert validation.detected_project == "api-platform"
+
+    service.create(CreateRequest(name="api", tool=Tool.CLAUDE, cwd=nested))
+    duplicate = service.validate_create(Tool.CLAUDE, "api", nested)
+    assert not duplicate.valid
+    assert "already exists" in duplicate.errors[0]
+
+
+def test_logging_stop_restart_and_metadata_removal_are_explicit(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(
+        CreateRequest(
+            name="protected",
+            tool=Tool.CODEX,
+            cwd=tmp_path,
+            logging_enabled=True,
+        )
+    )
+    assert created.logging_enabled
+    record = service.store.load(created.name)
+    assert record is not None
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    assert log_path.is_file()
+    assert log_path.stat().st_mode & 0o777 == 0o600
+
+    service.stop_command(created.name)
+    assert fake_backend.interrupted == [created.name]
+
+    stopped = service.stop_session(created.name)
+    assert stopped.runtime is RuntimeState.STOPPED
+    assert not fake_backend.session_exists(created.name)
+    organized = service.organize(created.name, state=TaskState.WAITING)
+    assert organized.task_state is TaskState.WAITING
+
+    restarted = service.restart(created.name)
+    assert restarted.runtime is RuntimeState.DETACHED
+    assert restarted.session_id != created.session_id
+    service.remove_metadata(created.name)
+    assert fake_backend.session_exists(created.name)
+    assert fake_backend.get_option(created.name, "@wf_owner") is None
+    assert service.list_sessions() == []
+
+
+def test_delete_logs_preserves_enabled_logging(
+    service: SessionService,
+    tmp_path: Path,
+) -> None:
+    created = service.create(
+        CreateRequest(name="logged", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    path = service.paths.logs_dir / f"{record.record_id}.log"
+    path.write_text("sanitized output\n", encoding="utf-8")
+    updated = service.delete_logs(created.name)
+    assert updated.logging_enabled
+    assert path.read_text(encoding="utf-8") == ""
+
+
+def test_live_restart_reestablishes_logging(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(
+        CreateRequest(name="restart-logging", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    restarted = service.restart(created.name)
+    assert restarted.logging_enabled
+    assert fake_backend.restarted == [created.name]
+    assert created.name in fake_backend.logging_paths
+
+
+def test_stopped_restart_rolls_back_new_tmux_session_when_state_save_fails(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = service.create(CreateRequest(name="restart-rollback", tool=Tool.SHELL, cwd=tmp_path))
+    service.stop_session(created.name)
+    original = service.store.load(created.name)
+    assert original is not None
+
+    def fail_save(record: SessionMetadata) -> None:
+        del record
+        raise StateError("simulated save failure")
+
+    monkeypatch.setattr(service.store, "save", fail_save)
+    with pytest.raises(StateError, match="simulated save failure"):
+        service.restart(created.name)
+    assert not fake_backend.session_exists(created.name)
+    assert service.store.load(created.name) == original
+
+
+def test_privacy_safe_diagnostic_export_redacts_sensitive_values(
+    service: SessionService,
+) -> None:
+    report = DoctorReport(
+        checks=[
+            HealthCheck(
+                name="state",
+                status=HealthStatus.FAIL,
+                detail=f"{Path.home()}/private password=not-safe 192.168.1.1",
+                corrective_action="Repair state.",
+            )
+        ]
+    )
+    destination = service.export_doctor_report(report)
+    exported = destination.read_text(encoding="utf-8")
+    assert str(Path.home()) not in exported
+    assert "not-safe" not in exported
+    assert "192.168.1.1" not in exported
+    assert destination.stat().st_mode & 0o777 == 0o600

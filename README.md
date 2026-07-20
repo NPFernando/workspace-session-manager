@@ -9,11 +9,14 @@ tmux sessions. Release installation and cutover remain separate approval-gated o
 
 ## Highlights
 
-- Grouped Textual dashboard with on-demand search, protected actions, and responsive layouts
+- Grouped Textual dashboard with on-demand search, structured filters, and responsive layouts
+- Distinct Overview, Status, Activity, Recent Output, and protected Manage panels
 - Persistent detached sessions through tmux
 - Claude, Codex, Hermes, and shell profiles with strict TOML validation
 - Separate runtime, task, and input states with notes, projects, tags, pinning, and rename
 - ANSI/OSC sanitization, secret redaction, and byte-and-line bounded pane and log views
+- Optional owner-only sanitized logging, usage-limit warnings, diagnostics export, and onboarding
+- Dark, light, monochrome, `NO_COLOR`, and ASCII-compatible presentation modes
 - Read-only discovery and preview of legacy WF sidecar metadata
 - Exact-ID, snapshot-validated, reversible session adoption
 - Ownership checks tied to both tmux's unique session ID and a tmux owner marker
@@ -62,6 +65,7 @@ wf-dev list --all              # Include unmanaged sessions for diagnostics
 wf-dev list --json
 wf-dev inspect claude-api
 wf-dev create --tool claude --name api --cwd ~/projects/api
+wf-dev create --tool codex --name review --cwd ~/projects/api --logging
 wf-dev create --tool shell --name diagnostics --cwd ~
 wf-dev edit claude-api --tag backend --state in_progress --input none --pin
 wf-dev note claude-api "Refactor authentication flow"
@@ -84,6 +88,7 @@ hidden unless `list --all` is requested.
 | Key | Action |
 | --- | --- |
 | `Enter` | Attach, or open details at 80-99 columns |
+| `Up`/`Down`, `j`/`k` | Navigate sessions and quick actions |
 | `c` | Create a session |
 | `e` | Edit name, project, tags, task/input state, and pin |
 | `n` | Edit the task description |
@@ -91,10 +96,18 @@ hidden unless `list --all` is requested.
 | `*` | Toggle pin |
 | `d` | Open protected session actions |
 | `/` | Enter on-demand search mode |
+| `f` | Filter by tool, runtime, task state, warning, or recent activity |
 | `p` | Open the command palette |
 | `?` | Open contextual help |
 | `r` | Refresh |
+| `t` | Cycle dark, light, and monochrome themes |
+| `Esc` | Cancel search or return from a narrow detail screen |
 | `q` | Quit |
+
+The create dialog validates names and directories, detects duplicate sessions and Git projects,
+shows the exact command, and keeps Create disabled until required fields are valid. `d` opens Manage;
+stop, metadata removal, log deletion, and complete deletion always require a separate confirmation
+with Cancel focused by default.
 
 ## Configuration
 
@@ -138,8 +151,9 @@ not restart, rename, or remove its disposable tmux session.
 ## Project status
 
 Version `0.2.0` adds the production dashboard hierarchy, protected interactions, responsive modes,
-and deterministic visual regression coverage. Installing it over an existing release remains an
-explicit approval-gated step; see [migration](docs/migration.md).
+sanitized logging, structured diagnostics, theme support, and deterministic visual regression
+coverage. Installing it over an existing release remains an explicit approval-gated step; see
+[migration](docs/migration.md).
 
 ## License
 

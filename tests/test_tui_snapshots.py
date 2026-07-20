@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from textual.pilot import Pilot
+from textual.widgets import Input
 
 from conftest import FakeBackend
 from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
@@ -105,7 +107,12 @@ def populated_app(
         Tool.SHELL,
         task_state=TaskState.UNSPECIFIED,
     )
-    return WFApp(service, monochrome=monochrome, hostname="wf-test-host")
+    return WFApp(
+        service,
+        monochrome=monochrome,
+        hostname="wf-test-host",
+        onboarding=False,
+    )
 
 
 def test_wide_snapshot(
@@ -114,6 +121,14 @@ def test_wide_snapshot(
     fake_backend: FakeBackend,
 ) -> None:
     assert snap_compare(populated_app(service, fake_backend), terminal_size=(160, 45))
+
+
+def test_standard_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    assert snap_compare(populated_app(service, fake_backend), terminal_size=(120, 35))
 
 
 def test_medium_snapshot(
@@ -134,7 +149,7 @@ def test_narrow_snapshot(
 
 def test_empty_snapshot(snap_compare: SnapCompare, service: SessionService) -> None:
     assert snap_compare(
-        WFApp(service, monochrome=False, hostname="wf-test-host"),
+        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
         terminal_size=(120, 35),
     )
 
@@ -153,7 +168,7 @@ def test_warning_snapshot(
         input_state=InputState.REQUIRED,
     )
     assert snap_compare(
-        WFApp(service, monochrome=False, hostname="wf-test-host"),
+        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
         terminal_size=(120, 35),
     )
 
@@ -172,7 +187,7 @@ def test_failure_snapshot(
         failed=True,
     )
     assert snap_compare(
-        WFApp(service, monochrome=False, hostname="wf-test-host"),
+        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
         terminal_size=(120, 35),
     )
 
@@ -210,6 +225,103 @@ def test_long_content_snapshot(
         for index in range(20)
     )
     assert snap_compare(
-        WFApp(service, monochrome=False, hostname="wf-test-host"),
+        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
+        terminal_size=(160, 45),
+    )
+
+
+def test_light_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+    app.ui_theme = "light"
+    assert snap_compare(app, terminal_size=(120, 35))
+
+
+def test_diagnostics_modal_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def open_diagnostics(pilot: Pilot) -> None:
+        app.action_diagnostics()
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=open_diagnostics)
+
+
+def test_create_form_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    assert snap_compare(
+        populated_app(service, fake_backend),
+        press=("c", "_"),
+        terminal_size=(120, 35),
+    )
+
+
+def test_create_validation_error_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def enter_invalid_values(pilot: Pilot) -> None:
+        await pilot.press("c")
+        app.screen.query_one("#create-name", Input).value = "astrology-website"
+        app.screen.query_one("#create-cwd", Input).value = "/missing/wf-directory"
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=enter_invalid_values)
+
+
+def test_usage_limit_warning_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    name = add_session(service, fake_backend, "usage-limited", Tool.CODEX)
+    fake_backend.previews[name] = (
+        "Warning: Codex usage limit reached\nRetry available: 23 Jul 2026, 10:46 AM"
+    )
+    assert snap_compare(
+        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
+        terminal_size=(120, 35),
+    )
+
+
+def test_destructive_confirmation_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def open_confirmation(pilot: Pilot) -> None:
+        await pilot.press("d")
+        await pilot.click("#manage-stop")
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=open_confirmation)
+
+
+@pytest.mark.parametrize("count", [50, 200])
+def test_large_inventory_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    count: int,
+) -> None:
+    for index in range(count):
+        add_session(service, fake_backend, f"load-{index:03d}", Tool.SHELL)
+    assert snap_compare(
+        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
         terminal_size=(160, 45),
     )
