@@ -299,7 +299,9 @@ class TmuxBackend:
             self._run("pipe-pane", "-t", pane_target)
             self.unset_option(name, "@wf_logging", expected_id=expected_id)
             return
-        command = shlex.join((sys.executable, "-m", "workspace_session_manager.log_sink", str(log_path)))
+        command = shlex.join(
+            (sys.executable, "-m", "workspace_session_manager.log_sink", str(log_path))
+        )
         self._run("pipe-pane", "-o", "-t", pane_target, "--", command)
         try:
             self.set_option(name, "@wf_logging", "1", expected_id=expected_id)
