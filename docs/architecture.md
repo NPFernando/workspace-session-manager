@@ -33,6 +33,11 @@ callbacks retain the exact name and tmux session ID captured when the workflow o
 background refresh or selection change cannot redirect an operation. Canceling a nested form or
 confirmation reopens Manage with its query, scroll position, and originating action restored.
 
+Attention is a temporary filtered dashboard view rather than a separate persistence model. Entering
+it captures the same dashboard context as other mode transitions, and `Esc` restores that context.
+Its filter contains sessions with known runtime, task, input, or agent alerts; sessions are never
+duplicated into a second dashboard group.
+
 ## Session creation
 
 WF validates the name, directory, tool profile, and executable before calling tmux. tmux starts an
@@ -120,3 +125,20 @@ for each source.
 Input-required status remains explicit metadata and is never inferred from arbitrary pane output.
 Conservative activity detectors may surface recognized usage-limit text in the inspector without
 changing runtime, task, or input state.
+
+## Attention scanning
+
+The dashboard checks eligible non-shell sessions in a single exclusive background worker. Every pane
+read is bounded to 20 sanitized lines and 8 KiB and carries the inventory snapshot's exact tmux ID;
+a reused name cannot redirect a capture. Results are accepted only when the worker generation,
+session identity, and notice revision still match the current dashboard state.
+
+Each refresh inspects at most `attention_scan_budget` sessions. Half of a multi-session batch is
+reserved for attached sessions and sessions with known warnings, while the remaining capacity uses
+least-recently-scanned order across the full eligible inventory. This provides prompt rechecks
+without starving detached sessions. A failed read retains the prior known alert, reports the scan as
+delayed, and remains eligible for retry.
+
+Startup establishes a complete alert baseline without notifications. Later scans aggregate newly
+discovered warnings into one notification per batch. Pane-derived alerts and scan timestamps remain
+process-local; WF does not infer or persist task/input metadata from output.

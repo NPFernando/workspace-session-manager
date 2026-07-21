@@ -37,3 +37,13 @@ def test_motion_configuration_is_strict() -> None:
     assert config.interface.reduce_motion
     with pytest.raises(ValueError):
         AppConfig.model_validate({"interface": {"animations": "constant"}})
+
+
+def test_attention_scan_budget_is_bounded() -> None:
+    assert AppConfig().attention_scan_budget == 8
+    assert AppConfig(attention_scan_budget=1).attention_scan_budget == 1
+    assert AppConfig(attention_scan_budget=64).attention_scan_budget == 64
+    with pytest.raises(ValueError):
+        AppConfig(attention_scan_budget=0)
+    with pytest.raises(ValueError):
+        AppConfig(attention_scan_budget=65)

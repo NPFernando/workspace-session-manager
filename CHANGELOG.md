@@ -26,6 +26,10 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
   source-local viewport restoration, find navigation, capture times, and selection-aware copying
 - An in-place 80-99-column detail workspace with contextual actions, inspector scrolling, focused
   warning/failure states, and deterministic light, monochrome, ASCII, and long-content coverage
+- Priority-rotated background Attention checks with bounded exact-ID pane inspection, scan progress,
+  delayed-scan guidance, and aggregated notifications for newly discovered warnings
+- A temporary Attention view that restores the prior search, filters, selection, focus, list scroll,
+  narrow detail state, and inspector/output positions on exit
 
 ### Changed
 
@@ -46,6 +50,8 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
   complete Logs workspace during read failures with an inline retry state
 - Reused the dashboard inspector for narrow details, preserving inspector and output viewports across
   overlays and returning safely to the list when filters, identity changes, or resizing invalidate it
+- Made warning totals explicit about incomplete or delayed alert scans and kept derived alert results
+  ephemeral rather than persisting arbitrary pane-output inferences to session metadata
 
 ## [0.2.0] - 2026-07-20
 

@@ -19,6 +19,7 @@ from wf_session_manager.models import (
     OutputSource,
     RuntimeState,
     SessionDetails,
+    SessionView,
     TaskState,
     Tool,
 )
@@ -30,6 +31,7 @@ from wf_session_manager.tui import (
     DeleteSessionScreen,
     DiagnosticsScreen,
     FilterScreen,
+    FilterState,
     IdentityOrganizationScreen,
     InteractionMode,
     LogScreen,
@@ -92,6 +94,14 @@ async def wait_for_log_refresh(pilot: Pilot[object], screen: LogScreen) -> None:
             return
         await pilot.pause(0.05)
     raise AssertionError("log refresh did not complete")
+
+
+async def wait_for_attention_scan(pilot: Pilot[object], app: WFApp) -> None:
+    for _ in range(120):
+        if not app._attention_scanning:
+            return
+        await pilot.pause(0.05)
+    raise AssertionError("attention scan did not complete")
 
 
 @pytest.mark.asyncio
@@ -617,7 +627,7 @@ async def test_empty_inventory_has_quick_actions_but_no_session_action(
         await pilot.pause()
         assert app.selected_name is None
         assert app.visible_sessions == []
-        assert app.query_one("#sessions", OptionList).option_count == 9
+        assert app.query_one("#sessions", OptionList).option_count == 10
         app.action_more_actions()
         assert app.screen is app.screen_stack[0]
 
@@ -1171,7 +1181,7 @@ async def test_usage_limit_updates_header_row_activity_and_agent_state(
         assert "Claude Code session limit reached" in str(
             app.query_one("#activity", Static).content
         )
-        assert "Agent       Paused" in str(app.query_one("#runtime-status", Static).content)
+        assert "Agent         Paused" in str(app.query_one("#runtime-status", Static).content)
         session = app.sessions[0]
         option = app.query_one("#sessions", OptionList).get_option(f"session:{session.session_id}")
         assert "!" in str(option.prompt)
@@ -1180,6 +1190,268 @@ async def test_usage_limit_updates_header_row_activity_and_agent_state(
         assert "You've hit" not in summary
         await pilot.click("#output-raw")
         assert "You've hit" in str(app.query_one("#recent-output", Static).content)
+
+
+@pytest.mark.asyncio
+async def test_attention_scan_finds_unselected_warning_and_restores_temporary_view(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limited = create_managed(service, "a-limited", Tool.CODEX)
+    selected = create_managed(service, "z-selected", Tool.CLAUDE)
+    service.organize(selected, pinned=True)
+    fake_backend.previews[limited] = (
+        "Warning: Codex usage limit reached\nRetry available: tomorrow at 10:00"
+    )
+    fake_backend.previews[selected] = "Ready"
+    notifications: list[tuple[str, dict[str, object]]] = []
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda message, **kwargs: notifications.append((message, kwargs)),
+    )
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_attention_scan(pilot, app)
+        assert app.selected_name == selected
+        assert "1 warning" in str(app.query_one("#app-header", Static).content)
+        limited_view = next(session for session in app.sessions if session.name == limited)
+        prompt = (
+            app.query_one("#sessions", OptionList)
+            .get_option(f"session:{limited_view.session_id}")
+            .prompt
+        )
+        assert "!" in str(prompt)
+        assert notifications == []
+
+        app.filter_query = "z-selected"
+        app.filters = FilterState(tool=Tool.CLAUDE)
+        app.query_one("#search", Input).value = app.filter_query
+        app._render_options()
+        await pilot.pause()
+        assert [session.name for session in app.visible_sessions] == [selected]
+
+        app.action_attention()
+        await pilot.pause()
+        assert app.has_class("attention-view")
+        assert [session.name for session in app.visible_sessions] == [limited]
+        assert "Attention" in str(app.query_one("#app-header", Static).content)
+        assert "Esc Back" in str(app.query_one("#action-bar", Static).content)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not app.has_class("attention-view")
+        assert app.filter_query == "z-selected"
+        assert app.filters == FilterState(tool=Tool.CLAUDE)
+        assert app.selected_name == selected
+        assert [session.name for session in app.visible_sessions] == [selected]
+
+        app.action_attention()
+        await pilot.press("/")
+        assert app._attention_context is None
+        assert app.has_class("searching")
+        assert app.query_one("#search", Input).value == "z-selected"
+        await pilot.press("escape")
+
+        app.action_attention()
+        await pilot.press("f")
+        await pilot.pause()
+        assert app._attention_context is None
+        assert isinstance(app.screen, FilterScreen)
+        assert app.screen.query_one("#filter-tool", Select).value == Tool.CLAUDE.value
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.filter_query == "z-selected"
+        assert app.filters == FilterState(tool=Tool.CLAUDE)
+
+
+@pytest.mark.asyncio
+async def test_attention_scan_notifies_once_after_baseline_and_clears_resolution(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = create_managed(service, "a-candidate", Tool.CODEX)
+    selected = create_managed(service, "z-selected", Tool.CLAUDE)
+    service.organize(selected, pinned=True)
+    fake_backend.previews[candidate] = "Ready"
+    fake_backend.previews[selected] = "Ready"
+    notifications: list[tuple[str, dict[str, object]]] = []
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda message, **kwargs: notifications.append((message, kwargs)),
+    )
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_attention_scan(pilot, app)
+        assert app._attention_baseline_established
+        assert notifications == []
+
+        fake_backend.previews[candidate] = "You've hit your session limit"
+        app.refresh_sessions()
+        await wait_for_attention_scan(pilot, app)
+        warning_notifications = [
+            item for item in notifications if item[1].get("title") == "New session warning"
+        ]
+        assert len(warning_notifications) == 1
+        assert "a-candidate" in warning_notifications[0][0]
+
+        app.refresh_sessions()
+        await wait_for_attention_scan(pilot, app)
+        assert (
+            len([item for item in notifications if item[1].get("title") == "New session warning"])
+            == 1
+        )
+
+        fake_backend.previews[candidate] = "Recovered and ready"
+        app.refresh_sessions()
+        await wait_for_attention_scan(pilot, app)
+        assert "No warnings" in str(app.query_one("#app-header", Static).content)
+        app.action_attention()
+        await pilot.pause()
+        assert app.visible_sessions == []
+        assert "No sessions need attention" in str(app.query_one("#identity", Static).content)
+
+
+def test_attention_batch_reserves_priority_and_rotates_detached_sessions(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    service.config = service.config.model_copy(update={"attention_scan_budget": 4})
+    attached_names: set[str] = set()
+    detached_names: set[str] = set()
+    for index in range(4):
+        name = create_managed(service, f"attached-{index}", Tool.CLAUDE)
+        fake_backend.sessions[name] = fake_backend.sessions[name].model_copy(
+            update={"attached_clients": 1}
+        )
+        attached_names.add(name)
+    for index in range(6):
+        detached_names.add(create_managed(service, f"detached-{index}", Tool.CODEX))
+
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app.sessions = service.list_sessions()
+    now = datetime.now(UTC)
+    app._attention_scanned_at = {
+        (session.name, session.session_id): now
+        for session in app.sessions
+        if session.name in attached_names
+    }
+    seen_detached: set[str] = set()
+    for offset in range(3):
+        batch = app._attention_batch()
+        assert len(batch) == 4
+        assert sum(item.session.name in attached_names for item in batch) == 2
+        seen_detached.update(
+            item.session.name for item in batch if item.session.name in detached_names
+        )
+        observed = now + timedelta(seconds=offset + 1)
+        for item in batch:
+            app._attention_scanned_at[(item.session.name, item.session.session_id)] = observed
+    assert seen_detached == detached_names
+
+
+@pytest.mark.asyncio
+async def test_attention_scan_error_is_deduplicated_and_recovers(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failing = create_managed(service, "a-failing", Tool.CODEX)
+    selected = create_managed(service, "z-selected", Tool.CLAUDE)
+    service.organize(selected, pinned=True)
+    fake_backend.previews[selected] = "Ready"
+    original = service.inspect_snapshot
+
+    def inspect_with_failure(session: SessionView, **kwargs: object) -> SessionDetails:
+        if session.name == failing:
+            raise TmuxError("capture unavailable")
+        return original(session, **kwargs)
+
+    monkeypatch.setattr(service, "inspect_snapshot", inspect_with_failure)
+    notifications: list[tuple[str, dict[str, object]]] = []
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda message, **kwargs: notifications.append((message, kwargs)),
+    )
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_attention_scan(pilot, app)
+        assert "capture unavailable" in app._attention_scan_error
+        assert (
+            len(
+                [item for item in notifications if item[1].get("title") == "Attention scan delayed"]
+            )
+            == 1
+        )
+
+        app.refresh_sessions()
+        await wait_for_attention_scan(pilot, app)
+        assert (
+            len(
+                [item for item in notifications if item[1].get("title") == "Attention scan delayed"]
+            )
+            == 1
+        )
+
+        monkeypatch.setattr(service, "inspect_snapshot", original)
+        fake_backend.previews[failing] = "Recovered"
+        app.refresh_sessions()
+        await wait_for_attention_scan(pilot, app)
+        assert app._attention_scan_error == ""
+        assert app._attention_complete()
+
+
+@pytest.mark.asyncio
+async def test_attention_scan_discards_removed_exact_identity(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = create_managed(service, "a-stale", Tool.CODEX)
+    selected = create_managed(service, "z-selected", Tool.CLAUDE)
+    service.organize(selected, pinned=True)
+    fake_backend.previews[candidate] = "You've hit your session limit"
+    fake_backend.previews[selected] = "Ready"
+    started = Event()
+    release = Event()
+    original = service.inspect_snapshot
+
+    def delayed_inspect(session: SessionView, **kwargs: object) -> SessionDetails:
+        if session.name == candidate:
+            started.set()
+            release.wait(timeout=5)
+        return original(session, **kwargs)
+
+    monkeypatch.setattr(service, "inspect_snapshot", delayed_inspect)
+    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        for _ in range(80):
+            if started.is_set():
+                break
+            await pilot.pause(0.05)
+        assert started.is_set()
+        stale_identity = next(
+            (session.name, session.session_id)
+            for session in app.sessions
+            if session.name == candidate
+        )
+        fake_backend.sessions[candidate] = fake_backend.sessions[candidate].model_copy(
+            update={"session_id": "$replacement"}
+        )
+        app.refresh_sessions()
+        release.set()
+        await wait_for_attention_scan(pilot, app)
+        assert stale_identity not in app._alerts
+        assert stale_identity not in app._attention_scanned_at
+        assert all(session.name != candidate for session in app.sessions)
 
 
 @pytest.mark.asyncio

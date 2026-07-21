@@ -168,6 +168,14 @@ async def open_logs(pilot: Pilot, app: WFApp) -> LogScreen:
     return screen
 
 
+async def wait_for_attention(pilot: Pilot, app: WFApp) -> None:
+    for _ in range(80):
+        if not app._attention_scanning:
+            return
+        await pilot.pause(0.05)
+    raise AssertionError("attention scan did not complete")
+
+
 def test_wide_snapshot(
     snap_compare: SnapCompare,
     service: SessionService,
@@ -301,6 +309,7 @@ def test_diagnostics_modal_snapshot(
     app = populated_app(service, fake_backend)
 
     async def open_diagnostics(pilot: Pilot) -> None:
+        await wait_for_attention(pilot, app)
         app.action_diagnostics()
         await pilot.pause()
 
@@ -749,6 +758,85 @@ def test_narrow_detail_ascii_snapshot(
         await pilot.pause()
 
     assert snap_compare(app, terminal_size=(80, 24), run_before=show_detail)
+
+
+def test_attention_scanning_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = populated_app(service, fake_backend)
+    monkeypatch.setattr(app, "_start_attention_scan", lambda: None)
+    assert snap_compare(app, terminal_size=(120, 35))
+
+
+@pytest.mark.parametrize(
+    "terminal_size",
+    [(120, 35), (100, 30), (80, 24)],
+    ids=["120x35", "100x30", "80x24"],
+)
+def test_attention_view_responsive_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    terminal_size: tuple[int, int],
+) -> None:
+    app = populated_app(service, fake_backend)
+
+    async def show_attention(pilot: Pilot) -> None:
+        await wait_for_attention(pilot, app)
+        app.action_attention()
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=terminal_size, run_before=show_attention)
+
+
+def test_attention_complete_empty_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app, _name = logs_app(service, fake_backend, tool=Tool.CLAUDE, output="Ready")
+
+    async def show_attention(pilot: Pilot) -> None:
+        await wait_for_attention(pilot, app)
+        app.action_attention()
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=show_attention)
+
+
+def test_attention_monochrome_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    app = populated_app(service, fake_backend, monochrome=True)
+
+    async def show_attention(pilot: Pilot) -> None:
+        await wait_for_attention(pilot, app)
+        app.action_attention()
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(80, 24), run_before=show_attention)
+
+
+def test_attention_ascii_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WF_ASCII", "1")
+    app = populated_app(service, fake_backend)
+
+    async def show_attention(pilot: Pilot) -> None:
+        await wait_for_attention(pilot, app)
+        app.action_attention()
+        await pilot.pause()
+
+    assert snap_compare(app, terminal_size=(80, 24), run_before=show_attention)
 
 
 def test_identity_form_snapshot(

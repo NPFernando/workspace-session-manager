@@ -315,14 +315,27 @@ class SessionService:
         raise SessionNotFoundError(f"session not found: {name}")
 
     def inspect(self, name: str) -> SessionDetails:
-        session = self.get(name)
-        saved_available = self._saved_log_available(name)
+        return self.inspect_snapshot(self.get(name))
+
+    def inspect_snapshot(
+        self,
+        session: SessionView,
+        *,
+        preview_lines: int | None = None,
+        preview_bytes: int | None = None,
+    ) -> SessionDetails:
+        """Inspect one inventory snapshot with an exact tmux-ID guard."""
+        max_lines = preview_lines or self.config.preview_lines
+        max_bytes = preview_bytes or self.config.preview_bytes
+        if max_lines < 1 or max_bytes < 1:
+            raise ValueError("preview limits must be positive")
+        saved_available = self._saved_log_available(session.name)
         available_sources = (
             *((OutputSource.PANE,) if session.runtime is not RuntimeState.STOPPED else ()),
             *((OutputSource.SAVED,) if saved_available else ()),
         )
         if session.runtime is RuntimeState.STOPPED:
-            preview = self._read_log(name, self.config.preview_lines, self.config.preview_bytes)
+            preview = self._read_log(session.name, max_lines, max_bytes)
             return SessionDetails(
                 session=session,
                 preview=preview.text,
@@ -331,12 +344,12 @@ class SessionService:
                 available_sources=available_sources,
             )
         output = self.backend.capture_pane(
-            name, self.config.preview_lines + 1, expected_id=session.session_id
+            session.name, max_lines + 1, expected_id=session.session_id
         )
         preview = bounded_output(
             output,
-            max_lines=self.config.preview_lines,
-            max_bytes=self.config.preview_bytes,
+            max_lines=max_lines,
+            max_bytes=max_bytes,
         )
         return SessionDetails(
             session=session,

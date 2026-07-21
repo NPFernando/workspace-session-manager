@@ -27,8 +27,8 @@ failure, usage-limit, diagnostics, create, create-advanced, validation-error, fi
 responsive Manage, filtered Manage, disabled Manage actions, identity and status forms,
 destructive-confirmation, responsive Logs, Live and Saved sources, Logs find/pause/warning/error/empty
 states, in-place narrow details at 80 and 99 columns, narrow detail warning/failure/long-content,
-dark, light, monochrome, ASCII, reduced-motion, diagnostics-running, long-content, 50-session, and
-200-session states.
+Attention scanning, responsive Attention warning and clear states, dark, light, monochrome, ASCII,
+reduced-motion, diagnostics-running, long-content, 50-session, and 200-session states.
 Reviewed before/after frames at
 `160x45`, `120x35`, `100x30`, and `80x24` are stored under `docs/screenshots/`.
 Fake-backend terminal recordings and replay instructions are stored under `docs/recordings/`; they
@@ -66,6 +66,12 @@ Check at least:
 - multiline task entry, advanced-option focus restoration, and incremental new-row insertion
 - actionable startup failure with rollback verification, retry, details, and metadata cleanup states
 - usage-limit propagation across header count, selected row, Activity, agent state, and Summary/Raw
+- unselected usage-limit discovery, baseline notification suppression, warning resolution, and one
+  aggregated post-baseline notification per scan batch
+- priority/fair Attention rotation, bounded exact-ID inspection, stale identity/revision rejection,
+  delayed-scan deduplication, retry recovery, and prior-alert retention on read failure
+- temporary Attention entry and exact restoration of search, filter, selection, focus, list scroll,
+  narrow detail state, and inspector/output positions
 - slow diagnostics progress plus PASS/WARN/FAIL/INFO completion totals
 - Cancel-focused confirmation for every protected Manage operation
 - dark, light, monochrome, `NO_COLOR`, and `WF_ASCII=1` rendering

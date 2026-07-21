@@ -11,6 +11,7 @@ The focused state set also includes Saved output, find mode, a structured usage 
 read failure with retry guidance.
 `details/` contains the reviewed in-place narrow inspector at `80x24` and `99x30`, plus warning,
 failure, and long-content states.
+`attention/` contains reviewed scan-progress, warning-only, responsive, and completed-clear states.
 
 All current frames use the fake backend and synthetic values. The SVGs do not connect to tmux or
 contain operational session data.

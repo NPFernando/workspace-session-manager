@@ -1,5 +1,6 @@
 schema_version = 1
 refresh_interval = 3.0
+attention_scan_budget = 8
 preview_lines = 80
 
 legacy_state_dirs = [

@@ -188,6 +188,27 @@ def test_logs_are_sanitized_and_report_truncation(
     assert len(details.preview.splitlines()) == service.config.log_lines
 
 
+def test_inspect_snapshot_is_bounded_and_exact_id_guarded(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(CreateRequest(name="attention", tool=Tool.CLAUDE, cwd=tmp_path))
+    snapshot = service.get(created.name)
+    fake_backend.previews[created.name] = "password=private\nfirst\nsecond\nthird"
+
+    details = service.inspect_snapshot(snapshot, preview_lines=2, preview_bytes=64)
+    assert details.preview == "second\nthird"
+    assert details.preview_truncated
+    assert "private" not in details.preview
+
+    fake_backend.sessions[created.name] = fake_backend.sessions[created.name].model_copy(
+        update={"session_id": "$replacement"}
+    )
+    with pytest.raises(TmuxError, match="ID mismatch"):
+        service.inspect_snapshot(snapshot, preview_lines=20, preview_bytes=8_192)
+
+
 def test_logs_expose_live_and_saved_sources(
     service: SessionService,
     fake_backend: FakeBackend,

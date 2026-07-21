@@ -49,6 +49,7 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: int = Field(default=1, ge=1, le=1)
     refresh_interval: float = Field(default=3.0, ge=1.0, le=60.0)
+    attention_scan_budget: int = Field(default=8, ge=1, le=64)
     preview_lines: int = Field(default=12, ge=8, le=500)
     preview_bytes: int = Field(default=32_768, ge=1024, le=1_048_576)
     log_lines: int = Field(default=500, ge=50, le=5000)

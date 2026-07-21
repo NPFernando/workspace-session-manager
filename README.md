@@ -14,6 +14,7 @@ tmux sessions. Release installation and cutover remain separate approval-gated o
 - Persistent detached sessions through tmux
 - Claude, Codex, Hermes, and shell profiles with strict TOML validation
 - Separate runtime, task, agent, input, and alert states with notes, projects, tags, and pinning
+- Background Attention checks with bounded exact-ID pane reads and a restorable warning-only view
 - ANSI/OSC sanitization, secret redaction, and byte-and-line bounded pane and log views
 - Source-aware Logs workspace with Live/Saved switching, follow/pause, find navigation, and copy
 - Optional owner-only sanitized logging, usage-limit warnings, diagnostics export, and onboarding
@@ -108,6 +109,11 @@ hidden unless `list --all` is requested.
 | `Esc` | Cancel search or return from a narrow detail screen |
 | `q` | Quit |
 
+Open **Attention** from Quick Actions or the command palette to temporarily show sessions with known
+warnings. `Esc` restores the prior query, filters, selection, focus, and list position. The header
+shows scan progress until every eligible agent session has been checked; new warnings discovered
+after that initial baseline are reported in one aggregated notification per scan batch.
+
 At 80-99 columns, the first `Enter` opens the selected session's existing inspector at full width;
 the next `Enter` attaches. `Esc` returns to the session list. Opening Edit, Task, Logs, Manage, or Help
 from that view preserves its inspector position, output position, Summary/Raw mode, selection, and
@@ -140,6 +146,11 @@ Agent commands are argument arrays, which avoids shell interpolation in configur
 The `[interface]` table accepts `animations = "off" | "subtle" | "full"` and
 `reduce_motion = true | false`. `WF_MOTION=off` takes precedence for an individual launch;
 monochrome mode also disables optional motion.
+
+`attention_scan_budget` controls how many eligible agent sessions a refresh may inspect. Its default
+is `8`, with a validated range of `1` to `64`. Each background check reads at most 20 sanitized lines
+and 8 KiB from the exact tmux session ID. Derived alerts remain in memory and never rewrite session
+metadata.
 
 ## Data model
 

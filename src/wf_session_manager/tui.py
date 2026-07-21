@@ -59,6 +59,8 @@ from wf_session_manager.service import SessionService, normalized_session_name
 
 BindingSpec = Binding | tuple[str, str] | tuple[str, str, str]
 RECENT_WINDOW = timedelta(hours=24)
+ATTENTION_PREVIEW_LINES = 20
+ATTENTION_PREVIEW_BYTES = 8_192
 USAGE_LIMIT_PATTERN = re.compile(
     r"(?im)^(?P<line>[^\n]*(?:(?:usage|session|rate)\s+limit\s+"
     r"(?:has been\s+|was\s+)?(?:reached|exceeded)|"
@@ -134,6 +136,20 @@ class ActivityNotice:
     @property
     def warning(self) -> bool:
         return self.level in {"warning", "error"}
+
+
+@dataclass(frozen=True, slots=True)
+class AttentionScanRequest:
+    session: SessionView
+    notice_revision: int
+
+
+@dataclass(frozen=True, slots=True)
+class AttentionScanResult:
+    name: str
+    session_id: str
+    preview: str = ""
+    error: str = ""
 
 
 def detect_activity(session: SessionView, output: str) -> ActivityNotice:
@@ -312,7 +328,7 @@ def labeled_values(values: list[tuple[str, str]]) -> Text:
     for label, value in values:
         if not value:
             continue
-        result.append(f"{label:<12}", style="dim")
+        result.append(f"{label:<14}", style="dim")
         result.append(value)
         result.append("\n")
     return result
@@ -2616,6 +2632,11 @@ class WFCommandProvider(Provider):
                 app.action_filter,
             ),
             (
+                "Dashboard · Attention",
+                "Temporarily show sessions with known warnings",
+                app.action_attention,
+            ),
+            (
                 "Dashboard · Refresh sessions                     r",
                 "Refresh tmux and metadata state",
                 app.action_refresh,
@@ -2701,6 +2722,14 @@ class WFApp(App[str | None]):
         self._option_sessions: dict[str, SessionView] = {}
         self._option_actions: dict[str, str] = {}
         self._alerts: dict[tuple[str, str], ActivityNotice] = {}
+        self._attention_scanned_at: dict[tuple[str, str], datetime] = {}
+        self._attention_notice_revisions: dict[tuple[str, str], int] = {}
+        self._attention_scan_generation = 0
+        self._attention_scanning = False
+        self._attention_baseline_established = False
+        self._attention_scan_error = ""
+        self._attention_scan_error_notified = False
+        self._attention_context: DashboardModeContext | None = None
         self.interaction_mode = InteractionMode.NORMAL
         self._mode_context: DashboardModeContext | None = None
         self.narrow_detail_open = False
@@ -2951,6 +2980,9 @@ class WFApp(App[str | None]):
         )
         self.call_after_refresh(self._maybe_show_onboarding)
 
+    def on_unmount(self) -> None:
+        self._attention_scan_generation += 1
+
     def _suspend_dashboard_refresh(self) -> None:
         self._dashboard_refresh_suspensions += 1
         if self._dashboard_refresh_suspensions == 1 and self._dashboard_refresh_timer:
@@ -3036,6 +3068,203 @@ class WFApp(App[str | None]):
             return max(28, int(self.size.width * 0.42) - 5)
         return max(28, self.size.width - 5)
 
+    @staticmethod
+    def _attention_eligible(session: SessionView) -> bool:
+        return session.tool is not Tool.SHELL and session.runtime not in {
+            RuntimeState.STOPPED,
+            RuntimeState.FAILED,
+        }
+
+    def _attention_progress(self) -> tuple[int, int]:
+        identities = {
+            (session.name, session.session_id)
+            for session in self.sessions
+            if self._attention_eligible(session)
+        }
+        return len(identities & self._attention_scanned_at.keys()), len(identities)
+
+    def _attention_complete(self) -> bool:
+        scanned, eligible = self._attention_progress()
+        return scanned == eligible and not self._attention_scan_error
+
+    def _attention_batch(self) -> tuple[AttentionScanRequest, ...]:
+        selected_identity = (self.selected_name, self.selected_session_id)
+        candidates = [
+            session
+            for session in self.sessions
+            if self._attention_eligible(session)
+            and (
+                (session.name, session.session_id) != selected_identity
+                or (session.name, session.session_id) not in self._attention_scanned_at
+            )
+        ]
+        if not candidates:
+            return ()
+        minimum = datetime.min.replace(tzinfo=UTC)
+
+        def scan_key(session: SessionView) -> tuple[datetime, datetime, str]:
+            identity = (session.name, session.session_id)
+            return (
+                self._attention_scanned_at.get(identity, minimum),
+                session.last_active_at or session.created_at or minimum,
+                session.name,
+            )
+
+        budget = min(self.service.config.attention_scan_budget, len(candidates))
+        priority = sorted(
+            (
+                session
+                for session in candidates
+                if session.runtime is RuntimeState.ATTACHED or self._notice_for(session).warning
+            ),
+            key=scan_key,
+        )
+        priority_slots = 0 if budget == 1 else budget // 2
+        selected = priority[:priority_slots]
+        selected_identities = {(session.name, session.session_id) for session in selected}
+        general = sorted(
+            (
+                session
+                for session in candidates
+                if (session.name, session.session_id) not in selected_identities
+            ),
+            key=scan_key,
+        )
+        selected.extend(general[: budget - len(selected)])
+        return tuple(
+            AttentionScanRequest(
+                session=session,
+                notice_revision=self._attention_notice_revisions.get(
+                    (session.name, session.session_id), 0
+                ),
+            )
+            for session in selected
+        )
+
+    def _start_attention_scan(self) -> None:
+        if (
+            self._attention_scanning
+            or self._dashboard_refresh_suspensions
+            or len(self.screen_stack) > 1
+        ):
+            return
+        requests = self._attention_batch()
+        if not requests:
+            if self._attention_complete():
+                self._attention_baseline_established = True
+            self._render_header()
+            self._render_attention_action()
+            return
+        self._attention_scan_generation += 1
+        self._attention_scanning = True
+        self._scan_attention(self._attention_scan_generation, requests)
+        self._render_header()
+        self._render_attention_action()
+
+    @work(thread=True, exclusive=True, group="attention-scan")
+    def _scan_attention(
+        self,
+        generation: int,
+        requests: tuple[AttentionScanRequest, ...],
+    ) -> None:
+        results: list[AttentionScanResult] = []
+        for request in requests:
+            session = request.session
+            try:
+                details = self.service.inspect_snapshot(
+                    session,
+                    preview_lines=ATTENTION_PREVIEW_LINES,
+                    preview_bytes=ATTENTION_PREVIEW_BYTES,
+                )
+            except (OSError, ValueError, WFError) as error:
+                results.append(
+                    AttentionScanResult(session.name, session.session_id, error=str(error))
+                )
+                continue
+            results.append(AttentionScanResult(session.name, session.session_id, details.preview))
+        self.call_from_thread(
+            self._finish_attention_scan,
+            generation,
+            requests,
+            tuple(results),
+        )
+
+    def _finish_attention_scan(
+        self,
+        generation: int,
+        requests: tuple[AttentionScanRequest, ...],
+        results: tuple[AttentionScanResult, ...],
+    ) -> None:
+        if generation != self._attention_scan_generation:
+            return
+        self._attention_scanning = False
+        request_by_identity = {
+            (request.session.name, request.session.session_id): request for request in requests
+        }
+        errors: list[str] = []
+        new_warnings: list[str] = []
+        warning_membership_changed = False
+        baseline_was_established = self._attention_baseline_established
+        observed_at = datetime.now(UTC)
+        for result in results:
+            identity = (result.name, result.session_id)
+            current = next(
+                (
+                    session
+                    for session in self.sessions
+                    if (session.name, session.session_id) == identity
+                ),
+                None,
+            )
+            request = request_by_identity.get(identity)
+            if current is None or request is None:
+                continue
+            if identity == (self.selected_name, self.selected_session_id):
+                continue
+            if self._attention_notice_revisions.get(identity, 0) != request.notice_revision:
+                continue
+            if result.error:
+                errors.append(f"{result.name}: {result.error}")
+                continue
+            previous = self._notice_for(current)
+            notice = detect_activity(current, result.preview)
+            self._store_notice(current, notice, observed_at=observed_at)
+            if previous.warning != notice.warning:
+                warning_membership_changed = True
+            if baseline_was_established and notice.warning and notice.kind != previous.kind:
+                new_warnings.append(current.display_name or current.name)
+
+        if errors:
+            self._attention_scan_error = errors[0]
+            if not self._attention_scan_error_notified:
+                self.notify(
+                    "Some session alerts could not be checked. Press r to retry.",
+                    title="Attention scan delayed",
+                    severity="warning",
+                )
+                self._attention_scan_error_notified = True
+        else:
+            self._attention_scan_error = ""
+            self._attention_scan_error_notified = False
+        if self._attention_complete():
+            self._attention_baseline_established = True
+        if new_warnings:
+            names = ", ".join(new_warnings[:3])
+            if len(new_warnings) > 3:
+                names = f"{names}, and {len(new_warnings) - 3} more"
+            self.notify(
+                f"{len(new_warnings)} session{'s' if len(new_warnings) != 1 else ''} "
+                f"need attention: {names}",
+                title="New session warning",
+                severity="warning",
+                timeout=8,
+            )
+        if warning_membership_changed and self.filters.warnings_only:
+            self._render_options()
+        else:
+            self._render_header()
+            self._render_attention_action()
+
     def refresh_sessions(self) -> None:
         if not self.query("#app-header"):
             return
@@ -3080,6 +3309,16 @@ class WFApp(App[str | None]):
             for identity, alert in self._alerts.items()
             if identity in valid_identities
         }
+        self._attention_scanned_at = {
+            identity: scanned_at
+            for identity, scanned_at in self._attention_scanned_at.items()
+            if identity in valid_identities
+        }
+        self._attention_notice_revisions = {
+            identity: revision
+            for identity, revision in self._attention_notice_revisions.items()
+            if identity in valid_identities
+        }
         self._detail_viewports = {
             identity: viewport
             for identity, viewport in self._detail_viewports.items()
@@ -3096,14 +3335,32 @@ class WFApp(App[str | None]):
                 severity="warning",
                 timeout=0,
             )
+        self._start_attention_scan()
 
     def _notice_for(self, session: SessionView) -> ActivityNotice:
-        return self._alerts.get((session.name, session.session_id), detect_activity(session, ""))
+        derived = detect_activity(session, "")
+        cached = self._alerts.get((session.name, session.session_id))
+        if derived.kind in {"runtime-failed", "runtime-stopped"}:
+            return derived
+        if cached is not None and cached.kind == "usage-limit":
+            return cached
+        return derived
 
-    def _store_notice(self, session: SessionView, notice: ActivityNotice) -> None:
+    def _store_notice(
+        self,
+        session: SessionView,
+        notice: ActivityNotice,
+        *,
+        observed_at: datetime | None = None,
+    ) -> None:
         identity = (session.name, session.session_id)
         previous = self._alerts.get(identity, detect_activity(session, ""))
         self._alerts[identity] = notice
+        self._attention_notice_revisions[identity] = (
+            self._attention_notice_revisions.get(identity, 0) + 1
+        )
+        if observed_at is not None and self._attention_eligible(session):
+            self._attention_scanned_at[identity] = observed_at
         option_id = f"session:{session.session_id}"
         if option_id in self._option_sessions:
             prompt = session_row(
@@ -3182,6 +3439,35 @@ class WFApp(App[str | None]):
         self._option_actions[option_id] = action
         return Option(Text.assemble((f"{symbol} ", "bold #66aaff"), label), id=option_id)
 
+    def _warning_count(self) -> int:
+        return sum(is_warning(session, self._notice_for(session)) for session in self.sessions)
+
+    def _attention_label(self) -> str:
+        warnings = self._warning_count()
+        if self._attention_scan_error:
+            return f"Attention ({warnings} known, delayed)"
+        if warnings:
+            return f"Attention ({warnings})"
+        if not self._attention_complete():
+            return "Attention (checking)"
+        return "Attention"
+
+    def _attention_option(self) -> Option:
+        option_id = "quick:attention"
+        self._option_actions[option_id] = "attention"
+        style = "bold #e9b44c" if self._warning_count() else "bold #66aaff"
+        return Option(Text.assemble(("! ", style), self._attention_label()), id=option_id)
+
+    def _render_attention_action(self) -> None:
+        option_id = "quick:attention"
+        if option_id not in self._option_actions:
+            return
+        style = "bold #e9b44c" if self._warning_count() else "bold #66aaff"
+        self.query_one("#sessions", OptionList).replace_option_prompt(
+            option_id,
+            Text.assemble(("! ", style), self._attention_label()),
+        )
+
     def _render_options(self) -> None:
         options = self.query_one("#sessions", OptionList)
         old_scroll = options.scroll_offset.y
@@ -3197,6 +3483,7 @@ class WFApp(App[str | None]):
         options.add_option(self._quick_option("Search", "search", "/"))
         options.add_option(self._quick_option("Filter sessions", "filter", "="))
         options.add_option(self._quick_option("Recent activity", "recent", "@"))
+        options.add_option(self._attention_option())
 
         self.visible_sessions = [item for item in self.sessions if self._matches_query(item)]
         groups: dict[str, list[SessionView]] = {
@@ -3256,13 +3543,28 @@ class WFApp(App[str | None]):
     def _render_header(self) -> None:
         attached = sum(session.runtime is RuntimeState.ATTACHED for session in self.sessions)
         detached = sum(session.runtime is RuntimeState.DETACHED for session in self.sessions)
-        warnings = sum(is_warning(session, self._notice_for(session)) for session in self.sessions)
+        warnings = self._warning_count()
         if not self.tmux_connected:
             warnings += 1
         session_label = "session" if len(self.sessions) == 1 else "sessions"
-        warning_text = (
-            "No warnings" if warnings == 0 else f"{warnings} warning{'s' if warnings != 1 else ''}"
-        )
+        scanned, eligible = self._attention_progress()
+        if self._attention_scan_error:
+            warning_text = (
+                f"{warnings} known warning{'s' if warnings != 1 else ''} / alerts delayed"
+            )
+        elif scanned < eligible:
+            known = (
+                "No known warnings"
+                if warnings == 0
+                else f"{warnings} known warning{'s' if warnings != 1 else ''}"
+            )
+            warning_text = f"{known} / alerts {scanned}/{eligible} checked"
+        else:
+            warning_text = (
+                "No warnings"
+                if warnings == 0
+                else f"{warnings} warning{'s' if warnings != 1 else ''}"
+            )
         separator = " | " if self.ascii_only else " • "
         counts = separator.join(
             (
@@ -3272,7 +3574,9 @@ class WFApp(App[str | None]):
                 warning_text,
             )
         )
-        active_filters = self.filters.labels()
+        active_filters = (
+            ["Attention"] if self.has_class("attention-view") else self.filters.labels()
+        )
         if self.filter_query:
             active_filters.insert(0, f'Search "{self.filter_query}"')
         filter_text = f"{separator}{', '.join(active_filters)}" if active_filters else ""
@@ -3317,6 +3621,11 @@ class WFApp(App[str | None]):
         if self.has_class("searching"):
             query = self.query_one("#search", Input).value
             value = f"SEARCH  {query}_   Enter Apply   Esc Cancel   Ctrl+U Clear"
+        elif self.has_class("attention-view"):
+            value = (
+                f"ATTENTION  {navigation} Nav   Enter Open   Esc Back   "
+                "f Filter   r Refresh   ? Help   q Quit"
+            )
         elif self.narrow_detail_open:
             selected = self._selected()
             primary = (
@@ -3394,6 +3703,26 @@ class WFApp(App[str | None]):
         )
 
     def _render_empty_state(self) -> None:
+        if self.has_class("attention-view"):
+            scanned, eligible = self._attention_progress()
+            checking = scanned < eligible or bool(self._attention_scan_error)
+            self.query_one("#identity", Static).update(
+                "Checking session alerts" if checking else "No sessions need attention"
+            )
+            self.query_one("#overview", Static).update(
+                f"Checked {scanned} of {eligible} eligible agent sessions."
+                if checking
+                else "The current runtime, task, input, and agent states are clear."
+            )
+            for widget_id in (
+                "#runtime-status",
+                "#activity",
+                "#recent-output",
+                "#session-actions",
+            ):
+                self.query_one(widget_id, Static).update("")
+            self.query_one("#output-meta", Static).update("")
+            return
         filtered = bool(self.filter_query) or self.filters.active
         self.query_one("#identity", Static).update("No matches" if filtered else "No sessions")
         self.query_one("#overview", Static).update(
@@ -3417,7 +3746,7 @@ class WFApp(App[str | None]):
             return
         session = details.session
         notice = detect_activity(session, details.preview)
-        self._store_notice(session, notice)
+        self._store_notice(session, notice, observed_at=datetime.now(UTC))
         separator = " / " if self.ascii_only else " · "
         identity = Text()
         identity.append(f"{session.tool.value.upper():<7}", style=TOOL_STYLES[session.tool])
@@ -3524,6 +3853,7 @@ class WFApp(App[str | None]):
             force=True,
         )
         self._render_header()
+        self._render_attention_action()
 
     @on(Button.Pressed, ".output-mode")
     def output_mode_changed(self, event: Button.Pressed) -> None:
@@ -3554,6 +3884,8 @@ class WFApp(App[str | None]):
     def action_search(self) -> None:
         if self.interaction_mode is not InteractionMode.NORMAL:
             return
+        if self._attention_context is not None:
+            self._restore_attention_view(restore_focus=False)
         if self.narrow_detail_open:
             self._close_narrow_detail(restore_focus=False)
         self._search_before = self.filter_query
@@ -3568,6 +3900,8 @@ class WFApp(App[str | None]):
     def action_filter(self) -> None:
         if self.interaction_mode not in {InteractionMode.NORMAL, InteractionMode.SEARCH}:
             return
+        if self._attention_context is not None:
+            self._restore_attention_view(restore_focus=False)
         if self.narrow_detail_open:
             self._close_narrow_detail()
         self._begin_overlay(InteractionMode.FILTER)
@@ -3593,8 +3927,95 @@ class WFApp(App[str | None]):
         self._restore_dashboard_mode()
 
     def action_recent(self) -> None:
+        if self._attention_context is not None:
+            self._restore_attention_view(restore_focus=False)
         self.filters = FilterState(recent_only=True)
         self._render_options()
+
+    def action_attention(self) -> None:
+        if (
+            self.interaction_mode is not InteractionMode.NORMAL
+            or self._attention_context is not None
+        ):
+            return
+        context = self._capture_dashboard_context()
+        if context.selected_session_id is not None:
+            context = replace(
+                context,
+                highlighted_option_id=f"session:{context.selected_session_id}",
+            )
+        self._attention_context = context
+        self._close_narrow_detail(restore_focus=False)
+        self.filter_query = ""
+        self.filters = FilterState(warnings_only=True)
+        with self.prevent(Input.Changed):
+            self.query_one("#search", Input).value = ""
+        self.add_class("attention-view")
+        self._render_options()
+        self.query_one("#sessions", OptionList).focus()
+
+    def _restore_attention_view(self, *, restore_focus: bool = True) -> None:
+        context = self._attention_context
+        self._attention_context = None
+        if context is None:
+            return
+        self.remove_class("attention-view")
+        self.filter_query = context.filter_query
+        self.filters = context.filters
+        self.selected_name = context.selected_name
+        self.selected_session_id = context.selected_session_id
+        search = self.query_one("#search", Input)
+        with self.prevent(Input.Changed):
+            search.value = context.search_value
+        self._set_interaction_mode(
+            InteractionMode.SEARCH if context.searching else InteractionMode.NORMAL
+        )
+        if context.searching:
+            self.add_class("searching")
+        self._set_narrow_detail_state(False)
+        self._render_options()
+        options = self.query_one("#sessions", OptionList)
+        option_ids = {
+            options.get_option_at_index(index).id for index in range(options.option_count)
+        }
+        if (
+            context.highlighted_option_id is not None
+            and context.highlighted_option_id in option_ids
+        ):
+            options.highlighted = options.get_option_index(context.highlighted_option_id)
+        self.call_after_refresh(options.scroll_to, y=context.scroll_y, animate=False, force=True)
+        restore_detail = (
+            context.narrow_detail_open and self._selected() is not None and self.has_class("narrow")
+        )
+        self._set_narrow_detail_state(restore_detail)
+        if restore_detail:
+            inspector = self.query_one("#inspector-scroll", VerticalScroll)
+            output = self.query_one("#recent-output-scroll", VerticalScroll)
+            self.call_after_refresh(
+                inspector.scroll_to,
+                y=context.inspector_scroll_y,
+                animate=False,
+                force=True,
+            )
+            self.call_after_refresh(
+                output.scroll_to,
+                y=context.output_scroll_y,
+                animate=False,
+                force=True,
+            )
+        if restore_focus:
+            focus_target: Widget = options
+            if context.searching:
+                focus_target = search
+            elif restore_detail:
+                focus_target = self.query_one("#inspector-scroll", VerticalScroll)
+            elif context.focused_id:
+                matches = self.query(f"#{context.focused_id}")
+                if matches:
+                    focus_target = matches.first()
+            self.call_after_refresh(focus_target.focus)
+        self._render_header()
+        self._render_action_bar()
 
     def action_cycle_theme(self) -> None:
         modes = ("dark", "light", "monochrome")
@@ -3612,6 +4033,8 @@ class WFApp(App[str | None]):
             self._render_options()
         elif self.narrow_detail_open:
             self._close_narrow_detail()
+        elif self._attention_context is not None:
+            self._restore_attention_view()
 
     def action_open(self) -> None:
         session = self._selected()
@@ -4203,7 +4626,15 @@ class WFApp(App[str | None]):
 
     def action_help(self) -> None:
         content = (
-            "Up/Down or j/k  Scroll details\n"
+            "Up/Down or j/k  Navigate warnings\n"
+            "Enter    Attach or open details\n"
+            "Esc      Return to the previous dashboard view\n"
+            "f        Open full filters\n"
+            "r        Refresh inventory and alerts\n"
+            "p        Command palette\n"
+            "q        Quit"
+            if self.has_class("attention-view")
+            else "Up/Down or j/k  Scroll details\n"
             "Esc      Return to sessions\n"
             "Enter    Attach or manage a stopped session\n"
             "e        Edit identity and organization\n"
@@ -4233,7 +4664,12 @@ class WFApp(App[str | None]):
         self._begin_overlay(InteractionMode.FORM)
         self.push_screen(
             MessageScreen(
-                "Session detail help" if self.narrow_detail_open else "Keyboard help", content
+                "Attention help"
+                if self.has_class("attention-view")
+                else "Session detail help"
+                if self.narrow_detail_open
+                else "Keyboard help",
+                content,
             ),
             lambda _result: self._restore_dashboard_mode(),
         )
