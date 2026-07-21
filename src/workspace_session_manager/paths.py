@@ -48,9 +48,9 @@ class AppPaths:
         return self.state_dir / ".migration.lock"
 
     @classmethod
-    def discover(cls, namespace: str = "wf-session-manager") -> AppPaths:
-        """Use an isolated namespace; WF_DEV_ROOT makes tests fully hermetic."""
-        isolated_root = os.environ.get("WF_DEV_ROOT")
+    def discover(cls, namespace: str = "workspace-session-manager") -> AppPaths:
+        """Use an isolated namespace; WS_DEV_ROOT makes tests fully hermetic."""
+        isolated_root = os.environ.get("WS_DEV_ROOT")
         if isolated_root:
             root = Path(isolated_root).expanduser().resolve()
             return cls(root / "config", root / "state", root / "cache")

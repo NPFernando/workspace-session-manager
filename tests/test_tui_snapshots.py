@@ -9,17 +9,17 @@ from textual.pilot import Pilot
 from textual.widgets import Button, Input, LoadingIndicator, Static
 
 from conftest import FakeBackend
-from wf_session_manager.errors import TmuxError
-from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
-from wf_session_manager.service import SessionService
-from wf_session_manager.tui import (
+from workspace_session_manager.errors import TmuxError
+from workspace_session_manager.models import CreateRequest, InputState, TaskState, Tool
+from workspace_session_manager.service import SessionService
+from workspace_session_manager.tui import (
     ConfirmActionScreen,
     CreateSessionScreen,
     DiagnosticsScreen,
     IdentityOrganizationScreen,
     LogScreen,
     StatusScreen,
-    WFApp,
+    WsApp,
 )
 
 SnapCompare = Callable[..., bool]
@@ -82,7 +82,7 @@ def populated_app(
     backend: FakeBackend,
     *,
     monochrome: bool = False,
-) -> WFApp:
+) -> WsApp:
     add_session(
         service,
         backend,
@@ -116,7 +116,7 @@ def populated_app(
         Tool.SHELL,
         task_state=TaskState.UNSPECIFIED,
     )
-    return WFApp(
+    return WsApp(
         service,
         monochrome=monochrome,
         hostname="wf-test-host",
@@ -132,7 +132,7 @@ def logs_app(
     *,
     output: str = "",
     tool: Tool = Tool.SHELL,
-) -> tuple[WFApp, str]:
+) -> tuple[WsApp, str]:
     name = add_session(
         service,
         backend,
@@ -144,7 +144,7 @@ def logs_app(
     )
     backend.previews[name] = output
     return (
-        WFApp(
+        WsApp(
             service,
             monochrome=False,
             hostname="wf-test-host",
@@ -155,7 +155,7 @@ def logs_app(
     )
 
 
-async def open_logs(pilot: Pilot, app: WFApp) -> LogScreen:
+async def open_logs(pilot: Pilot, app: WsApp) -> LogScreen:
     await pilot.press("l")
     assert isinstance(app.screen, LogScreen)
     screen = app.screen
@@ -168,7 +168,7 @@ async def open_logs(pilot: Pilot, app: WFApp) -> LogScreen:
     return screen
 
 
-async def wait_for_attention(pilot: Pilot, app: WFApp) -> None:
+async def wait_for_attention(pilot: Pilot, app: WsApp) -> None:
     for _ in range(80):
         if not app._attention_scanning:
             return
@@ -210,7 +210,7 @@ def test_narrow_snapshot(
 
 def test_empty_snapshot(snap_compare: SnapCompare, service: SessionService) -> None:
     assert snap_compare(
-        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
+        WsApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
         terminal_size=(120, 35),
     )
 
@@ -229,7 +229,7 @@ def test_warning_snapshot(
         input_state=InputState.REQUIRED,
     )
     assert snap_compare(
-        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
+        WsApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
         terminal_size=(120, 35),
     )
 
@@ -248,7 +248,7 @@ def test_failure_snapshot(
         failed=True,
     )
     assert snap_compare(
-        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
+        WsApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
         terminal_size=(120, 35),
     )
 
@@ -286,7 +286,7 @@ def test_long_content_snapshot(
         for index in range(20)
     )
     assert snap_compare(
-        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
+        WsApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
         terminal_size=(160, 45),
     )
 
@@ -446,7 +446,7 @@ def test_manage_ascii_snapshot(
     fake_backend: FakeBackend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("WF_ASCII", "1")
+    monkeypatch.setenv("WS_ASCII", "1")
     app = populated_app(service, fake_backend)
 
     async def open_manage(pilot: Pilot) -> None:
@@ -505,7 +505,7 @@ def test_logs_saved_snapshot(
     path = service.paths.logs_dir / f"{record.record_id}.log"
     path.write_text("Sanitized build output\nDeployment checks passed\n", encoding="utf-8")
     fake_backend.previews[created.name] = "Live pane is ready"
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
 
     async def show_saved(pilot: Pilot) -> None:
         screen = await open_logs(pilot, app)
@@ -624,7 +624,7 @@ def test_logs_ascii_snapshot(
     fake_backend: FakeBackend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("WF_ASCII", "1")
+    monkeypatch.setenv("WS_ASCII", "1")
     app, _name = logs_app(service, fake_backend, output="Sanitized output\nReady")
 
     async def show_logs(pilot: Pilot) -> None:
@@ -691,7 +691,7 @@ def test_narrow_detail_failure_snapshot(
         failed=True,
     )
     fake_backend.previews[name] = "Worker exited with status 1"
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
 
     async def show_detail(pilot: Pilot) -> None:
         await pilot.press("enter")
@@ -717,7 +717,7 @@ def test_narrow_detail_long_content_snapshot(
         project="enterprise-api-platform-with-shared-services",
     )
     fake_backend.previews[name] = "Reviewing authentication boundaries\nAudit remains in progress"
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
 
     async def show_detail(pilot: Pilot) -> None:
         await pilot.press("enter")
@@ -750,7 +750,7 @@ def test_narrow_detail_ascii_snapshot(
     fake_backend: FakeBackend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("WF_ASCII", "1")
+    monkeypatch.setenv("WS_ASCII", "1")
     app, _name = logs_app(service, fake_backend, output="Sanitized output\nReady")
 
     async def show_detail(pilot: Pilot) -> None:
@@ -828,7 +828,7 @@ def test_attention_ascii_snapshot(
     fake_backend: FakeBackend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("WF_ASCII", "1")
+    monkeypatch.setenv("WS_ASCII", "1")
     app = populated_app(service, fake_backend)
 
     async def show_attention(pilot: Pilot) -> None:
@@ -928,7 +928,7 @@ def test_usage_limit_warning_snapshot(
         "Warning: Codex usage limit reached\nRetry available: 23 Jul 2026, 10:46 AM"
     )
     assert snap_compare(
-        WFApp(
+        WsApp(
             service,
             monochrome=False,
             hostname="wf-test-host",
@@ -978,6 +978,6 @@ def test_large_inventory_snapshot(
     for index in range(count):
         add_session(service, fake_backend, f"load-{index:03d}", Tool.SHELL)
     assert snap_compare(
-        WFApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
+        WsApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
         terminal_size=(160, 45),
     )

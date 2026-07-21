@@ -4,14 +4,14 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from conftest import FakeBackend
-from wf_session_manager.errors import (
+from workspace_session_manager.errors import (
     OwnershipError,
     SessionNotFoundError,
     StateError,
     TmuxError,
     ToolUnavailableError,
 )
-from wf_session_manager.models import (
+from workspace_session_manager.models import (
     CreateRequest,
     DoctorReport,
     HealthCheck,
@@ -23,7 +23,7 @@ from wf_session_manager.models import (
     TaskState,
     Tool,
 )
-from wf_session_manager.service import SessionService
+from workspace_session_manager.service import SessionService
 
 
 def test_foreign_session_is_hidden_but_available_for_diagnostics(

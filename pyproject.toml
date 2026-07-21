@@ -3,13 +3,13 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "wf-session-manager"
+name = "workspace-session-manager"
 version = "0.2.0"
 description = "A safe Textual interface for persistent tmux-based AI and shell sessions"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-authors = [{ name = "WF contributors" }]
+authors = [{ name = "Workspace Session Manager contributors" }]
 keywords = ["tmux", "textual", "tui", "claude", "codex", "workflow"]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -42,19 +42,19 @@ dev = [
 ]
 
 [project.scripts]
-WF = "wf_session_manager.cli:main"
-wf-dev = "wf_session_manager.cli:main"
+ws = "workspace_session_manager.cli:main"
+ws-dev = "workspace_session_manager.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/NPFernando/wf-session-manager"
-Issues = "https://github.com/NPFernando/wf-session-manager/issues"
-Source = "https://github.com/NPFernando/wf-session-manager"
+Homepage = "https://github.com/NPFernando/workspace-session-manager"
+Issues = "https://github.com/NPFernando/workspace-session-manager/issues"
+Source = "https://github.com/NPFernando/workspace-session-manager"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-wf_session_manager = ["*.tcss", "py.typed"]
+workspace_session_manager = ["*.tcss", "py.typed"]
 
 [tool.ruff]
 target-version = "py311"
@@ -80,7 +80,7 @@ pretty = true
 files = ["src"]
 
 [tool.pytest.ini_options]
-addopts = "-ra --strict-config --strict-markers --cov=wf_session_manager --cov-report=term-missing --cov-fail-under=65"
+addopts = "-ra --strict-config --strict-markers --cov=workspace_session_manager --cov-report=term-missing --cov-fail-under=65"
 testpaths = ["tests"]
 markers = [
   "integration: uses an isolated, uniquely named real tmux session",

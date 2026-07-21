@@ -17,9 +17,9 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from wf_session_manager.errors import MigrationError, WFError
-from wf_session_manager.legacy import MAX_SIDECAR_BYTES, LegacyMetadataReader
-from wf_session_manager.models import (
+from workspace_session_manager.errors import MigrationError, WsError
+from workspace_session_manager.legacy import MAX_SIDECAR_BYTES, LegacyMetadataReader
+from workspace_session_manager.models import (
     SESSION_NAME_PATTERN,
     LegacyMetadata,
     SessionMetadata,
@@ -29,12 +29,12 @@ from wf_session_manager.models import (
     normalize_task_state,
     utc_now,
 )
-from wf_session_manager.paths import AppPaths
-from wf_session_manager.service import SessionBackend, infer_tool
-from wf_session_manager.store import MetadataStore
+from workspace_session_manager.paths import AppPaths
+from workspace_session_manager.service import SessionBackend, infer_tool
+from workspace_session_manager.store import MetadataStore
 
 OWNER_OPTION = "@wf_owner"
-OWNER_VALUE = "wf-session-manager"
+OWNER_VALUE = "workspace-session-manager"
 MAX_PLAN_BYTES = 1024 * 1024
 SIDECAR_SUFFIXES = ("tool", "cwd", "project", "note", "tags", "state", "last", "pinned")
 
@@ -453,7 +453,7 @@ class MigrationManager:
                 }
             )
             self._write_journal(failed)
-            if isinstance(error, WFError) and not cleanup_errors:
+            if isinstance(error, WsError) and not cleanup_errors:
                 raise
             raise MigrationError(f"migration failed: {error}{cleanup_detail}") from error
 

@@ -1,37 +1,37 @@
 """Domain-specific errors with safe, user-facing messages."""
 
 
-class WFError(Exception):
+class WsError(Exception):
     """Base class for expected application failures."""
 
 
-class ConfigurationError(WFError):
+class ConfigurationError(WsError):
     """Configuration is missing or invalid."""
 
 
-class TmuxError(WFError):
+class TmuxError(WsError):
     """A tmux operation failed."""
 
 
-class SessionNotFoundError(WFError):
+class SessionNotFoundError(WsError):
     """The requested tmux session does not exist."""
 
 
-class SessionExistsError(WFError):
+class SessionExistsError(WsError):
     """A tmux session already uses the requested name."""
 
 
-class OwnershipError(WFError):
-    """A mutation was rejected because WF does not own the session."""
+class OwnershipError(WsError):
+    """A mutation was rejected because ws does not own the session."""
 
 
-class ToolUnavailableError(WFError):
+class ToolUnavailableError(WsError):
     """The configured agent command is unavailable."""
 
 
-class StateError(WFError):
+class StateError(WsError):
     """Persisted application state is corrupt or unavailable."""
 
 
-class MigrationError(WFError):
+class MigrationError(WsError):
     """A session adoption plan is invalid, stale, or unsafe to apply."""

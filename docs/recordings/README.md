@@ -1,7 +1,7 @@
 # TUI Interaction Recordings
 
 These recordings were captured from the in-memory fake backend. They do not connect to a tmux
-server, read WF metadata, or contain real session names, paths, output, hostnames, or credentials.
+server, read ws metadata, or contain real session names, paths, output, hostnames, or credentials.
 
 Each scenario has a `typescript` stream and a timing file produced by util-linux `script`. Replay a
 recording from the repository root with:

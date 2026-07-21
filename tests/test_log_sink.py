@@ -13,7 +13,7 @@ def test_log_sink_writes_owner_only_sanitized_redacted_output(tmp_path: Path) ->
         "\x1b[31mstatus\x1b[0m password=not-safe 192.168.1.1\n"
     )
     result = subprocess.run(
-        [sys.executable, "-m", "wf_session_manager.log_sink", str(destination)],
+        [sys.executable, "-m", "workspace_session_manager.log_sink", str(destination)],
         input=source,
         text=True,
         capture_output=True,

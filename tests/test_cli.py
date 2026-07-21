@@ -5,21 +5,21 @@ import pytest
 from typer.testing import CliRunner
 
 from conftest import FakeBackend
-from wf_session_manager import cli
-from wf_session_manager.cli import Runtime
-from wf_session_manager.config import AppConfig
-from wf_session_manager.legacy import LegacyMetadataReader
-from wf_session_manager.migration import MigrationManager
-from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
-from wf_session_manager.paths import AppPaths
-from wf_session_manager.service import SessionService
-from wf_session_manager.store import MetadataStore
+from workspace_session_manager import cli
+from workspace_session_manager.cli import Runtime
+from workspace_session_manager.config import AppConfig
+from workspace_session_manager.legacy import LegacyMetadataReader
+from workspace_session_manager.migration import MigrationManager
+from workspace_session_manager.models import CreateRequest, InputState, TaskState, Tool
+from workspace_session_manager.paths import AppPaths
+from workspace_session_manager.service import SessionService
+from workspace_session_manager.store import MetadataStore
 
 
 def test_version() -> None:
     result = CliRunner().invoke(cli.app, ["--version"])
     assert result.exit_code == 0
-    assert result.stdout.startswith("WF ")
+    assert result.stdout.startswith("ws ")
 
 
 def test_no_animation_option_reaches_tui(
@@ -59,7 +59,7 @@ def test_classic_launcher_requires_owner_only_executable(
     assert executed == [(classic, [str(classic)])]
 
     classic.chmod(0o755)
-    with pytest.raises(cli.WFError, match="unsafe classic"):
+    with pytest.raises(cli.WsError, match="unsafe classic"):
         cli.run_classic()
 
 

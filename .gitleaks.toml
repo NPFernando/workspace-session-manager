@@ -1,4 +1,4 @@
-title = "WF Session Manager gitleaks configuration"
+title = "Workspace Session Manager gitleaks configuration"
 
 [extend]
 useDefault = true

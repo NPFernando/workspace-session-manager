@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from wf_session_manager.config import AppConfig, ToolProfile
-from wf_session_manager.errors import SessionExistsError, SessionNotFoundError, TmuxError
-from wf_session_manager.legacy import LegacyMetadataReader
-from wf_session_manager.models import TmuxSession, Tool
-from wf_session_manager.paths import AppPaths
-from wf_session_manager.service import SessionService
-from wf_session_manager.store import MetadataStore
+from workspace_session_manager.config import AppConfig, ToolProfile
+from workspace_session_manager.errors import SessionExistsError, SessionNotFoundError, TmuxError
+from workspace_session_manager.legacy import LegacyMetadataReader
+from workspace_session_manager.models import TmuxSession, Tool
+from workspace_session_manager.paths import AppPaths
+from workspace_session_manager.service import SessionService
+from workspace_session_manager.store import MetadataStore
 
 
 class FakeBackend:
@@ -89,7 +89,7 @@ class FakeBackend:
             (tuple(shell_command), tuple(agent_command) if agent_command else None)
         )
         session = self.add(name, cwd=cwd, command=Path((agent_command or shell_command)[0]).name)
-        self.set_option(name, "@wf_owner", "wf-session-manager")
+        self.set_option(name, "@wf_owner", "workspace-session-manager")
         return session
 
     def capture_pane(self, name: str, lines: int, expected_id: str | None = None) -> str:

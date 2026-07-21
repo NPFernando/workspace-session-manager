@@ -1,11 +1,11 @@
-"""Read-only adapter for legacy WF sidecar metadata."""
+"""Read-only adapter for legacy ws sidecar metadata."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
 
-from wf_session_manager.models import SESSION_NAME_PATTERN, LegacyMetadata, Tool
+from workspace_session_manager.models import SESSION_NAME_PATTERN, LegacyMetadata, Tool
 
 MAX_SIDECAR_BYTES = 4096
 

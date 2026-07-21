@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from wf_session_manager.errors import SessionExistsError, SessionNotFoundError, TmuxError
-from wf_session_manager.models import TmuxSession
+from workspace_session_manager.errors import SessionExistsError, SessionNotFoundError, TmuxError
+from workspace_session_manager.models import TmuxSession
 
 # tmux escapes control characters in format output as backslash-octal text.
 FIELD_SEPARATOR = "\\037"
@@ -207,7 +207,7 @@ class TmuxBackend:
             self.set_option(
                 name,
                 "@wf_owner",
-                "wf-session-manager",
+                "workspace-session-manager",
                 expected_id=created_id or None,
             )
             if agent_command:
@@ -299,7 +299,7 @@ class TmuxBackend:
             self._run("pipe-pane", "-t", pane_target)
             self.unset_option(name, "@wf_logging", expected_id=expected_id)
             return
-        command = shlex.join((sys.executable, "-m", "wf_session_manager.log_sink", str(log_path)))
+        command = shlex.join((sys.executable, "-m", "workspace_session_manager.log_sink", str(log_path)))
         self._run("pipe-pane", "-o", "-t", pane_target, "--", command)
         try:
             self.set_option(name, "@wf_logging", "1", expected_id=expected_id)

@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeBackend
-from wf_session_manager.errors import MigrationError, StateError, TmuxError
-from wf_session_manager.legacy import LegacyMetadataReader
-from wf_session_manager.migration import MigrationJournal, MigrationManager
-from wf_session_manager.models import SessionMetadata, TaskState, Tool
-from wf_session_manager.paths import AppPaths
-from wf_session_manager.store import MetadataStore
+from workspace_session_manager.errors import MigrationError, StateError, TmuxError
+from workspace_session_manager.legacy import LegacyMetadataReader
+from workspace_session_manager.migration import MigrationJournal, MigrationManager
+from workspace_session_manager.models import SessionMetadata, TaskState, Tool
+from workspace_session_manager.paths import AppPaths
+from workspace_session_manager.store import MetadataStore
 
 
 def write_legacy(
@@ -129,7 +129,7 @@ def test_apply_and_rollback_never_remove_tmux_session(
     assert record is not None
     assert record.tmux_session_id == session.session_id
     assert record.task_state is TaskState.WAITING
-    assert fake_backend.get_option(session.name, "@wf_owner") == "wf-session-manager"
+    assert fake_backend.get_option(session.name, "@wf_owner") == "workspace-session-manager"
 
     rolled_back = manager.rollback(applied.migration_id)
     assert rolled_back.status == "rolled_back"
@@ -202,7 +202,7 @@ def test_rollback_refuses_modified_migration_record(
     with pytest.raises(MigrationError, match="record was modified"):
         manager.rollback(journal.migration_id)
     assert manager.store.load("claude-old") is not None
-    assert fake_backend.get_option("claude-old", "@wf_owner") == "wf-session-manager"
+    assert fake_backend.get_option("claude-old", "@wf_owner") == "workspace-session-manager"
 
 
 def test_rollback_failure_restores_entire_adoption_batch(
@@ -231,7 +231,7 @@ def test_rollback_failure_restores_entire_adoption_batch(
 
     for name in ("claude-one", "codex-two"):
         assert manager.store.load(name) is not None
-        assert fake_backend.get_option(name, "@wf_owner") == "wf-session-manager"
+        assert fake_backend.get_option(name, "@wf_owner") == "workspace-session-manager"
     assert manager.load_journal(journal.migration_id).status == "applied"
 
 
@@ -354,7 +354,7 @@ def test_rollback_finalization_failure_restores_adoption(
         manager.rollback(journal.migration_id)
 
     assert manager.store.load("claude-old") is not None
-    assert fake_backend.get_option("claude-old", "@wf_owner") == "wf-session-manager"
+    assert fake_backend.get_option("claude-old", "@wf_owner") == "workspace-session-manager"
     assert manager.load_journal(journal.migration_id).status == "applied"
 
 

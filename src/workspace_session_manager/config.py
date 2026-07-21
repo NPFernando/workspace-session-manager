@@ -9,9 +9,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from wf_session_manager.errors import ConfigurationError
-from wf_session_manager.models import Tool
-from wf_session_manager.paths import AppPaths
+from workspace_session_manager.errors import ConfigurationError
+from workspace_session_manager.models import Tool
+from workspace_session_manager.paths import AppPaths
 
 
 class ToolProfile(BaseModel):
@@ -80,7 +80,7 @@ class AppConfig(BaseModel):
 
 def load_config(paths: AppPaths, override: Path | None = None) -> AppConfig:
     """Load strict TOML, returning defaults when no config file exists."""
-    env_path = os.environ.get("WF_DEV_CONFIG")
+    env_path = os.environ.get("WS_DEV_CONFIG")
     config_path = override or (Path(env_path).expanduser() if env_path else paths.config_file)
     if not config_path.exists():
         return AppConfig()

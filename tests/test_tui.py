@@ -11,8 +11,8 @@ from textual.pilot import Pilot
 from textual.widgets import Button, Input, OptionList, Select, Static, Switch, TextArea
 
 from conftest import FakeBackend
-from wf_session_manager.errors import TmuxError
-from wf_session_manager.models import (
+from workspace_session_manager.errors import TmuxError
+from workspace_session_manager.models import (
     AgentState,
     CreateRequest,
     InputState,
@@ -23,8 +23,8 @@ from wf_session_manager.models import (
     TaskState,
     Tool,
 )
-from wf_session_manager.service import SessionService
-from wf_session_manager.tui import (
+from workspace_session_manager.service import SessionService
+from workspace_session_manager.tui import (
     ConfirmActionScreen,
     CreateFailureScreen,
     CreateSessionScreen,
@@ -40,7 +40,7 @@ from wf_session_manager.tui import (
     NoteScreen,
     OnboardingScreen,
     StatusScreen,
-    WFApp,
+    WsApp,
     detect_activity,
     display_path,
     humanize_task,
@@ -61,7 +61,7 @@ async def wait_for_create_validation(pilot: Pilot[object], screen: CreateSession
     raise AssertionError("create-session validation did not complete")
 
 
-async def wait_for_confirmation(pilot: Pilot[object], app: WFApp) -> ConfirmActionScreen:
+async def wait_for_confirmation(pilot: Pilot[object], app: WsApp) -> ConfirmActionScreen:
     for _ in range(40):
         if isinstance(app.screen, ConfirmActionScreen):
             return app.screen
@@ -69,7 +69,7 @@ async def wait_for_confirmation(pilot: Pilot[object], app: WFApp) -> ConfirmActi
     raise AssertionError("confirmation screen did not open")
 
 
-async def wait_for_manage(pilot: Pilot[object], app: WFApp) -> ManageSessionScreen:
+async def wait_for_manage(pilot: Pilot[object], app: WsApp) -> ManageSessionScreen:
     for _ in range(40):
         if isinstance(app.screen, ManageSessionScreen):
             return app.screen
@@ -96,7 +96,7 @@ async def wait_for_log_refresh(pilot: Pilot[object], screen: LogScreen) -> None:
     raise AssertionError("log refresh did not complete")
 
 
-async def wait_for_attention_scan(pilot: Pilot[object], app: WFApp) -> None:
+async def wait_for_attention_scan(pilot: Pilot[object], app: WsApp) -> None:
     for _ in range(120):
         if not app._attention_scanning:
             return
@@ -110,7 +110,7 @@ async def test_tui_loads_grouped_rows_and_searches_on_demand(
 ) -> None:
     create_managed(service, "first", Tool.CLAUDE)
     create_managed(service, "second", Tool.CODEX)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 36)) as pilot:
         assert len(app.visible_sessions) == 2
         assert not app.has_class("searching")
@@ -133,7 +133,7 @@ async def test_tui_loads_grouped_rows_and_searches_on_demand(
 async def test_search_enter_commits_filter_without_attaching(service: SessionService) -> None:
     create_managed(service, "first", Tool.CLAUDE)
     create_managed(service, "second", Tool.CODEX)
-    app = WFApp(service, monochrome=False)
+    app = WsApp(service, monochrome=False)
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.press("/")
         await pilot.press("c", "o", "d", "e", "x", "enter")
@@ -147,7 +147,7 @@ async def test_search_enter_commits_filter_without_attaching(service: SessionSer
 @pytest.mark.asyncio
 async def test_wide_enter_attaches_selected_session(service: SessionService) -> None:
     create_managed(service, "first", Tool.CLAUDE)
-    app = WFApp(service, monochrome=False)
+    app = WsApp(service, monochrome=False)
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.pause()
         await pilot.press("enter")
@@ -157,7 +157,7 @@ async def test_wide_enter_attaches_selected_session(service: SessionService) -> 
 @pytest.mark.asyncio
 async def test_narrow_enter_opens_in_place_detail_then_attaches(service: SessionService) -> None:
     create_managed(service, "first", Tool.CLAUDE)
-    app = WFApp(service, monochrome=False)
+    app = WsApp(service, monochrome=False)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.press("enter")
         await pilot.pause()
@@ -178,7 +178,7 @@ async def test_narrow_detail_restores_viewports_after_forms_logs_and_back(
     name = create_managed(service, "narrow-workspace", Tool.CLAUDE)
     service.update_note(name, "\n".join(f"Task detail {index}" for index in range(24)))
     fake_backend.previews[name] = "\n".join(f"output line {index}" for index in range(40))
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
 
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.press("enter")
@@ -245,7 +245,7 @@ async def test_narrow_detail_restores_viewports_after_forms_logs_and_back(
 @pytest.mark.asyncio
 async def test_narrow_detail_search_and_filter_return_to_list(service: SessionService) -> None:
     create_managed(service, "narrow-modes", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
 
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.press("enter", "/")
@@ -269,7 +269,7 @@ async def test_narrow_stopped_detail_opens_manage_and_restores_detail(
 ) -> None:
     name = create_managed(service, "stopped-narrow", Tool.SHELL)
     service.stop_session(name)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
 
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.press("enter")
@@ -289,7 +289,7 @@ async def test_narrow_detail_closes_on_identity_loss_and_wide_resize(
     fake_backend: FakeBackend,
 ) -> None:
     name = create_managed(service, "resize-detail", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
 
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.press("enter")
@@ -323,7 +323,7 @@ async def test_logs_follow_pause_manual_refresh_and_restore_dashboard_timer(
 ) -> None:
     name = create_managed(service, "live-logs", Tool.SHELL)
     fake_backend.previews[name] = "first line\nsecond line"
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         dashboard_timer = app._dashboard_refresh_timer
         assert dashboard_timer is not None and dashboard_timer._active.is_set()
@@ -374,7 +374,7 @@ async def test_logs_switch_between_live_and_saved_sources(
     path = service.paths.logs_dir / f"{record.record_id}.log"
     path.write_text("saved history\n", encoding="utf-8")
     fake_backend.previews[created.name] = "live output"
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
 
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("l")
@@ -401,7 +401,7 @@ async def test_logs_find_navigation_pauses_follow_and_copy_uses_selection(
     name = create_managed(service, "find-logs", Tool.SHELL)
     fake_backend.previews[name] = "alpha one\nbeta\nalpha two"
     copied: list[str] = []
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
 
     async with app.run_test(size=(120, 35)) as pilot:
@@ -453,7 +453,7 @@ async def test_logs_surface_warning_refresh_error_and_identity_guard(
     fake_backend.previews[name] = (
         "Warning: Codex usage limit reached\nRetry available: tomorrow at 10:00"
     )
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("l")
         assert isinstance(app.screen, LogScreen)
@@ -495,7 +495,7 @@ async def test_logs_retry_time_refresh_guards_and_stale_result(
         return original_logs(session_name, source=source)
 
     monkeypatch.setattr(service, "logs", flaky_logs)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("l")
         assert isinstance(app.screen, LogScreen)
@@ -548,7 +548,7 @@ async def test_logs_restore_viewport_for_each_source(
     path = service.paths.logs_dir / f"{record.record_id}.log"
     path.write_text("\n".join(f"saved line {index}" for index in range(20)), encoding="utf-8")
     fake_backend.previews[created.name] = "\n".join(f"live line {index}" for index in range(20))
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
 
     async with app.run_test(size=(100, 24)) as pilot:
         await pilot.press("l")
@@ -584,7 +584,7 @@ async def test_logs_resize_and_stopped_session_disable_attach(
 ) -> None:
     name = create_managed(service, "stopped-view", Tool.SHELL)
     service.stop_session(name)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.press("l")
         assert isinstance(app.screen, LogScreen)
@@ -608,7 +608,7 @@ async def test_logs_resize_and_stopped_session_disable_attach(
 @pytest.mark.asyncio
 async def test_zero_search_results_clear_actionable_selection(service: SessionService) -> None:
     create_managed(service, "first", Tool.CLAUDE)
-    app = WFApp(service, monochrome=False)
+    app = WsApp(service, monochrome=False)
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.press("/")
         app.query_one("#search", Input).value = "no-match"
@@ -622,7 +622,7 @@ async def test_zero_search_results_clear_actionable_selection(service: SessionSe
 async def test_empty_inventory_has_quick_actions_but_no_session_action(
     service: SessionService,
 ) -> None:
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.pause()
         assert app.selected_name is None
@@ -638,7 +638,7 @@ async def test_refresh_clears_removed_or_reused_tmux_identity(
     fake_backend: FakeBackend,
 ) -> None:
     name = create_managed(service, "first", Tool.CLAUDE)
-    app = WFApp(service, monochrome=False)
+    app = WsApp(service, monochrome=False)
     async with app.run_test(size=(120, 36)) as pilot:
         assert app.selected_name == name
         fake_backend.sessions[name] = fake_backend.sessions[name].model_copy(
@@ -652,7 +652,7 @@ async def test_refresh_clears_removed_or_reused_tmux_identity(
 
 @pytest.mark.asyncio
 async def test_create_dialog_is_keyboard_accessible(service: SessionService) -> None:
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(100, 30)) as pilot:
         base_screen = app.screen
         await pilot.press("c")
@@ -667,7 +667,7 @@ async def test_delete_requires_manage_and_exact_confirmation(
     fake_backend: FakeBackend,
 ) -> None:
     name = create_managed(service, "delete-me", Tool.SHELL)
-    app = WFApp(service, monochrome=False)
+    app = WsApp(service, monochrome=False)
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.press("d")
         assert isinstance(app.screen, MoreActionsScreen)
@@ -690,7 +690,7 @@ async def test_refresh_preserves_selection_filter_and_list_scroll(
 ) -> None:
     for index in range(40):
         create_managed(service, f"session-{index:02d}", Tool.SHELL)
-    app = WFApp(service, monochrome=False)
+    app = WsApp(service, monochrome=False)
     async with app.run_test(size=(100, 30)) as pilot:
         options = app.query_one("#sessions", OptionList)
         target = app.visible_sessions[20]
@@ -724,15 +724,15 @@ async def test_responsive_layout_modes(
     size: tuple[int, int],
     layout: str,
 ) -> None:
-    app = WFApp(service, monochrome=False)
+    app = WsApp(service, monochrome=False)
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         assert app.has_class(layout)
         if layout == "too-small":
             fallback = str(app.query_one("#small-terminal", Static).content)
             assert "Minimum: 80x24" in fallback
-            assert "WF list" in fallback
-            assert "WF --classic" in fallback
+            assert "ws list" in fallback
+            assert "ws --classic" in fallback
 
 
 @pytest.mark.asyncio
@@ -741,8 +741,8 @@ async def test_ascii_mode_uses_text_separators_and_navigation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     create_managed(service, "ascii", Tool.SHELL)
-    monkeypatch.setenv("WF_ASCII", "1")
-    app = WFApp(service, monochrome=True, hostname="ascii-host")
+    monkeypatch.setenv("WS_ASCII", "1")
+    app = WsApp(service, monochrome=True, hostname="ascii-host")
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
         footer = str(app.query_one("#action-bar", Static).content)
@@ -825,7 +825,7 @@ async def test_create_form_validates_duplicates_and_directory_inline(
     project = tmp_path / "detected-project"
     project.mkdir()
     (project / ".git").mkdir()
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("c")
         assert isinstance(app.screen, CreateSessionScreen)
@@ -854,7 +854,7 @@ async def test_create_form_uses_latest_normalized_name_value(
     service: SessionService,
     tmp_path: Path,
 ) -> None:
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("c")
         form = app.screen
@@ -871,7 +871,7 @@ async def test_create_form_uses_latest_normalized_name_value(
 async def test_create_suspends_and_restores_search_mode(service: SessionService) -> None:
     create_managed(service, "first", Tool.CLAUDE)
     create_managed(service, "second", Tool.CODEX)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("/")
         await pilot.press("c", "o", "d", "e", "x")
@@ -903,7 +903,7 @@ async def test_create_suspends_and_restores_search_mode(service: SessionService)
 async def test_filter_suspends_and_restores_search_mode(service: SessionService) -> None:
     create_managed(service, "first", Tool.CLAUDE)
     create_managed(service, "second", Tool.CODEX)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("/", "c", "o", "d", "e", "x")
         visible_before = [session.name for session in app.visible_sessions]
@@ -929,7 +929,7 @@ async def test_filter_suspends_and_restores_search_mode(service: SessionService)
 @pytest.mark.asyncio
 async def test_palette_has_exclusive_mode_and_restores_search(service: SessionService) -> None:
     create_managed(service, "first", Tool.CLAUDE)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("/", "f", "i", "r", "s", "t")
         app.action_command_palette()
@@ -954,7 +954,7 @@ async def test_palette_restores_dashboard_before_dispatching_command(
     service: SessionService,
 ) -> None:
     create_managed(service, "first", Tool.CLAUDE)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("p")
         app.screen.query_one(Input).value = "filter sessions"
@@ -971,7 +971,7 @@ async def test_palette_restores_dashboard_before_dispatching_command(
 @pytest.mark.asyncio
 async def test_global_shortcuts_do_not_stack_over_filter(service: SessionService) -> None:
     create_managed(service, "protected", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("f")
         screen = app.screen
@@ -989,7 +989,7 @@ async def test_basic_create_form_fits_without_scrolling(
     service: SessionService,
     tmp_path: Path,
 ) -> None:
-    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
+    app = WsApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("c")
         await pilot.pause()
@@ -1004,7 +1004,7 @@ async def test_basic_create_form_fits_without_scrolling(
 async def test_advanced_options_preserve_values_and_focus(
     service: SessionService,
 ) -> None:
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("c")
         await pilot.click("#create-advanced-toggle")
@@ -1030,7 +1030,7 @@ async def test_advanced_options_preserve_values_and_focus(
 async def test_home_directory_does_not_become_ubuntu_project(
     service: SessionService,
 ) -> None:
-    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=Path.home())
+    app = WsApp(service, monochrome=False, onboarding=False, default_cwd=Path.home())
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("c")
         app.screen.query_one("#create-name", Input).value = "home-task"
@@ -1050,7 +1050,7 @@ async def test_recent_directory_selection_updates_working_directory(
     recent = tmp_path / "recent-project"
     recent.mkdir()
     service.create(CreateRequest(name="recent", tool=Tool.SHELL, cwd=recent))
-    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
+    app = WsApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("c")
         app.screen.query_one("#create-recent-dir", Select).value = str(recent)
@@ -1064,7 +1064,7 @@ async def test_ctrl_enter_requires_current_validation_and_creates_incrementally(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
+    app = WsApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
     async with app.run_test(size=(120, 35)) as pilot:
         base_screen = app.screen
         await pilot.press("c")
@@ -1099,7 +1099,7 @@ async def test_ctrl_enter_requires_current_validation_and_creates_incrementally(
 async def test_multiline_task_enter_does_not_submit(
     service: SessionService,
 ) -> None:
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("c")
         task = app.screen.query_one("#create-note", TextArea)
@@ -1114,7 +1114,7 @@ async def test_prefix_can_be_disabled_without_changing_the_backend(
     service: SessionService,
     tmp_path: Path,
 ) -> None:
-    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
+    app = WsApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("c")
         app.screen.query_one("#create-name", Input).value = "api_refactor"
@@ -1138,7 +1138,7 @@ async def test_failed_startup_is_actionable_and_leaves_no_metadata(
         raise TmuxError("isolated startup failed")
 
     monkeypatch.setattr(fake_backend, "create_session", fail_start)
-    app = WFApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
+    app = WsApp(service, monochrome=False, onboarding=False, default_cwd=tmp_path)
     monkeypatch.setattr(
         app,
         "notify",
@@ -1174,7 +1174,7 @@ async def test_usage_limit_updates_header_row_activity_and_agent_state(
 ) -> None:
     name = create_managed(service, "limited", Tool.CLAUDE)
     fake_backend.previews[name] = "You've hit your session limit\nAvailable again at 10:10 AM"
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.pause()
         assert "1 warning" in str(app.query_one("#app-header", Static).content)
@@ -1206,7 +1206,7 @@ async def test_attention_scan_finds_unselected_warning_and_restores_temporary_vi
     )
     fake_backend.previews[selected] = "Ready"
     notifications: list[tuple[str, dict[str, object]]] = []
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     monkeypatch.setattr(
         app,
         "notify",
@@ -1279,7 +1279,7 @@ async def test_attention_scan_notifies_once_after_baseline_and_clears_resolution
     fake_backend.previews[candidate] = "Ready"
     fake_backend.previews[selected] = "Ready"
     notifications: list[tuple[str, dict[str, object]]] = []
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     monkeypatch.setattr(
         app,
         "notify",
@@ -1333,7 +1333,7 @@ def test_attention_batch_reserves_priority_and_rotates_detached_sessions(
     for index in range(6):
         detached_names.add(create_managed(service, f"detached-{index}", Tool.CODEX))
 
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     app.sessions = service.list_sessions()
     now = datetime.now(UTC)
     app._attention_scanned_at = {
@@ -1374,7 +1374,7 @@ async def test_attention_scan_error_is_deduplicated_and_recovers(
 
     monkeypatch.setattr(service, "inspect_snapshot", inspect_with_failure)
     notifications: list[tuple[str, dict[str, object]]] = []
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     monkeypatch.setattr(
         app,
         "notify",
@@ -1430,7 +1430,7 @@ async def test_attention_scan_discards_removed_exact_identity(
         return original(session, **kwargs)
 
     monkeypatch.setattr(service, "inspect_snapshot", delayed_inspect)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
 
     async with app.run_test(size=(120, 35)) as pilot:
         for _ in range(80):
@@ -1459,7 +1459,7 @@ async def test_diagnostics_is_centered_modal_with_safe_default_details(
     service: SessionService,
 ) -> None:
     create_managed(service, "diagnostics", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         app.action_diagnostics()
         await pilot.pause()
@@ -1493,7 +1493,7 @@ async def test_slow_diagnostics_shows_progress_then_duration(
         return original()
 
     monkeypatch.setattr(service, "doctor", slow_doctor)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         app.action_diagnostics()
         await pilot.pause(0.28)
@@ -1512,7 +1512,7 @@ async def test_manage_requires_cancel_focused_confirmation_for_stop(
     fake_backend: FakeBackend,
 ) -> None:
     name = create_managed(service, "protected", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("d")
         assert isinstance(app.screen, ManageSessionScreen)
@@ -1540,7 +1540,7 @@ async def test_manage_confirmation_keeps_original_session_target(
 ) -> None:
     original_name = create_managed(service, "original", Tool.SHELL)
     other_name = create_managed(service, "other", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         original = next(session for session in app.sessions if session.name == original_name)
         other = next(session for session in app.sessions if session.name == other_name)
@@ -1563,7 +1563,7 @@ async def test_manage_confirmation_keeps_original_session_target(
 @pytest.mark.asyncio
 async def test_manage_fits_all_categories_at_120x35(service: SessionService) -> None:
     create_managed(service, "managed", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("d")
         screen = await wait_for_manage(pilot, app)
@@ -1590,7 +1590,7 @@ async def test_manage_fits_all_categories_at_120x35(service: SessionService) -> 
 @pytest.mark.asyncio
 async def test_manage_find_is_local_and_cancellable(service: SessionService) -> None:
     create_managed(service, "managed", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("d", "/")
         screen = await wait_for_manage(pilot, app)
@@ -1619,7 +1619,7 @@ async def test_manage_find_is_local_and_cancellable(service: SessionService) -> 
 async def test_manage_disabled_actions_explain_stopped_state(service: SessionService) -> None:
     name = create_managed(service, "stopped", Tool.SHELL)
     service.stop_session(name)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("d")
         screen = await wait_for_manage(pilot, app)
@@ -1637,7 +1637,7 @@ async def test_manage_identity_edit_returns_with_filter_and_new_identity(
     service: SessionService,
 ) -> None:
     original_name = create_managed(service, "original", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("d", "/", *"identity", "enter", "enter")
         assert isinstance(app.screen, IdentityOrganizationScreen)
@@ -1664,7 +1664,7 @@ async def test_manage_identity_edit_returns_with_filter_and_new_identity(
 @pytest.mark.asyncio
 async def test_manage_task_status_and_pin_stay_in_workflow(service: SessionService) -> None:
     name = create_managed(service, "workflow", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("d", "n")
         assert isinstance(app.screen, NoteScreen)
@@ -1693,7 +1693,7 @@ async def test_manage_task_status_and_pin_stay_in_workflow(service: SessionServi
 @pytest.mark.asyncio
 async def test_manage_is_full_screen_at_narrow_width(service: SessionService) -> None:
     create_managed(service, "narrow-manage", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.press("d")
         screen = await wait_for_manage(pilot, app)
@@ -1707,7 +1707,7 @@ async def test_filter_dialog_applies_tool_and_warning_filters(service: SessionSe
     claude = create_managed(service, "decision", Tool.CLAUDE)
     create_managed(service, "other", Tool.CODEX)
     service.organize(claude, input_state=InputState.REQUIRED)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("f")
         assert isinstance(app.screen, FilterScreen)
@@ -1721,7 +1721,7 @@ async def test_filter_dialog_applies_tool_and_warning_filters(service: SessionSe
 
 @pytest.mark.asyncio
 async def test_onboarding_is_safe_and_recorded(service: SessionService) -> None:
-    app = WFApp(service, monochrome=False)
+    app = WsApp(service, monochrome=False)
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause()
         assert isinstance(app.screen, OnboardingScreen)
@@ -1739,7 +1739,7 @@ async def test_large_inventories_render_once_per_session(
 ) -> None:
     for index in range(count):
         create_managed(service, f"load-{index:03d}", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(160, 45)) as pilot:
         await pilot.pause()
         assert len(app.visible_sessions) == count
@@ -1752,7 +1752,7 @@ async def test_terminal_resizing_preserves_selection_and_switches_modes(
     service: SessionService,
 ) -> None:
     create_managed(service, "resize", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(160, 45)) as pilot:
         selected = app.selected_name
         await pilot.resize_terminal(100, 30)
@@ -1771,7 +1771,7 @@ async def test_terminal_resizing_preserves_selection_and_switches_modes(
 @pytest.mark.asyncio
 async def test_light_and_monochrome_theme_cycle(service: SessionService) -> None:
     create_managed(service, "theme", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False)
+    app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         app.action_cycle_theme()
         await pilot.pause()
@@ -1787,7 +1787,7 @@ async def test_no_color_starts_in_monochrome_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("NO_COLOR", "1")
-    app = WFApp(service, hostname="no-color-host", onboarding=False)
+    app = WsApp(service, hostname="no-color-host", onboarding=False)
     assert app.monochrome
     assert app.ui_theme == "monochrome"
     async with app.run_test(size=(120, 35)) as pilot:
@@ -1799,17 +1799,17 @@ def test_motion_can_be_disabled_by_cli_env_and_monochrome(
     service: SessionService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("WF_MOTION", "off")
-    assert WFApp(service, monochrome=False, onboarding=False).motion == "off"
-    monkeypatch.delenv("WF_MOTION")
-    assert WFApp(service, monochrome=False, onboarding=False, no_animation=True).motion == "off"
-    assert WFApp(service, monochrome=True, onboarding=False).motion == "off"
+    monkeypatch.setenv("WS_MOTION", "off")
+    assert WsApp(service, monochrome=False, onboarding=False).motion == "off"
+    monkeypatch.delenv("WS_MOTION")
+    assert WsApp(service, monochrome=False, onboarding=False, no_animation=True).motion == "off"
+    assert WsApp(service, monochrome=True, onboarding=False).motion == "off"
 
 
 @pytest.mark.asyncio
 async def test_modal_cancel_restores_dashboard_focus(service: SessionService) -> None:
     create_managed(service, "focus", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         sessions = app.query_one("#sessions", OptionList)
         assert app.focused is sessions
@@ -1825,7 +1825,7 @@ async def test_failed_refresh_preserves_selection_and_filters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     create_managed(service, "refresh", Tool.SHELL)
-    app = WFApp(service, monochrome=False, onboarding=False, no_animation=True)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("/", "r", "e", "f", "enter")
         selected = app.selected_name

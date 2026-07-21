@@ -39,14 +39,14 @@ rollback_migration_on_failure() {
   if (( status != 0 && migration_applied == 1 && cutover_complete == 0 )); then
     set +e
     printf 'Pre-cutover failure; rolling back migration %s.\n' "$migration_id" >&2
-    "$venv_dir/bin/wf-dev" migrate rollback "$migration_id" --approve
+    "$venv_dir/bin/ws-dev" migrate rollback "$migration_id" --approve
     rollback_status=$?
     if (( rollback_status == 0 )); then
-      printf 'Rolled back migration %s; the WF command was not switched.\n' \
+      printf 'Rolled back migration %s; the ws command was not switched.\n' \
         "$migration_id" >&2
     else
       printf 'Automatic rollback failed for migration %s; inspect it with %s migrate status.\n' \
-        "$migration_id" "$venv_dir/bin/wf-dev" >&2
+        "$migration_id" "$venv_dir/bin/ws-dev" >&2
     fi
   fi
   exit "$status"
@@ -83,11 +83,11 @@ if (( approve == 0 )); then
 fi
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-install_root="${XDG_DATA_HOME:-$HOME/.local/share}/wf-session-manager"
+install_root="${XDG_DATA_HOME:-$HOME/.local/share}/workspace-session-manager"
 venv_dir="$install_root/venv"
 bin_dir="$HOME/.local/bin"
 libexec_dir="$HOME/.local/libexec"
-target="$bin_dir/WF"
+target="$bin_dir/ws"
 classic="$libexec_dir/wf-classic"
 owner_marker="$install_root/classic-owner"
 cutover_lock="$install_root/cutover.lock"
@@ -102,21 +102,21 @@ fi
 if [[ -e "$target" || -L "$target" ]]; then
   current="$target"
 else
-  current="$(command -v WF 2>/dev/null || true)"
+  current="$(command -v ws 2>/dev/null || true)"
 fi
 
 if [[ -z "$current" || ! -e "$current" ]]; then
-  printf '%s\n' 'Cannot preserve classic WF: current command was not found.' >&2
+  printf '%s\n' 'Cannot preserve classic ws: current command was not found.' >&2
   exit 1
 fi
 
 current_resolved="$(readlink -f -- "$current")"
-if [[ "$current_resolved" == "$venv_dir/bin/WF" ]]; then
-  printf '%s\n' 'WF Session Manager is already installed.'
+if [[ "$current_resolved" == "$venv_dir/bin/ws" ]]; then
+  printf '%s\n' 'Workspace Session Manager is already installed.'
   exit 0
 fi
 if [[ ! -f "$current_resolved" || ! -x "$current_resolved" ]]; then
-  printf 'Cannot preserve unsafe or non-executable WF command: %s\n' "$current_resolved" >&2
+  printf 'Cannot preserve unsafe or non-executable ws command: %s\n' "$current_resolved" >&2
   exit 1
 fi
 
@@ -154,40 +154,40 @@ elif ! owner_only_regular_file "$classic" || [[ ! -x "$classic" ]]; then
 fi
 classic_sha256="$(sha256sum -- "$classic" | awk '{print $1}')"
 if [[ "$classic_sha256" != "$current_sha256" ]]; then
-  printf '%s\n' 'Refusing cutover because the preserved executable does not match current WF.' >&2
+  printf '%s\n' 'Refusing cutover because the preserved executable does not match current ws.' >&2
   exit 1
 fi
 
 python3 -m venv "$venv_dir"
 "$venv_dir/bin/python" -m pip install --upgrade pip
 "$venv_dir/bin/python" -m pip install "$project_dir"
-"$venv_dir/bin/wf-dev" doctor
+"$venv_dir/bin/ws-dev" doctor
 
 if [[ -n "$migration_plan" ]]; then
-  validation_json="$("$venv_dir/bin/wf-dev" migrate validate "$migration_plan" --json)"
+  validation_json="$("$venv_dir/bin/ws-dev" migrate validate "$migration_plan" --json)"
   migration_id="$(
     printf '%s\n' "$validation_json" \
       | "$venv_dir/bin/python" -c \
         'import json,sys,uuid; print(uuid.UUID(json.load(sys.stdin)["plan_id"]))'
   )"
   printf 'Validated migration plan: %s\n' "$migration_id"
-  "$venv_dir/bin/wf-dev" migrate apply "$migration_plan" --approve
+  "$venv_dir/bin/ws-dev" migrate apply "$migration_plan" --approve
   migration_applied=1
 fi
 
 legacy_unmanaged="$(
-  "$venv_dir/bin/wf-dev" list --all --json \
+  "$venv_dir/bin/ws-dev" list --all --json \
     | "$venv_dir/bin/python" -c \
       'import json,sys; print(sum(not x["owned"] and x["legacy_metadata"] for x in json.load(sys.stdin)))'
 )"
 if (( legacy_unmanaged > 0 )); then
   printf 'Refusing cutover: %s legacy-managed tmux session(s) remain unadopted.\n' \
     "$legacy_unmanaged" >&2
-  printf '%s\n' 'Generate and review a migration plan with wf-dev migrate preview.' >&2
+  printf '%s\n' 'Generate and review a migration plan with ws-dev migrate preview.' >&2
   exit 1
 fi
 
-backup="$install_root/WF.pre-cutover.$(date +%Y%m%d-%H%M%S)"
+backup="$install_root/ws.pre-cutover.$(date +%Y%m%d-%H%M%S)"
 if [[ -e "$backup" || -L "$backup" ]]; then
   printf 'Refusing to overwrite an existing command backup: %s\n' "$backup" >&2
   exit 1
@@ -202,7 +202,7 @@ umask 077
 } > "$marker_temporary"
 chmod 600 "$marker_temporary"
 mv -- "$marker_temporary" "$owner_marker"
-replace_with_symlink "$venv_dir/bin/WF" "$target"
+replace_with_symlink "$venv_dir/bin/ws" "$target"
 cutover_complete=1
 trap - EXIT
 

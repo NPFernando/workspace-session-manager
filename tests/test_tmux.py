@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from wf_session_manager.errors import TmuxError
-from wf_session_manager.tmux import FIELD_SEPARATOR, TMUX_FORMAT, TmuxBackend
+from workspace_session_manager.errors import TmuxError
+from workspace_session_manager.tmux import FIELD_SEPARATOR, TMUX_FORMAT, TmuxBackend
 
 
 class RecordingRunner:
@@ -74,9 +74,9 @@ def test_no_server_is_an_empty_inventory(message: str) -> None:
 
 
 def test_session_option_uses_exact_pane_target() -> None:
-    runner = RecordingRunner(stdout="wf-session-manager\n")
+    runner = RecordingRunner(stdout="workspace-session-manager\n")
     value = TmuxBackend(runner).get_option("claude-api", "@wf_owner")
-    assert value == "wf-session-manager"
+    assert value == "workspace-session-manager"
     assert runner.calls[0] == (
         "tmux",
         "show-options",
@@ -136,7 +136,7 @@ def test_expected_id_is_used_for_final_tmux_targets(monkeypatch: pytest.MonkeyPa
 
     option_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
     TmuxBackend(option_runner).set_option(
-        "claude-api", "@wf_owner", "wf-session-manager", expected_id="$3"
+        "claude-api", "@wf_owner", "workspace-session-manager", expected_id="$3"
     )
     assert option_runner.calls[-1] == (
         "tmux",
@@ -145,7 +145,7 @@ def test_expected_id_is_used_for_final_tmux_targets(monkeypatch: pytest.MonkeyPa
         "-t",
         "$3:",
         "@wf_owner",
-        "wf-session-manager",
+        "workspace-session-manager",
     )
 
     read_runner = RecordingRunner(stdout=f"{live_session_line()}\n")
@@ -223,7 +223,7 @@ def test_interrupt_restart_and_logging_use_exact_pane_target(tmp_path: Path) -> 
     TmuxBackend(logging_runner).set_logging("claude-api", log_path, expected_id="$3")
     pipe_call = next(call for call in logging_runner.calls if "pipe-pane" in call)
     assert pipe_call[:6] == ("tmux", "pipe-pane", "-o", "-t", "$3:", "--")
-    assert "wf_session_manager.log_sink" in pipe_call[-1]
+    assert "workspace_session_manager.log_sink" in pipe_call[-1]
     assert str(log_path) in pipe_call[-1]
 
 

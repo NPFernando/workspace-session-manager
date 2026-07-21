@@ -2,15 +2,15 @@ from pathlib import Path
 
 import pytest
 
-from wf_session_manager.config import AppConfig, load_config
-from wf_session_manager.errors import ConfigurationError
-from wf_session_manager.paths import AppPaths
+from workspace_session_manager.config import AppConfig, load_config
+from workspace_session_manager.errors import ConfigurationError
+from workspace_session_manager.paths import AppPaths
 
 
 def test_defaults_use_isolated_namespace_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("WF_DEV_ROOT", str(tmp_path))
+    monkeypatch.setenv("WS_DEV_ROOT", str(tmp_path))
     paths = AppPaths.discover()
     config = load_config(paths)
     assert paths.state_dir == tmp_path / "state"

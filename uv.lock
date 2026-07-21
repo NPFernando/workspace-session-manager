@@ -864,7 +864,7 @@ wheels = [
 ]
 
 [[package]]
-name = "wf-session-manager"
+name = "workspace-session-manager"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [

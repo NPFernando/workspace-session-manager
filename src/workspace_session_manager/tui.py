@@ -38,9 +38,9 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from wf_session_manager import __version__
-from wf_session_manager.errors import WFError
-from wf_session_manager.models import (
+from workspace_session_manager import __version__
+from workspace_session_manager.errors import WsError
+from workspace_session_manager.models import (
     AgentState,
     CreateRequest,
     DoctorReport,
@@ -55,7 +55,7 @@ from wf_session_manager.models import (
     Tool,
     normalize_tags,
 )
-from wf_session_manager.service import SessionService, normalized_session_name
+from workspace_session_manager.service import SessionService, normalized_session_name
 
 BindingSpec = Binding | tuple[str, str] | tuple[str, str, str]
 RECENT_WINDOW = timedelta(hours=24)
@@ -602,12 +602,12 @@ class CreateSessionScreen(ModalScreen[CreateFormResult | None]):
         self.set_class(self.size.width < 100, "narrow-form")
         self.set_class(self.size.width < 120 or self.size.height < 35, "compact-form")
         self._touched.update(("tool", "cwd"))
-        log_root = "WF state/logs"
+        log_root = "ws state/logs"
         if self.service:
             try:
                 self.service.paths.logs_dir.relative_to(Path.home())
             except ValueError:
-                log_root = "$WF_STATE/logs"
+                log_root = "$WS_STATE/logs"
             else:
                 log_root = display_path(self.service.paths.logs_dir)
         self.query_one("#logging-hint", Static).update(
@@ -675,7 +675,7 @@ class CreateSessionScreen(ModalScreen[CreateFormResult | None]):
             try:
                 normalized = normalized_session_name(tool, name, automatic_prefix=automatic_prefix)
                 name_error = ""
-            except WFError as error:
+            except WsError as error:
                 normalized = ""
                 name_error = str(error)
             resolved_cwd = cwd.resolve() if cwd.is_dir() else None
@@ -780,7 +780,7 @@ class CreateSessionScreen(ModalScreen[CreateFormResult | None]):
         message = Text()
         changed = entered.strip() != normalized
         if changed:
-            message.append("! Normalized for tmux/WF\n", "#e9b44c")
+            message.append("! Normalized for tmux/ws\n", "#e9b44c")
         message.append(f"Display name  {entered.strip()}\n", "dim")
         message.append(f"+ Available as {normalized}", "#72c78e")
         target = self.query_one("#create-name-status", Static)
@@ -945,7 +945,7 @@ class CreateFailureScreen(ModalScreen[str | None]):
                 classes="confirm-copy",
             )
             yield Static(
-                "WF preserved the validated request. Retry after correcting the environment, "
+                "ws preserved the validated request. Retry after correcting the environment, "
                 "or inspect the failure details.",
                 classes="dialog-context",
             )
@@ -1053,7 +1053,7 @@ class IdentityOrganizationScreen(ModalScreen[OrganizationEditResult | None]):
         requested_name, display_name, project, raw_tags = signature
         try:
             validation = self.service.validate_rename(self.session.name, requested_name.strip())
-        except WFError as error:
+        except WsError as error:
             normalized = ""
             name_error = str(error)
         else:
@@ -1081,7 +1081,7 @@ class IdentityOrganizationScreen(ModalScreen[OrganizationEditResult | None]):
             name_status.update("+ Session ID unchanged")
             name_status.add_class("valid")
         else:
-            name_status.update(f"! tmux/WF session will be renamed to {normalized}")
+            name_status.update(f"! tmux/ws session will be renamed to {normalized}")
             name_status.add_class("warning")
 
         tags_status = self.query_one("#identity-tags-status", Static)
@@ -1327,7 +1327,7 @@ def session_manage_actions(session: SessionView) -> tuple[ManageAction, ...]:
             "stop-session",
             "Danger",
             "Stop tmux session",
-            "Stop tmux while retaining WF metadata and sanitized logs.",
+            "Stop tmux while retaining ws metadata and sanitized logs.",
             "t",
             enabled=not stopped,
             disabled_reason=stopped_reason if stopped else "",
@@ -1336,8 +1336,8 @@ def session_manage_actions(session: SessionView) -> tuple[ManageAction, ...]:
         ManageAction(
             "remove-metadata",
             "Danger",
-            "Remove WF metadata",
-            "Leave tmux running but remove this session from managed WF views.",
+            "Remove ws metadata",
+            "Leave tmux running but remove this session from managed ws views.",
             "m",
             destructive=True,
         ),
@@ -1947,7 +1947,7 @@ class DiagnosticsScreen(ModalScreen[None]):
         started = perf_counter()
         try:
             report = self.service.doctor()
-        except (OSError, WFError) as error:
+        except (OSError, WsError) as error:
             report = DoctorReport(
                 checks=[
                     HealthCheck(
@@ -1987,7 +1987,7 @@ class DiagnosticsScreen(ModalScreen[None]):
         elif event.button.id == "diagnostics-export":
             try:
                 destination = self.service.export_doctor_report(self.report)
-            except (OSError, WFError) as error:
+            except (OSError, WsError) as error:
                 self.notify(str(error), title="Export failed", severity="error")
             else:
                 self.notify(display_path(destination), title="Privacy-safe report exported")
@@ -2010,7 +2010,7 @@ class OnboardingScreen(ModalScreen[str | None]):
         ),
         (
             "2 of 3 - Status",
-            "WF keeps tmux runtime, task progress, agent state, and input requirements separate.",
+            "ws keeps tmux runtime, task progress, agent state, and input requirements separate.",
         ),
         (
             "3 of 3 - Safety",
@@ -2039,7 +2039,7 @@ class OnboardingScreen(ModalScreen[str | None]):
         self.query_one("#onboarding-title", Label).update(title)
         self.query_one("#onboarding-copy", Static).update(copy)
         self.query_one("#onboarding-next", Button).label = (
-            "Start using WF" if self.step == len(self.STEPS) - 1 else "Next"
+            "Start using ws" if self.step == len(self.STEPS) - 1 else "Next"
         )
 
     @on(Button.Pressed)
@@ -2069,7 +2069,7 @@ def advanced_document(session: SessionView) -> Text:
             ("Task state", session.task_state.value),
             ("Input state", session.input_state.value),
             ("Logging", "enabled" if session.logging_enabled else "disabled"),
-            ("Ownership", "wf-session-manager" if session.owned else "unmanaged"),
+            ("Ownership", "workspace-session-manager" if session.owned else "unmanaged"),
         ]
     )
 
@@ -2148,7 +2148,7 @@ class LogScreen(Screen[str | None]):
         self.query_one("#log-output", TextArea).cursor_blink = False
         self._set_layout_classes(self.size.width, self.size.height)
         self._render_workspace()
-        if isinstance(self.app, WFApp):
+        if isinstance(self.app, WsApp):
             self.app._suspend_dashboard_refresh()
         self._refresh_timer = self.set_interval(
             self.service.config.refresh_interval,
@@ -2162,7 +2162,7 @@ class LogScreen(Screen[str | None]):
         if self._refresh_timer is not None:
             self._refresh_timer.stop()
             self._refresh_timer = None
-        if isinstance(self.app, WFApp):
+        if isinstance(self.app, WsApp):
             self.app._resume_dashboard_refresh()
 
     def on_resize(self, event: events.Resize) -> None:
@@ -2175,7 +2175,7 @@ class LogScreen(Screen[str | None]):
         self.set_class(width < 80 or height < 24, "log-too-small")
         if width < 80 or height < 24:
             self.query_one("#log-small-terminal", Static).update(
-                "WF Logs requires a terminal of at least 80x24.\n\n"
+                "ws Logs requires a terminal of at least 80x24.\n\n"
                 f"Current: {width}x{height}\n\nEsc  Back"
             )
 
@@ -2208,7 +2208,7 @@ class LogScreen(Screen[str | None]):
     def _load_output(self, generation: int, source: OutputSource | None) -> None:
         try:
             details = self.service.logs(self.session.name, source=source)
-        except (OSError, WFError) as error:
+        except (OSError, WsError) as error:
             self.app.call_from_thread(self._finish_refresh, generation, None, str(error))
             return
         self.app.call_from_thread(self._finish_refresh, generation, details, "")
@@ -2302,7 +2302,7 @@ class LogScreen(Screen[str | None]):
         self.set_class(bool(self.error_message), "has-log-error")
         notice = detect_activity(self.session, self.rendered_output)
         self.set_class(notice.warning, "has-log-alert")
-        header = Text("WF  Logs  ", "bold")
+        header = Text("ws  Logs  ", "bold")
         header.append(TOOL_LABELS[self.session.tool].upper(), TOOL_STYLES[self.session.tool])
         header.append(f"  {self.session.name}", "bold")
         self.query_one("#log-header", Static).update(header)
@@ -2509,7 +2509,7 @@ class LogScreen(Screen[str | None]):
             return
         try:
             current = self.service.get(self.session.name)
-        except WFError as error:
+        except WsError as error:
             self.notify(str(error), severity="warning")
             return
         if current.session_id != self.session.session_id:
@@ -2556,12 +2556,12 @@ class DashboardModeContext:
     focused_id: str | None
 
 
-class WFCommandProvider(Provider):
+class WsCommandProvider(Provider):
     """Session-aware commands for Textual's built-in fuzzy palette."""
 
     def _commands(self) -> list[tuple[str, str, Callable[[], object]]]:
         app = self.app
-        if not isinstance(app, WFApp):
+        if not isinstance(app, WsApp):
             return []
         selected = app._selected()
 
@@ -2669,13 +2669,13 @@ class WFCommandProvider(Provider):
                 yield Hit(score, matcher.highlight(display), command, help=help_text)
 
 
-class WFApp(App[str | None]):
+class WsApp(App[str | None]):
     """Operational session dashboard; it returns the selected attach target."""
 
     CSS_PATH = "wf.tcss"
-    TITLE = "WF - Workflow Session Manager"
+    TITLE = "Workspace Session Manager"
     ENABLE_COMMAND_PALETTE = True
-    COMMANDS: ClassVar[set[type[Provider] | Callable[[], type[Provider]]]] = {WFCommandProvider}
+    COMMANDS: ClassVar[set[type[Provider] | Callable[[], type[Provider]]]] = {WsCommandProvider}
     BINDINGS: ClassVar[list[BindingSpec]] = [
         Binding("q", "quit", "Quit"),
         Binding("enter", "open", "Open"),
@@ -2745,13 +2745,13 @@ class WFApp(App[str | None]):
         self._onboarding_checked = False
         self.default_cwd = default_cwd or Path.cwd()
         encoding = locale.getpreferredencoding(False).lower()
-        self.ascii_only = os.environ.get("WF_ASCII") == "1" or "utf" not in encoding
+        self.ascii_only = os.environ.get("WS_ASCII") == "1" or "utf" not in encoding
         no_color = bool(os.environ.get("NO_COLOR"))
         self.monochrome = no_color if monochrome is None else monochrome
         self.ui_theme = theme_mode or ("monochrome" if self.monochrome else "dark")
         self.hostname = hostname or socket.gethostname()
         configured_motion: str = self.service.config.interface.animations
-        env_motion = os.environ.get("WF_MOTION", "").strip().lower()
+        env_motion = os.environ.get("WS_MOTION", "").strip().lower()
         if env_motion in {"off", "subtle", "full"}:
             configured_motion = env_motion
         self.motion = (
@@ -3019,9 +3019,9 @@ class WFApp(App[str | None]):
         if width < 80 or height < 24:
             self.add_class("too-small")
             self.query_one("#small-terminal", Static).update(
-                "The terminal is too small for the WF interface.\n\n"
+                "The terminal is too small for the ws interface.\n\n"
                 f"Minimum: 80x24\nCurrent: {width}x{height}\n\n"
-                "Use:\nWF list\nWF --classic"
+                "Use:\nws list\nws --classic"
             )
         elif width >= 140:
             self.add_class("very-wide", "wide")
@@ -3050,7 +3050,7 @@ class WFApp(App[str | None]):
         self._restore_dashboard_mode()
         try:
             self.service.mark_onboarding_seen()
-        except (OSError, WFError) as error:
+        except (OSError, WsError) as error:
             self.notify(str(error), title="Unable to save onboarding state", severity="warning")
         if action == "create":
             self.call_after_refresh(self.action_create)
@@ -3176,7 +3176,7 @@ class WFApp(App[str | None]):
                     preview_lines=ATTENTION_PREVIEW_LINES,
                     preview_bytes=ATTENTION_PREVIEW_BYTES,
                 )
-            except (OSError, ValueError, WFError) as error:
+            except (OSError, ValueError, WsError) as error:
                 results.append(
                     AttentionScanResult(session.name, session.session_id, error=str(error))
                 )
@@ -3272,7 +3272,7 @@ class WFApp(App[str | None]):
         self._render_header()
         try:
             sessions = self.service.list_sessions()
-        except WFError as error:
+        except WsError as error:
             self.tmux_connected = False
             self.refresh_error = str(error)
             self.remove_class("refreshing")
@@ -3588,7 +3588,7 @@ class WFApp(App[str | None]):
             updated = "Updated now" if age < 1 else f"Updated {age}s ago"
             connection = f"{connection}{separator}{updated}"
         text = Text()
-        text.append("WF", "bold #72c78e")
+        text.append("ws", "bold #72c78e")
         selected = self._selected()
         if self.narrow_detail_open and selected is not None:
             text.append("  Session  ", "dim")
@@ -3601,16 +3601,16 @@ class WFApp(App[str | None]):
             if warning:
                 text.append("  !", "bold yellow")
         elif self.has_class("very-wide"):
-            text.append(f"  Workflow Session Manager  v{__version__}")
+            text.append(f"  Workspace Session Manager  v{__version__}")
             text.append(f"    {counts}{filter_text}", "dim")
             text.append(f"    {truncate(self.hostname, 22, ascii_only=self.ascii_only)}")
             text.append(f"{separator}{connection}", "green" if self.tmux_connected else "red")
         elif self.has_class("wide"):
-            text.append("  Workflow Session Manager")
+            text.append("  Workspace Session Manager")
             text.append(f"    {counts}{filter_text}", "dim")
             text.append(f"{separator}{connection}", "green" if self.tmux_connected else "red")
         elif self.has_class("medium"):
-            text.append("  Workflow Session Manager")
+            text.append("  Workspace Session Manager")
             text.append(f"\n{counts}{filter_text}", "dim")
         else:
             text.append(f"  {counts}{filter_text}", "dim")
@@ -3741,7 +3741,7 @@ class WFApp(App[str | None]):
         old_output_scroll = output_scroller.scroll_offset.y
         try:
             details = self.service.inspect(name)
-        except WFError as error:
+        except WsError as error:
             self.query_one("#overview", Static).update(str(error))
             return
         session = details.session
@@ -3791,7 +3791,7 @@ class WFApp(App[str | None]):
             ("Task", humanize_task(session.note)),
             ("Project", session.project),
             ("Directory", display_path(session.cwd)),
-            ("Ownership", "Managed by WF" if session.owned else "Read only"),
+            ("Ownership", "Managed by ws" if session.owned else "Read only"),
             ("Tags", ", ".join(session.tags)),
         ]
         if session.display_name and session.display_name != session.name:
@@ -4069,7 +4069,7 @@ class WFApp(App[str | None]):
     def action_resume(self) -> None:
         try:
             target = self.service.resume_target()
-        except WFError as error:
+        except WsError as error:
             self.notify(str(error), severity="warning")
             return
         self.exit(target.name)
@@ -4145,7 +4145,7 @@ class WFApp(App[str | None]):
     def _attempt_create(self, result: CreateFormResult) -> None:
         try:
             session = self.service.create(result.request)
-        except WFError as error:
+        except WsError as error:
             self._failed_create_result = result
             try:
                 session_name = normalized_session_name(
@@ -4154,7 +4154,7 @@ class WFApp(App[str | None]):
                     automatic_prefix=result.request.automatic_prefix,
                 )
                 metadata_exists = self.service.store.load(session_name) is not None
-            except WFError:
+            except WsError:
                 session_name = result.request.name
                 metadata_exists = False
             self._set_interaction_mode(InteractionMode.CONFIRMATION)
@@ -4195,7 +4195,7 @@ class WFApp(App[str | None]):
                 )
                 self.service.remove_metadata(session_name)
                 self._notify_success(f"Metadata removed: {session_name}")
-            except WFError as error:
+            except WsError as error:
                 self.notify(str(error), title="Metadata removal failed", severity="error")
         self._failed_create_result = None
         if action == "details" and result is not None:
@@ -4245,7 +4245,7 @@ class WFApp(App[str | None]):
                 tags=result.tags,
                 project=result.project,
             )
-        except WFError as error:
+        except WsError as error:
             self.notify(str(error), title="Save failed", severity="error")
             if manage_state is None:
                 self._restore_dashboard_mode()
@@ -4284,7 +4284,7 @@ class WFApp(App[str | None]):
             return
         try:
             updated = self.service.update_note(session.name, note)
-        except WFError as error:
+        except WsError as error:
             self.notify(str(error), title="Save failed", severity="error")
             if manage_state is None:
                 self._restore_dashboard_mode()
@@ -4313,7 +4313,7 @@ class WFApp(App[str | None]):
                 state=result.task_state,
                 input_state=result.input_state,
             )
-        except WFError as error:
+        except WsError as error:
             self.notify(str(error), title="Status update failed", severity="error")
             self._return_to_manage(session, manage_state)
             return
@@ -4343,7 +4343,7 @@ class WFApp(App[str | None]):
     def _toggle_pin(self, session: SessionView) -> None:
         try:
             updated = self.service.organize(session.name, pinned=not session.pinned)
-        except WFError as error:
+        except WsError as error:
             self.notify(str(error), severity="warning")
             return
         self.selected_name = updated.name
@@ -4412,7 +4412,7 @@ class WFApp(App[str | None]):
         elif action == "pin":
             try:
                 updated = self.service.organize(session.name, pinned=not session.pinned)
-            except WFError as error:
+            except WsError as error:
                 self.notify(str(error), severity="warning")
                 self._return_to_manage(session, state)
                 return
@@ -4427,7 +4427,7 @@ class WFApp(App[str | None]):
         elif action == "logging":
             try:
                 updated = self.service.set_logging(session.name, not session.logging_enabled)
-            except (WFError, OSError) as error:
+            except (WsError, OSError) as error:
                 self.notify(str(error), title="Logging update failed", severity="error")
                 self._return_to_manage(session, state)
                 return
@@ -4523,17 +4523,17 @@ class WFApp(App[str | None]):
                 ),
                 "stop-command": (
                     "Stop Command",
-                    "WF will send Ctrl+C to the active pane. The tmux session remains available.",
+                    "ws will send Ctrl+C to the active pane. The tmux session remains available.",
                     "Stop Command",
                 ),
                 "stop-session": (
                     "Stop tmux Session",
-                    "The tmux session will stop. WF metadata and sanitized logs are retained.",
+                    "The tmux session will stop. ws metadata and sanitized logs are retained.",
                     "Stop Session",
                 ),
                 "remove-metadata": (
-                    "Remove WF Metadata",
-                    "The tmux session remains running but disappears from managed WF views.",
+                    "Remove ws Metadata",
+                    "The tmux session remains running but disappears from managed ws views.",
                     "Remove Metadata",
                 ),
                 "delete-logs": (
@@ -4588,13 +4588,13 @@ class WFApp(App[str | None]):
                 self.service.remove_metadata(name)
                 self.selected_name = None
                 self.selected_session_id = None
-                message = "WF metadata removed"
+                message = "ws metadata removed"
             elif action == "delete-logs":
                 self.service.delete_logs(name)
                 message = "Sanitized logs deleted"
             else:
                 return
-        except (WFError, OSError) as error:
+        except (WsError, OSError) as error:
             self.notify(str(error), title=f"{display_state(action)} failed", severity="error")
             return
         self._notify_success(message)
@@ -4609,7 +4609,7 @@ class WFApp(App[str | None]):
     def _delete_session(self, session: SessionView) -> None:
         try:
             self.service.delete(session.name)
-        except (WFError, OSError) as error:
+        except (WsError, OSError) as error:
             self.notify(str(error), title="Delete failed", severity="error")
             return
         self.selected_name = None

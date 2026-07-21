@@ -15,17 +15,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from wf_session_manager.config import AppConfig
-from wf_session_manager.errors import (
+from workspace_session_manager.config import AppConfig
+from workspace_session_manager.errors import (
     OwnershipError,
     SessionExistsError,
     SessionNotFoundError,
     StateError,
     ToolUnavailableError,
-    WFError,
+    WsError,
 )
-from wf_session_manager.legacy import LegacyMetadataReader
-from wf_session_manager.models import (
+from workspace_session_manager.legacy import LegacyMetadataReader
+from workspace_session_manager.models import (
     CreateRequest,
     DoctorReport,
     HealthCheck,
@@ -42,9 +42,9 @@ from wf_session_manager.models import (
     normalize_task_state,
     utc_now,
 )
-from wf_session_manager.paths import AppPaths
-from wf_session_manager.security import BoundedOutput, bounded_output, redact_text
-from wf_session_manager.store import MetadataStore
+from workspace_session_manager.paths import AppPaths
+from workspace_session_manager.security import BoundedOutput, bounded_output, redact_text
+from workspace_session_manager.store import MetadataStore
 
 
 class SessionBackend(Protocol):
@@ -139,7 +139,7 @@ def slugify_name(value: str) -> str:
 def normalized_session_name(tool: Tool, requested: str, *, automatic_prefix: bool = True) -> str:
     purpose = slugify_name(requested)
     if not purpose:
-        raise WFError("session name must contain a letter or digit")
+        raise WsError("session name must contain a letter or digit")
     if not automatic_prefix or tool is Tool.SHELL:
         return purpose
     if purpose == tool.value or purpose.startswith(f"{tool.value}-"):
@@ -226,7 +226,7 @@ class SessionService:
         owned = (
             record is not None
             and record.tmux_session_id == session.session_id
-            and session.wf_owner == "wf-session-manager"
+            and session.wf_owner == "workspace-session-manager"
         )
         legacy = None if owned else self.legacy.read(session.name)
         return SessionView(
@@ -462,7 +462,7 @@ class SessionService:
             normalized = normalized_session_name(
                 tool, requested_name, automatic_prefix=automatic_prefix
             )
-        except WFError as error:
+        except WsError as error:
             name_error = str(error)
         if len(requested_name.strip()) > 200:
             name_error = "display name must be 200 characters or fewer"
@@ -498,7 +498,7 @@ class SessionService:
         name_error = ""
         try:
             normalized = normalized_session_name(record.tool, requested_name)
-        except WFError as error:
+        except WsError as error:
             name_error = str(error)
         if (
             normalized
@@ -521,7 +521,7 @@ class SessionService:
                 raise SessionExistsError(message)
             if message.startswith("command not found") or "disabled in configuration" in message:
                 raise ToolUnavailableError(message)
-            raise WFError(message)
+            raise WsError(message)
         name = validation.normalized_name
         cwd = validation.cwd
         profile = self.config.tools[request.tool]
@@ -662,7 +662,7 @@ class SessionService:
         record = self.store.load(name)
         if record is None:
             raise OwnershipError(
-                f"refusing to modify {name}: it was not created by this WF installation"
+                f"refusing to modify {name}: it was not created by this ws installation"
             )
         try:
             session = self.backend.get_session(name)
@@ -671,9 +671,9 @@ class SessionService:
                 raise
             return record
         marker = self.backend.get_option(name, "@wf_owner", expected_id=session.session_id)
-        if record.tmux_session_id != session.session_id or marker != "wf-session-manager":
+        if record.tmux_session_id != session.session_id or marker != "workspace-session-manager":
             raise OwnershipError(
-                f"refusing to modify {name}: it was not created by this WF installation"
+                f"refusing to modify {name}: it was not created by this ws installation"
             )
         return record
 
@@ -703,7 +703,7 @@ class SessionService:
 
     def update_note(self, name: str, note: str) -> SessionView:
         if len(note) > 2000:
-            raise WFError("note cannot exceed 2000 characters")
+            raise WsError("note cannot exceed 2000 characters")
         record = self._managed_record(name)
         self.store.save(record.model_copy(update={"note": note, "updated_at": utc_now()}))
         return self.get(name)
@@ -868,7 +868,7 @@ class SessionService:
                 self.backend.set_option(
                     name,
                     "@wf_owner",
-                    "wf-session-manager",
+                    "workspace-session-manager",
                     expected_id=record.tmux_session_id,
                 )
                 if was_logging:
@@ -885,7 +885,7 @@ class SessionService:
             checks.append(
                 HealthCheck(name="tmux", status=HealthStatus.PASS, detail=self.backend.version())
             )
-        except WFError as error:
+        except WsError as error:
             checks.append(
                 HealthCheck(
                     name="tmux",
@@ -969,7 +969,7 @@ class SessionService:
         destination = (
             self.paths.diagnostics_dir / f"wf-diagnostics-{utc_now():%Y%m%d-%H%M%S-%f}.txt"
         )
-        lines = ["WF privacy-safe diagnostics", f"Generated: {utc_now().isoformat()}", ""]
+        lines = ["ws privacy-safe diagnostics", f"Generated: {utc_now().isoformat()}", ""]
         for check in report.checks:
             detail = redact_text(check.detail)
             lines.append(f"{check.status.value.upper():<4} {check.name}: {detail}")

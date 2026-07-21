@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from wf_session_manager.errors import StateError
-from wf_session_manager.models import SessionMetadata, Tool
-from wf_session_manager.paths import AppPaths
-from wf_session_manager.store import MetadataStore
+from workspace_session_manager.errors import StateError
+from workspace_session_manager.models import SessionMetadata, Tool
+from workspace_session_manager.paths import AppPaths
+from workspace_session_manager.store import MetadataStore
 
 
 def make_record(name: str = "claude-test") -> SessionMetadata:

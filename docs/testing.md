@@ -12,7 +12,7 @@ They do not access the live tmux server or operational metadata.
 ## Real tmux
 
 ```bash
-WF_RUN_TMUX_INTEGRATION=1 pytest -m integration -q --no-cov
+WS_RUN_TMUX_INTEGRATION=1 pytest -m integration -q --no-cov
 ```
 
 The integration tests use `tmux -S` with a socket inside pytest's temporary directory. Cleanup
@@ -36,13 +36,13 @@ never connect to the live tmux server or production metadata.
 
 ## Manual TUI matrix
 
-Run `uv run textual run --dev wf_session_manager.tui:WFApp` only with a suitable service fixture, or
-run `uv run wf-dev` against the managed inventory. Use `wf-dev list --all` for read-only diagnostics.
+Run `uv run textual run --dev workspace_session_manager.tui:WsApp` only with a suitable service fixture, or
+run `uv run ws-dev` against the managed inventory. Use `ws-dev list --all` for read-only diagnostics.
 
 Check at least:
 
 - `80x24`, `100x30`, `120x35`, and `160x45`
-- SSH disconnect and reconnect after creating a disposable `wf-dev` session
+- SSH disconnect and reconnect after creating a disposable `ws-dev` session
 - inside-tmux switching and outside-tmux attachment
 - missing Claude, Codex, and Hermes commands
 - exact-name delete mismatch and cancellation
@@ -74,11 +74,11 @@ Check at least:
   narrow detail state, and inspector/output positions
 - slow diagnostics progress plus PASS/WARN/FAIL/INFO completion totals
 - Cancel-focused confirmation for every protected Manage operation
-- dark, light, monochrome, `NO_COLOR`, and `WF_ASCII=1` rendering
+- dark, light, monochrome, `NO_COLOR`, and `WS_ASCII=1` rendering
 - output and session-list scroll position preservation across background refresh
 - Live/Saved log switching, source-local selection restoration, follow/pause, manual retry, and find
 - log-read failure recovery, stale worker rejection, exact-ID attach blocking, and timer cleanup
 - narrow list/detail transitions, inspector scrolling, contextual Help, and stopped-session Manage
 - narrow detail viewport restoration across Edit, Task, Logs, Manage, Help, refresh, and reopen
 - safe narrow-detail exit after filter exclusion, identity replacement, session loss, or wide resize
-- `--no-animation`, `WF_MOTION=off`, reduced motion, and focus restoration after modal cancellation
+- `--no-animation`, `WS_MOTION=off`, reduced motion, and focus restoration after modal cancellation

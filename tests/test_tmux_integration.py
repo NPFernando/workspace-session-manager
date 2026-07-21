@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from wf_session_manager.legacy import LegacyMetadataReader
-from wf_session_manager.migration import MigrationManager
-from wf_session_manager.paths import AppPaths
-from wf_session_manager.store import MetadataStore
-from wf_session_manager.tmux import TmuxBackend
+from workspace_session_manager.legacy import LegacyMetadataReader
+from workspace_session_manager.migration import MigrationManager
+from workspace_session_manager.paths import AppPaths
+from workspace_session_manager.store import MetadataStore
+from workspace_session_manager.tmux import TmuxBackend
 
-RUN_INTEGRATION = os.environ.get("WF_RUN_TMUX_INTEGRATION") == "1"
+RUN_INTEGRATION = os.environ.get("WS_RUN_TMUX_INTEGRATION") == "1"
 
 
 def isolated_backend(tmp_path: Path) -> TmuxBackend:
@@ -21,7 +21,7 @@ def isolated_backend(tmp_path: Path) -> TmuxBackend:
 @pytest.mark.integration
 @pytest.mark.skipif(
     not RUN_INTEGRATION,
-    reason="set WF_RUN_TMUX_INTEGRATION=1 to use a disposable isolated tmux socket",
+    reason="set WS_RUN_TMUX_INTEGRATION=1 to use a disposable isolated tmux socket",
 )
 def test_real_tmux_create_capture_and_guarded_delete(tmp_path: Path) -> None:
     backend = isolated_backend(tmp_path)
@@ -37,7 +37,7 @@ def test_real_tmux_create_capture_and_guarded_delete(tmp_path: Path) -> None:
         assert backend.get_session(name).session_id == created.session_id
         assert (
             backend.get_option(name, "@wf_owner", expected_id=created.session_id)
-            == "wf-session-manager"
+            == "workspace-session-manager"
         )
         backend.capture_pane(name, 10, expected_id=created.session_id)
     finally:
@@ -50,7 +50,7 @@ def test_real_tmux_create_capture_and_guarded_delete(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.skipif(
     not RUN_INTEGRATION,
-    reason="set WF_RUN_TMUX_INTEGRATION=1 to use a disposable isolated tmux socket",
+    reason="set WS_RUN_TMUX_INTEGRATION=1 to use a disposable isolated tmux socket",
 )
 def test_real_tmux_exact_id_adoption_and_rollback(tmp_path: Path) -> None:
     backend = isolated_backend(tmp_path)

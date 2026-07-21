@@ -2,10 +2,10 @@
 
 ## Boundaries
 
-WF separates five concerns:
+ws separates five concerns:
 
 1. `TmuxBackend` performs small, exact-target tmux operations using subprocess argument arrays.
-2. `MetadataStore` persists validated WF-owned JSON records with locking and atomic replacement.
+2. `MetadataStore` persists validated ws-owned JSON records with locking and atomic replacement.
 3. `SessionService` applies ownership and lifecycle policy.
 4. `MigrationManager` previews, snapshots, adopts, journals, and rolls back legacy sessions.
 5. Typer and Textual are presentation layers over the same service.
@@ -40,12 +40,12 @@ duplicated into a second dashboard group.
 
 ## Session creation
 
-WF validates the name, directory, tool profile, and executable before calling tmux. tmux starts an
-interactive login shell in detached mode. For agent sessions, WF sends a shell-quoted command to that
+ws validates the name, directory, tool profile, and executable before calling tmux. tmux starts an
+interactive login shell in detached mode. For agent sessions, ws sends a shell-quoted command to that
 new shell. The shell remains after the agent exits, preserving diagnostics and a useful workspace.
 
-After creation, WF writes a tmux user option and an owner-only metadata record. If tmux setup or the
-metadata write fails, WF removes only the session it just created, after checking its tmux ID.
+After creation, ws writes a tmux user option and an owner-only metadata record. If tmux setup or the
+metadata write fails, ws removes only the session it just created, after checking its tmux ID.
 
 ## Ownership
 
@@ -53,14 +53,14 @@ A session mutation requires all of the following:
 
 - a live tmux session with the exact requested name;
 - a valid JSON record in the new XDG namespace;
-- `owner = "wf-session-manager"` in that validated record; and
+- `owner = "workspace-session-manager"` in that validated record; and
 - an exact match between the record's tmux ID and the live tmux ID; and
-- `@wf_owner = "wf-session-manager"` on the live tmux session.
+- `@wf_owner = "workspace-session-manager"` on the live tmux session.
 
 This protects legacy sessions, manually created sessions, stale metadata, and names reused after a
 session exits.
 
-After validation, WF carries the expected tmux ID into the backend operation and targets `$session_id`
+After validation, ws carries the expected tmux ID into the backend operation and targets `$session_id`
 for attach, pane capture, rename, option changes, logging, restart, stop, and deletion. It does not
 validate an ID and then return to the reusable name for the final command.
 
@@ -82,7 +82,7 @@ hidden by the original installer error. A separate owner-only, nonblocking `floc
 installer transaction so preservation, environment installation, adoption, and command switching
 cannot race another cutover invocation.
 
-Install and command rollback create a private temporary symlink beside `~/.local/bin/WF` and use a
+Install and command rollback create a private temporary symlink beside `~/.local/bin/ws` and use a
 same-filesystem rename for the final replacement. The old command therefore remains available until
 the new link is complete. Timestamped pre-cutover backups use no-replace semantics; a collision aborts
 and enters the same adoption-recovery path.
@@ -99,11 +99,11 @@ written as schema v2 only when it is created or explicitly edited.
 
 Runtime state is read from tmux. Attached-client count distinguishes attached and detached sessions;
 dead-pane status distinguishes stopped and failed sessions. Session activity timestamps come from
-tmux and are combined conservatively with WF's last-attach timestamp.
+tmux and are combined conservatively with ws's last-attach timestamp.
 
 ## Attach behavior
 
-Outside tmux, WF runs `tmux attach-session`. Inside tmux, it runs `tmux switch-client`. tmux owns the
+Outside tmux, ws runs `tmux attach-session`. Inside tmux, it runs `tmux switch-client`. tmux owns the
 long-running process, so closing SSH does not terminate the session.
 
 ## Output and logging
@@ -111,7 +111,7 @@ long-running process, so closing SSH does not terminate the session.
 Pane previews are captured on demand. ANSI, OSC, DCS, clipboard, title, and control sequences are
 stripped; common token/password forms are redacted; local home paths are shortened; and output is
 bounded by both lines and UTF-8 bytes after sanitization. Optional persistent logging uses tmux
-`pipe-pane` with an argument-array command that invokes WF's sanitizer and writes owner-only rotating
+`pipe-pane` with an argument-array command that invokes ws's sanitizer and writes owner-only rotating
 files. Logging state is a tmux option and is never enabled for an unmanaged session.
 
 The Logs workspace makes its source explicit. Live reads capture the exact verified tmux session ID;
@@ -141,4 +141,4 @@ delayed, and remains eligible for retry.
 
 Startup establishes a complete alert baseline without notifications. Later scans aggregate newly
 discovered warnings into one notification per batch. Pane-derived alerts and scan timestamps remain
-process-local; WF does not infer or persist task/input metadata from output.
+process-local; ws does not infer or persist task/input metadata from output.

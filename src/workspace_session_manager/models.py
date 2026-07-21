@@ -145,12 +145,12 @@ class TmuxSession(BaseModel):
 
 
 class SessionMetadata(BaseModel):
-    """WF-owned state. A tmux ID prevents accidental adoption after name reuse."""
+    """ws-owned state. A tmux ID prevents accidental adoption after name reuse."""
 
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[2] = 2
     record_id: UUID = Field(default_factory=uuid4)
-    owner: Literal["wf-session-manager"] = "wf-session-manager"
+    owner: Literal["workspace-session-manager"] = "workspace-session-manager"
     tmux_session_id: str
     name: str
     display_name: Annotated[str, Field(max_length=200)] = ""

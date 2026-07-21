@@ -14,20 +14,20 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from wf_session_manager import __version__
-from wf_session_manager.config import AppConfig, load_config
-from wf_session_manager.errors import WFError
-from wf_session_manager.legacy import LegacyMetadataReader
-from wf_session_manager.migration import MigrationManager, MigrationPlan
-from wf_session_manager.models import CreateRequest, InputState, TaskState, Tool
-from wf_session_manager.paths import AppPaths
-from wf_session_manager.service import SessionService
-from wf_session_manager.store import MetadataStore
-from wf_session_manager.tmux import TmuxBackend
-from wf_session_manager.tui import WFApp
+from workspace_session_manager import __version__
+from workspace_session_manager.config import AppConfig, load_config
+from workspace_session_manager.errors import WsError
+from workspace_session_manager.legacy import LegacyMetadataReader
+from workspace_session_manager.migration import MigrationManager, MigrationPlan
+from workspace_session_manager.models import CreateRequest, InputState, TaskState, Tool
+from workspace_session_manager.paths import AppPaths
+from workspace_session_manager.service import SessionService
+from workspace_session_manager.store import MetadataStore
+from workspace_session_manager.tmux import TmuxBackend
+from workspace_session_manager.tui import WsApp
 
 app = typer.Typer(
-    name="WF",
+    name="ws",
     help="Manage persistent AI and shell sessions with tmux.",
     no_args_is_help=False,
     invoke_without_command=True,
@@ -70,7 +70,7 @@ def build_runtime(config_path: Path | None = None) -> Runtime:
 def runtime_from_context(context: typer.Context) -> Runtime:
     runtime = context.obj
     if not isinstance(runtime, Runtime):
-        raise RuntimeError("WF runtime was not initialized")
+        raise RuntimeError("ws runtime was not initialized")
     return runtime
 
 
@@ -85,23 +85,23 @@ def run_classic() -> None:
     try:
         details = classic.stat(follow_symlinks=False)
     except OSError as error:
-        raise WFError(f"classic launcher is unavailable: {classic}") from error
+        raise WsError(f"classic launcher is unavailable: {classic}") from error
     if (
         not stat.S_ISREG(details.st_mode)
         or details.st_uid != os.getuid()
         or details.st_mode & 0o077
         or not os.access(classic, os.X_OK)
     ):
-        raise WFError(f"refusing unsafe classic launcher: {classic}")
+        raise WsError(f"refusing unsafe classic launcher: {classic}")
     os.execv(classic, [str(classic)])  # noqa: S606 - validated owner-only executable
 
 
 def run_tui(runtime: Runtime, *, no_animation: bool = False) -> None:
     try:
-        result = WFApp(runtime.service(), no_animation=no_animation).run()
+        result = WsApp(runtime.service(), no_animation=no_animation).run()
         if result:
             runtime.service().attach(result)
-    except WFError as error:
+    except WsError as error:
         abort(error)
 
 
@@ -110,7 +110,7 @@ def root(
     context: typer.Context,
     version: Annotated[
         bool,
-        typer.Option("--version", "-V", help="Show the WF version."),
+        typer.Option("--version", "-V", help="Show the ws version."),
     ] = False,
     config: Annotated[
         Path | None,
@@ -129,15 +129,15 @@ def root(
     if classic:
         try:
             run_classic()
-        except WFError as error:
+        except WsError as error:
             abort(error)
     try:
         runtime = build_runtime(config)
-    except WFError as error:
+    except WsError as error:
         abort(error)
     context.obj = runtime
     if version:
-        typer.echo(f"WF {__version__}")
+        typer.echo(f"ws {__version__}")
         raise typer.Exit()
     if context.invoked_subcommand is None:
         run_tui(runtime, no_animation=no_animation)
@@ -159,7 +159,7 @@ def list_command(
             .service()
             .list_sessions(include_unmanaged=include_unmanaged)
         )
-    except WFError as error:
+    except WsError as error:
         abort(error)
     if as_json:
         typer.echo(json.dumps([item.model_dump(mode="json") for item in sessions], indent=2))
@@ -194,7 +194,7 @@ def inspect(
     """Show metadata and a sanitized pane preview."""
     try:
         details = runtime_from_context(context).service().inspect(name)
-    except WFError as error:
+    except WsError as error:
         abort(error)
     if as_json:
         typer.echo(details.model_dump_json(indent=2))
@@ -228,7 +228,7 @@ def create(
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     attach: Annotated[bool, typer.Option("--attach")] = False,
 ) -> None:
-    """Create a detached, persistent WF-owned session."""
+    """Create a detached, persistent ws-owned session."""
     request = CreateRequest(
         name=name,
         tool=tool,
@@ -241,14 +241,14 @@ def create(
     service = runtime_from_context(context).service()
     try:
         session = service.create(request, dry_run=dry_run)
-    except WFError as error:
+    except WsError as error:
         abort(error)
     prefix = "Would create" if dry_run else "Created"
     console.print(f"{prefix}: [bold]{session.name}[/bold] in {session.cwd}")
     if attach and not dry_run:
         try:
             service.attach(session.name)
-        except WFError as error:
+        except WsError as error:
             abort(error)
 
 
@@ -257,7 +257,7 @@ def attach(context: typer.Context, name: str) -> None:
     """Attach or switch to an existing tmux session."""
     try:
         runtime_from_context(context).service().attach(name)
-    except WFError as error:
+    except WsError as error:
         abort(error)
 
 
@@ -267,16 +267,16 @@ def resume(context: typer.Context) -> None:
     service = runtime_from_context(context).service()
     try:
         service.attach(service.resume_target().name)
-    except WFError as error:
+    except WsError as error:
         abort(error)
 
 
 @app.command()
 def note(context: typer.Context, name: str, text: str) -> None:
-    """Update the note for a WF-owned session."""
+    """Update the note for a ws-owned session."""
     try:
         runtime_from_context(context).service().update_note(name, text)
-    except WFError as error:
+    except WsError as error:
         abort(error)
     typer.echo(f"Updated note for {name}")
 
@@ -291,7 +291,7 @@ def edit_session(
     project: Annotated[str | None, typer.Option("--project")] = None,
     pin: Annotated[bool | None, typer.Option("--pin/--unpin")] = None,
 ) -> None:
-    """Set tags, task state, or pin status on a WF-owned session."""
+    """Set tags, task state, or pin status on a ws-owned session."""
     try:
         runtime_from_context(context).service().organize(
             name,
@@ -301,7 +301,7 @@ def edit_session(
             project=project,
             pinned=pin,
         )
-    except WFError as error:
+    except WsError as error:
         abort(error)
     typer.echo(f"Updated {name}")
 
@@ -322,10 +322,10 @@ def organize_compatibility(
 
 @app.command()
 def rename(context: typer.Context, old_name: str, new_name: str) -> None:
-    """Rename a WF-owned session and its metadata atomically."""
+    """Rename a ws-owned session and its metadata atomically."""
     try:
         session = runtime_from_context(context).service().rename(old_name, new_name)
-    except WFError as error:
+    except WsError as error:
         abort(error)
     typer.echo(f"Renamed {old_name} to {session.name}")
 
@@ -336,7 +336,7 @@ def delete(
     name: str,
     yes: Annotated[bool, typer.Option("--yes", help="Skip typed confirmation.")] = False,
 ) -> None:
-    """Delete a WF-owned session."""
+    """Delete a ws-owned session."""
     if not yes:
         confirmation = typer.prompt(f'Type "{name}" to confirm deletion')
         if confirmation != name:
@@ -344,7 +344,7 @@ def delete(
             raise typer.Exit(1)
     try:
         runtime_from_context(context).service().delete(name)
-    except WFError as error:
+    except WsError as error:
         abort(error)
     typer.echo(f"Deleted {name}")
 
@@ -423,7 +423,7 @@ def migration_preview(
         plan = manager.preview(None if all_sessions else sessions)
         if output is not None:
             manager.write_plan(plan, output.expanduser())
-    except WFError as error:
+    except WsError as error:
         abort(error)
     if as_json:
         typer.echo(plan.model_dump_json(indent=2))
@@ -442,7 +442,7 @@ def migration_validate(
     """Verify that a plan is private, unused, and matches live state."""
     try:
         plan = _migration_manager(context).validate_plan(plan_path.expanduser())
-    except WFError as error:
+    except WsError as error:
         abort(error)
     if as_json:
         typer.echo(
@@ -483,7 +483,7 @@ def migration_apply(
         raise typer.Exit(2)
     try:
         journal = _migration_manager(context).apply(plan_path.expanduser())
-    except WFError as error:
+    except WsError as error:
         abort(error)
     console.print(f"Applied migration {journal.migration_id}: {len(journal.items)} sessions")
 
@@ -496,7 +496,7 @@ def migration_status(
     """Show migration journals without changing sessions."""
     try:
         journals = _migration_manager(context).status()
-    except WFError as error:
+    except WsError as error:
         abort(error)
     if as_json:
         typer.echo(json.dumps([item.model_dump(mode="json") for item in journals], indent=2))
@@ -531,7 +531,7 @@ def migration_rollback(
         raise typer.Exit(2)
     try:
         journal = _migration_manager(context).rollback(migration_id)
-    except WFError as error:
+    except WsError as error:
         abort(error)
     console.print(f"Rolled back migration {journal.migration_id}: {len(journal.items)} sessions")
 

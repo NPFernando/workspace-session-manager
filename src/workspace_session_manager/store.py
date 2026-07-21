@@ -1,4 +1,4 @@
-"""Atomic, permission-restricted persistence for WF-owned session metadata."""
+"""Atomic, permission-restricted persistence for ws-owned session metadata."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from wf_session_manager.errors import StateError
-from wf_session_manager.models import SESSION_NAME_PATTERN, SessionMetadata
-from wf_session_manager.paths import AppPaths
+from workspace_session_manager.errors import StateError
+from workspace_session_manager.models import SESSION_NAME_PATTERN, SessionMetadata
+from workspace_session_manager.paths import AppPaths
 
 
 class MetadataStore:

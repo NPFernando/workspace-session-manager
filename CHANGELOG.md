@@ -15,11 +15,11 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 - Independent agent execution and alert states propagated through the header, rows, inspector, and
   structured output summary
 - PASS, WARN, FAIL, and INFO diagnostic classifications with progress, last-run, and duration states
-- Configurable subtle motion, `--no-animation`, `WF_MOTION=off`, and reduced-motion behavior
+- Configurable subtle motion, `--no-animation`, `WS_MOTION=off`, and reduced-motion behavior
 - Dark, light, monochrome, `NO_COLOR`, and ASCII presentation modes
 - Snapshot coverage for dialogs, validation failures, usage warnings, destructive confirmation, light
   mode, and inventories of 50 and 200 sessions
-- A session-aware command palette with categorized WF actions, shortcuts, and availability details
+- A session-aware command palette with categorized ws actions, shortcuts, and availability details
 - A compact searchable Manage browser with General, Runtime, and Danger categories, plus dedicated
   identity, task, and task-status forms
 - A responsive full-screen Logs workspace with explicit Live and Saved sources, follow/pause,
@@ -77,11 +77,11 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 - Sensitive tmux operations retain the verified session ID through the final tmux command
 - Migration plans and journals are rejected unless their file permissions are owner-only
 - Classic restore and retirement now require an owner-only, checksum-verified preservation copy;
-  retirement also requires the new WF command to remain active
-- Installer failures after adoption automatically roll back that exact migration until the WF command
+  retirement also requires the new ws command to remain active
+- Installer failures after adoption automatically roll back that exact migration until the ws command
   switch succeeds
 - Cutover installation is serialized with an owner-only nonblocking process lock
-- Install and command rollback replace the WF symlink atomically and never overwrite a command backup
+- Install and command rollback replace the ws symlink atomically and never overwrite a command backup
 - Classic retirement verifies the archived executable payload before deletion and writes a relocatable
   archive checksum
 - Textual filtering clears hidden selections and renders explicit empty or no-match states

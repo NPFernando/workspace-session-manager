@@ -42,22 +42,22 @@ if [[ $- == *i* ]] \\
 fi
 """
 
-NEW_HOOK = """# BEGIN WF SESSION MANAGER SSH HOOK
+NEW_HOOK = """# BEGIN WORKSPACE SESSION MANAGER SSH HOOK
 if [[ $- == *i* ]] \\
   && [[ -n "${SSH_CONNECTION:-}" ]] \\
   && [[ -z "${TMUX:-}" ]] \\
-  && [[ -z "${NO_WF_MENU:-}" ]] \\
   && [[ -z "${NO_WS_MENU:-}" ]] \\
-  && [[ -z "${WF_MENU_SHOWN:-}" ]] \\
+  && [[ -z "${NO_WS_MENU:-}" ]] \\
+  && [[ -z "${WS_MENU_SHOWN:-}" ]] \\
   && [[ -z "${WS_MENU_SHOWN:-}" ]] \\
   && [[ "${TERM:-}" != "dumb" ]] \\
   && command -v tmux >/dev/null 2>&1 \\
-  && command -v WF >/dev/null 2>&1; then
-  export WF_MENU_SHOWN=1
+  && command -v ws >/dev/null 2>&1; then
   export WS_MENU_SHOWN=1
-  WF
+  export WS_MENU_SHOWN=1
+  ws
 fi
-# END WF SESSION MANAGER SSH HOOK
+# END WORKSPACE SESSION MANAGER SSH HOOK
 """
 
 
@@ -107,7 +107,7 @@ def main() -> int:
                     OLD_HOOK.splitlines(keepends=True),
                     NEW_HOOK.splitlines(keepends=True),
                     fromfile="current SSH hook",
-                    tofile="WF SSH hook",
+                    tofile="ws SSH hook",
                 )
             ),
             end="",

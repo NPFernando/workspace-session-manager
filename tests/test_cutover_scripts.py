@@ -99,7 +99,7 @@ def make_retirement_fixture(tmp_path: Path, *, age_days: int) -> tuple[dict[str,
     classic.parent.mkdir(parents=True)
     classic.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     classic.chmod(0o700)
-    marker = data / "wf-session-manager" / "classic-owner"
+    marker = data / "workspace-session-manager" / "classic-owner"
     marker.parent.mkdir(parents=True)
     digest = hashlib.sha256(classic.read_bytes()).hexdigest()
     marker.write_text(
@@ -107,11 +107,11 @@ def make_retirement_fixture(tmp_path: Path, *, age_days: int) -> tuple[dict[str,
         encoding="utf-8",
     )
     marker.chmod(0o600)
-    expected = data / "wf-session-manager" / "venv" / "bin" / "WF"
+    expected = data / "workspace-session-manager" / "venv" / "bin" / "ws"
     expected.parent.mkdir(parents=True)
     expected.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     expected.chmod(0o700)
-    target = home / ".local" / "bin" / "WF"
+    target = home / ".local" / "bin" / "ws"
     target.parent.mkdir(parents=True)
     target.symlink_to(expected)
     env = {**os.environ, "HOME": str(home), "XDG_DATA_HOME": str(data)}
@@ -125,7 +125,7 @@ def test_install_refuses_mismatched_existing_classic(tmp_path: Path) -> None:
     current.parent.mkdir(parents=True)
     current.write_text("#!/bin/sh\nprintf 'current\\n'\n", encoding="utf-8")
     current.chmod(0o700)
-    target = home / ".local" / "bin" / "WF"
+    target = home / ".local" / "bin" / "ws"
     target.parent.mkdir(parents=True)
     target.symlink_to(current)
     classic = home / ".local" / "libexec" / "wf-classic"
@@ -142,10 +142,10 @@ def test_install_refuses_mismatched_existing_classic(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "does not match current WF" in result.stderr
+    assert "does not match current ws" in result.stderr
     assert target.resolve() == current
     assert "different" in classic.read_text(encoding="utf-8")
-    assert not (data / "wf-session-manager" / "classic-owner").exists()
+    assert not (data / "workspace-session-manager" / "classic-owner").exists()
 
 
 def make_install_simulation(
@@ -162,13 +162,13 @@ def make_install_simulation(
     current.parent.mkdir(parents=True)
     current.write_text("#!/bin/sh\nprintf 'classic\\n'\n", encoding="utf-8")
     current.chmod(0o700)
-    target = home / ".local" / "bin" / "WF"
+    target = home / ".local" / "bin" / "ws"
     target.parent.mkdir(parents=True)
     target.symlink_to(current)
     plan = tmp_path / "plan.json"
     plan.write_text("{}\n", encoding="utf-8")
     plan.chmod(0o600)
-    log = tmp_path / "wf-dev.log"
+    log = tmp_path / "ws-dev.log"
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     python3 = fake_bin / "python3"
@@ -189,14 +189,14 @@ def make_install_simulation(
             fi
             exec __REAL_PYTHON__ "$@"
             PYTHON
-            cat > "$venv/bin/WF" <<'WF'
+            cat > "$venv/bin/ws" <<'ws'
             #!/bin/sh
             exit 0
-            WF
-            cat > "$venv/bin/wf-dev" <<'WFDEV'
+            ws
+            cat > "$venv/bin/ws-dev" <<'WSDEV'
             #!/usr/bin/env bash
             set -euo pipefail
-            printf '%s\n' "$*" >> "$WF_TEST_LOG"
+            printf '%s\n' "$*" >> "$WS_TEST_LOG"
             case "${1:-}" in
               doctor)
                 ;;
@@ -208,7 +208,7 @@ def make_install_simulation(
                   apply)
                     ;;
                   rollback)
-                    if [[ "${WF_TEST_ROLLBACK_FAIL:-0}" == '1' ]]; then
+                    if [[ "${WS_TEST_ROLLBACK_FAIL:-0}" == '1' ]]; then
                       exit 9
                     fi
                     ;;
@@ -216,7 +216,7 @@ def make_install_simulation(
                 esac
                 ;;
               list)
-                if [[ "${WF_TEST_UNMANAGED:-0}" == '1' ]]; then
+                if [[ "${WS_TEST_UNMANAGED:-0}" == '1' ]]; then
                   printf '%s\n' '[{"owned":false,"legacy_metadata":true}]'
                 else
                   printf '%s\n' '[]'
@@ -224,8 +224,8 @@ def make_install_simulation(
                 ;;
               *) exit 66 ;;
             esac
-            WFDEV
-            chmod 700 "$venv/bin/python" "$venv/bin/WF" "$venv/bin/wf-dev"
+            WSDEV
+            chmod 700 "$venv/bin/python" "$venv/bin/ws" "$venv/bin/ws-dev"
             """
         )
         .lstrip()
@@ -243,7 +243,7 @@ def make_install_simulation(
         textwrap.dedent(
             r"""
             #!/usr/bin/env bash
-            if [[ "${WF_TEST_SWITCH_FAIL:-0}" == '1' && "${1:-}" == '-Tf' ]]; then
+            if [[ "${WS_TEST_SWITCH_FAIL:-0}" == '1' && "${1:-}" == '-Tf' ]]; then
               exit 73
             fi
             exec __REAL_MV__ "$@"
@@ -259,8 +259,8 @@ def make_install_simulation(
         textwrap.dedent(
             r"""
             #!/usr/bin/env bash
-            if [[ "${1:-}" == '+%Y%m%d-%H%M%S' && -n "${WF_TEST_BACKUP_STAMP:-}" ]]; then
-              printf '%s\n' "$WF_TEST_BACKUP_STAMP"
+            if [[ "${1:-}" == '+%Y%m%d-%H%M%S' && -n "${WS_TEST_BACKUP_STAMP:-}" ]]; then
+              printf '%s\n' "$WS_TEST_BACKUP_STAMP"
               exit 0
             fi
             exec __REAL_DATE__ "$@"
@@ -276,11 +276,11 @@ def make_install_simulation(
         "HOME": str(home),
         "XDG_DATA_HOME": str(data),
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
-        "WF_TEST_LOG": str(log),
-        "WF_TEST_UNMANAGED": "1" if unmanaged else "0",
-        "WF_TEST_ROLLBACK_FAIL": "1" if rollback_fails else "0",
-        "WF_TEST_SWITCH_FAIL": "1" if switch_fails else "0",
-        "WF_TEST_BACKUP_STAMP": backup_stamp,
+        "WS_TEST_LOG": str(log),
+        "WS_TEST_UNMANAGED": "1" if unmanaged else "0",
+        "WS_TEST_ROLLBACK_FAIL": "1" if rollback_fails else "0",
+        "WS_TEST_SWITCH_FAIL": "1" if switch_fails else "0",
+        "WS_TEST_BACKUP_STAMP": backup_stamp,
     }
     return env, current, target, log, plan
 
@@ -302,8 +302,8 @@ def test_install_completes_simulated_transaction(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    install_root = Path(env["XDG_DATA_HOME"]) / "wf-session-manager"
-    assert target.resolve() == install_root / "venv" / "bin" / "WF"
+    install_root = Path(env["XDG_DATA_HOME"]) / "workspace-session-manager"
+    assert target.resolve() == install_root / "venv" / "bin" / "ws"
     classic = Path(env["HOME"]) / ".local" / "libexec" / "wf-classic"
     assert classic.read_bytes() == current.read_bytes()
     marker = install_root / "classic-owner"
@@ -313,11 +313,11 @@ def test_install_completes_simulated_transaction(tmp_path: Path) -> None:
     assert f"migrate apply {plan} --approve" in log.read_text(encoding="utf-8")
     assert "migrate rollback" not in log.read_text(encoding="utf-8")
     assert "tmux processes were not restarted, renamed, or terminated" in result.stdout
-    backups = list(install_root.glob("WF.pre-cutover.*"))
+    backups = list(install_root.glob("ws.pre-cutover.*"))
     assert len(backups) == 1
     assert backups[0].is_symlink()
     assert backups[0].resolve() == current
-    assert not list(target.parent.glob(".WF.switch.*"))
+    assert not list(target.parent.glob(".ws.switch.*"))
 
 
 def test_install_rolls_back_adoption_on_pre_cutover_failure(tmp_path: Path) -> None:
@@ -340,13 +340,13 @@ def test_install_rolls_back_adoption_on_pre_cutover_failure(tmp_path: Path) -> N
     assert "Rolled back migration" in result.stderr
     assert target.resolve() == current
     assert f"migrate rollback {TEST_MIGRATION_ID} --approve" in log.read_text(encoding="utf-8")
-    marker = Path(env["XDG_DATA_HOME"]) / "wf-session-manager" / "classic-owner"
+    marker = Path(env["XDG_DATA_HOME"]) / "workspace-session-manager" / "classic-owner"
     assert not marker.exists()
 
 
 def test_install_refuses_concurrent_cutover(tmp_path: Path) -> None:
     env, current, target, log, plan = make_install_simulation(tmp_path, unmanaged=False)
-    install_root = Path(env["XDG_DATA_HOME"]) / "wf-session-manager"
+    install_root = Path(env["XDG_DATA_HOME"]) / "workspace-session-manager"
     install_root.mkdir(parents=True)
     install_root.chmod(0o700)
     lock_path = install_root / "cutover.lock"
@@ -371,13 +371,13 @@ def test_install_refuses_concurrent_cutover(tmp_path: Path) -> None:
     assert "another installer holds the cutover lock" in result.stderr
     assert target.resolve() == current
     assert not log.exists()
-    marker = Path(env["XDG_DATA_HOME"]) / "wf-session-manager" / "classic-owner"
+    marker = Path(env["XDG_DATA_HOME"]) / "workspace-session-manager" / "classic-owner"
     assert not marker.exists()
 
 
 def test_install_refuses_symlinked_cutover_lock(tmp_path: Path) -> None:
     env, current, target, log, plan = make_install_simulation(tmp_path, unmanaged=False)
-    install_root = Path(env["XDG_DATA_HOME"]) / "wf-session-manager"
+    install_root = Path(env["XDG_DATA_HOME"]) / "workspace-session-manager"
     install_root.mkdir(parents=True)
     outside = tmp_path / "outside-lock-target"
     outside.write_text("unchanged\n", encoding="utf-8")
@@ -453,7 +453,7 @@ def test_install_rolls_back_when_atomic_command_switch_fails(tmp_path: Path) -> 
     assert "Rolled back migration" in result.stderr
     assert target.resolve() == current
     assert f"migrate rollback {TEST_MIGRATION_ID} --approve" in log.read_text(encoding="utf-8")
-    assert not list(target.parent.glob(".WF.switch.*"))
+    assert not list(target.parent.glob(".ws.switch.*"))
 
 
 def test_install_refuses_backup_collision_and_rolls_back(tmp_path: Path) -> None:
@@ -463,9 +463,9 @@ def test_install_refuses_backup_collision_and_rolls_back(tmp_path: Path) -> None
         unmanaged=False,
         backup_stamp=stamp,
     )
-    install_root = Path(env["XDG_DATA_HOME"]) / "wf-session-manager"
+    install_root = Path(env["XDG_DATA_HOME"]) / "workspace-session-manager"
     install_root.mkdir(parents=True)
-    backup = install_root / f"WF.pre-cutover.{stamp}"
+    backup = install_root / f"ws.pre-cutover.{stamp}"
     backup.write_text("keep existing backup\n", encoding="utf-8")
 
     result = subprocess.run(
@@ -491,7 +491,7 @@ def test_install_refuses_backup_collision_and_rolls_back(tmp_path: Path) -> None
 
 def test_uninstall_restores_only_checksum_verified_classic(tmp_path: Path) -> None:
     env, classic = make_retirement_fixture(tmp_path, age_days=1)
-    target = Path(env["HOME"]) / ".local" / "bin" / "WF"
+    target = Path(env["HOME"]) / ".local" / "bin" / "ws"
 
     restored = subprocess.run(
         ["bash", str(UNINSTALL_SCRIPT), "--restore-classic"],
@@ -502,12 +502,12 @@ def test_uninstall_restores_only_checksum_verified_classic(tmp_path: Path) -> No
 
     assert restored.returncode == 0, restored.stderr
     assert target.resolve() == classic
-    assert not list(target.parent.glob(".WF.switch.*"))
+    assert not list(target.parent.glob(".ws.switch.*"))
 
 
 def test_uninstall_refuses_modified_classic(tmp_path: Path) -> None:
     env, classic = make_retirement_fixture(tmp_path, age_days=1)
-    target = Path(env["HOME"]) / ".local" / "bin" / "WF"
+    target = Path(env["HOME"]) / ".local" / "bin" / "ws"
     expected = target.resolve()
     classic.write_text("#!/bin/sh\nexit 9\n", encoding="utf-8")
 
@@ -525,7 +525,7 @@ def test_uninstall_refuses_modified_classic(tmp_path: Path) -> None:
 
 def test_uninstall_refuses_non_private_classic(tmp_path: Path) -> None:
     env, classic = make_retirement_fixture(tmp_path, age_days=1)
-    target = Path(env["HOME"]) / ".local" / "bin" / "WF"
+    target = Path(env["HOME"]) / ".local" / "bin" / "ws"
     expected = target.resolve()
     classic.chmod(0o755)
 
@@ -557,7 +557,7 @@ def test_classic_retirement_archives_only_installer_owned_copy(tmp_path: Path) -
     )
     assert applied.returncode == 0, applied.stderr
     assert not classic.exists()
-    archive_dir = Path(env["XDG_DATA_HOME"]) / "wf-session-manager" / "classic-archive"
+    archive_dir = Path(env["XDG_DATA_HOME"]) / "workspace-session-manager" / "classic-archive"
     archives = list(archive_dir.glob("*.tar.gz"))
     checksums = list(archive_dir.glob("*.tar.gz.sha256"))
     assert len(archives) == 1
@@ -621,7 +621,7 @@ def test_classic_retirement_refuses_corrupt_archive_payload(tmp_path: Path) -> N
     assert result.returncode != 0
     assert "archived executable does not match" in result.stderr
     assert classic.read_bytes() == original
-    marker = Path(env["XDG_DATA_HOME"]) / "wf-session-manager" / "classic-owner"
+    marker = Path(env["XDG_DATA_HOME"]) / "workspace-session-manager" / "classic-owner"
     assert marker.exists()
     archive_dir = marker.parent / "classic-archive"
     assert len(list(archive_dir.glob("*.tar.gz"))) == 1
@@ -643,7 +643,7 @@ def test_classic_retirement_enforces_soak_period(tmp_path: Path) -> None:
 
 def test_classic_retirement_refuses_when_classic_is_active(tmp_path: Path) -> None:
     env, classic = make_retirement_fixture(tmp_path, age_days=8)
-    target = Path(env["HOME"]) / ".local" / "bin" / "WF"
+    target = Path(env["HOME"]) / ".local" / "bin" / "ws"
     target.unlink()
     target.symlink_to(classic)
 
@@ -655,13 +655,13 @@ def test_classic_retirement_refuses_when_classic_is_active(tmp_path: Path) -> No
     )
 
     assert result.returncode != 0
-    assert "new WF installation is not active" in result.stderr
+    assert "new ws installation is not active" in result.stderr
     assert classic.exists()
 
 
 def test_classic_retirement_refuses_non_private_marker(tmp_path: Path) -> None:
     env, classic = make_retirement_fixture(tmp_path, age_days=8)
-    marker = Path(env["XDG_DATA_HOME"]) / "wf-session-manager" / "classic-owner"
+    marker = Path(env["XDG_DATA_HOME"]) / "workspace-session-manager" / "classic-owner"
     marker.chmod(0o644)
 
     result = subprocess.run(

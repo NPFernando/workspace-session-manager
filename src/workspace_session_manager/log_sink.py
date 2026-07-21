@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from wf_session_manager.security import redact_text
+from workspace_session_manager.security import redact_text
 
 MAX_LOG_BYTES = 5 * 1024 * 1024
 RETAIN_BYTES = 2 * 1024 * 1024
@@ -80,7 +80,7 @@ def stream_to_log(path: Path) -> int:
 
 def main() -> None:
     if len(sys.argv) != 2:
-        raise SystemExit("usage: python -m wf_session_manager.log_sink LOG_PATH")
+        raise SystemExit("usage: python -m workspace_session_manager.log_sink LOG_PATH")
     raise SystemExit(stream_to_log(Path(sys.argv[1])))
 
 

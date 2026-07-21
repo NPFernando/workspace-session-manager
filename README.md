@@ -1,10 +1,10 @@
-# WF - Workflow Session Manager
+# Workspace Session Manager
 
-WF is a terminal application for creating, resuming, inspecting, and managing persistent Claude
+ws is a terminal application for creating, resuming, inspecting, and managing persistent Claude
 Code, Codex CLI, Hermes Agent, and shell sessions on Linux. Textual provides the default interface,
 Typer provides automation-friendly commands, and tmux keeps work alive across SSH disconnects.
 
-Repository development does not replace an installed `WF`, change login hooks, or adopt existing
+Repository development does not replace an installed `ws`, change login hooks, or adopt existing
 tmux sessions. Release installation and cutover remain separate approval-gated operations.
 
 ## Highlights
@@ -20,8 +20,8 @@ tmux sessions. Release installation and cutover remain separate approval-gated o
 - Optional owner-only sanitized logging, usage-limit warnings, diagnostics export, and onboarding
 - Session-aware command palette with categorized commands, shortcuts, and availability details
 - Dark, light, monochrome, `NO_COLOR`, and ASCII-compatible presentation modes
-- Subtle SSH-friendly motion with config, `--no-animation`, and `WF_MOTION=off` overrides
-- Read-only discovery and preview of legacy WF sidecar metadata
+- Subtle SSH-friendly motion with config, `--no-animation`, and `WS_MOTION=off` overrides
+- Read-only discovery and preview of legacy ws sidecar metadata
 - Exact-ID, snapshot-validated, reversible session adoption
 - Ownership checks tied to both tmux's unique session ID and a tmux owner marker
 - Managed-only default views with `list --all` for diagnostics
@@ -35,53 +35,53 @@ tmux sessions. Release installation and cutover remain separate approval-gated o
 - tmux
 - One or more optional agent commands: `claude`, `codex`, or `hermes`
 
-No command in WF invokes `sudo`.
+No command in ws invokes `sudo`.
 
 ## Development setup
 
 ```bash
-git clone https://github.com/NPFernando/wf-session-manager.git
-cd wf-session-manager
+git clone https://github.com/NPFernando/workspace-session-manager.git
+cd workspace-session-manager
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/wf-dev doctor
-.venv/bin/wf-dev
+.venv/bin/ws-dev doctor
+.venv/bin/ws-dev
 ```
 
 With `uv`:
 
 ```bash
 uv sync --extra dev
-uv run wf-dev doctor
-uv run wf-dev
+uv run ws-dev doctor
+uv run ws-dev
 ```
 
-Development data lives under the `wf-session-manager` XDG namespace. Operational legacy WF paths are
+Development data lives under the `workspace-session-manager` XDG namespace. Operational legacy ws paths are
 read only unless a reviewed adoption plan is explicitly applied; adoption does not change those
 paths or restart a tmux session.
 
 ## CLI
 
 ```bash
-wf-dev                         # Open the Textual interface
-wf-dev --no-animation          # Open with all optional motion disabled
-wf-dev list
-wf-dev list --all              # Include unmanaged sessions for diagnostics
-wf-dev list --json
-wf-dev inspect claude-api
-wf-dev create --tool claude --name api --cwd ~/projects/api
-wf-dev create --tool codex --name review --cwd ~/projects/api --logging
-wf-dev create --tool shell --name diagnostics --cwd ~
-wf-dev edit claude-api --tag backend --state in_progress --input none --pin
-wf-dev note claude-api "Refactor authentication flow"
-wf-dev rename claude-api api-refactor
-wf-dev resume
-wf-dev attach claude-api
-wf-dev delete claude-api       # Exact-name confirmation required
-wf-dev doctor
-wf-dev migrate preview --all --output adoption-plan.json
-wf-dev migrate validate adoption-plan.json
-wf-dev migrate status
+ws-dev                         # Open the Textual interface
+ws-dev --no-animation          # Open with all optional motion disabled
+ws-dev list
+ws-dev list --all              # Include unmanaged sessions for diagnostics
+ws-dev list --json
+ws-dev inspect claude-api
+ws-dev create --tool claude --name api --cwd ~/projects/api
+ws-dev create --tool codex --name review --cwd ~/projects/api --logging
+ws-dev create --tool shell --name diagnostics --cwd ~
+ws-dev edit claude-api --tag backend --state in_progress --input none --pin
+ws-dev note claude-api "Refactor authentication flow"
+ws-dev rename claude-api api-refactor
+ws-dev resume
+ws-dev attach claude-api
+ws-dev delete claude-api       # Exact-name confirmation required
+ws-dev doctor
+ws-dev migrate preview --all --output adoption-plan.json
+ws-dev migrate validate adoption-plan.json
+ws-dev migrate status
 ```
 
 Normal commands and the Textual dashboard operate only on managed sessions. A session is managed only
@@ -138,13 +138,13 @@ its query, selection, focus, and scroll state when they close.
 Copy `config.example.toml` to:
 
 ```text
-${XDG_CONFIG_HOME:-~/.config}/wf-session-manager/config.toml
+${XDG_CONFIG_HOME:-~/.config}/workspace-session-manager/config.toml
 ```
 
 Configuration is parsed as TOML and validated by Pydantic. It is never evaluated as shell code.
 Agent commands are argument arrays, which avoids shell interpolation in configuration parsing.
 The `[interface]` table accepts `animations = "off" | "subtle" | "full"` and
-`reduce_motion = true | false`. `WF_MOTION=off` takes precedence for an individual launch;
+`reduce_motion = true | false`. `WS_MOTION=off` takes precedence for an individual launch;
 monochrome mode also disables optional motion.
 
 `attention_scan_budget` controls how many eligible agent sessions a refresh may inspect. Its default
@@ -157,7 +157,7 @@ metadata.
 New metadata is stored in:
 
 ```text
-${XDG_STATE_HOME:-~/.local/state}/wf-session-manager/sessions/
+${XDG_STATE_HOME:-~/.local/state}/workspace-session-manager/sessions/
 ```
 
 Each JSON file is owner-only and written atomically. Schema-v2 records include the exact tmux session

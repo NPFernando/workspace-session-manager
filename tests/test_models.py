@@ -3,9 +3,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from wf_session_manager.models import InputState, SessionMetadata, TaskState, Tool
-from wf_session_manager.security import bounded_output, bounded_preview, redact_text
-from wf_session_manager.service import normalized_session_name, slugify_name
+from workspace_session_manager.models import InputState, SessionMetadata, TaskState, Tool
+from workspace_session_manager.security import bounded_output, bounded_preview, redact_text
+from workspace_session_manager.service import normalized_session_name, slugify_name
 
 
 def test_slugify_and_tool_prefix() -> None:
