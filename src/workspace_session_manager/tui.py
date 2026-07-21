@@ -2673,7 +2673,7 @@ class WsApp(App[str | None]):
     """Operational session dashboard; it returns the selected attach target."""
 
     CSS_PATH = "wf.tcss"
-    TITLE = "Workspace Session Manager"
+    TITLE = "Workspace"
     ENABLE_COMMAND_PALETTE = True
     COMMANDS: ClassVar[set[type[Provider] | Callable[[], type[Provider]]]] = {WsCommandProvider}
     BINDINGS: ClassVar[list[BindingSpec]] = [
