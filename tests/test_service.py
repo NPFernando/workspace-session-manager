@@ -552,6 +552,23 @@ def test_refresh_health_alerts_skips_disabled_checks(
     assert "docker-containers" not in names
 
 
+def test_health_enabled_false_is_a_master_switch_over_every_check(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    config = AppConfig(legacy_state_dirs=(), health=HealthConfig(enabled=False))
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    service = SessionService(
+        backend=fake_backend,
+        store=MetadataStore(paths),
+        config=config,
+        paths=paths,
+        legacy=LegacyMetadataReader(()),
+    )
+    assert service.cached_health_alerts() == []
+    assert service.refresh_health_alerts(force=True) == []
+    assert service.health_stale_names(datetime.now(UTC)) == frozenset()
+
+
 def test_health_stale_names_respects_ttl(tmp_path: Path, fake_backend: FakeBackend) -> None:
     service = _disk_only_service(tmp_path, fake_backend)
     now = datetime.now(UTC)

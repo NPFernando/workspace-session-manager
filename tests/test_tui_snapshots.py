@@ -9,6 +9,7 @@ from textual.pilot import Pilot
 from textual.widgets import Button, Input, LoadingIndicator, Static
 
 from conftest import FakeBackend
+from workspace_session_manager.config import HealthConfig
 from workspace_session_manager.errors import TmuxError
 from workspace_session_manager.models import CreateRequest, InputState, TaskState, Tool
 from workspace_session_manager.service import SessionService
@@ -213,6 +214,70 @@ def test_empty_snapshot(snap_compare: SnapCompare, service: SessionService) -> N
         WsApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
         terminal_size=(120, 35),
     )
+
+
+def test_health_row_hidden_when_no_alerts_snapshot(
+    snap_compare: SnapCompare, service: SessionService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service.config = service.config.model_copy(
+        update={
+            "health": HealthConfig(
+                enabled=True,
+                apt_updates_enabled=False,
+                reboot_required_enabled=False,
+                git_dirty_enabled=False,
+                docker_enabled=False,
+            )
+        }
+    )
+
+    class FakeUsage:
+        total = 100
+        free = 90
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _root: FakeUsage())
+    app = WsApp(service, monochrome=False, hostname="wf-test-host", onboarding=False)
+
+    async def wait_for_scan(pilot: Pilot) -> None:
+        for _ in range(40):
+            if not app._health_scanning:
+                return
+            await pilot.pause(0.05)
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=wait_for_scan)
+
+
+def test_health_row_shows_alert_snapshot(
+    snap_compare: SnapCompare, service: SessionService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service.config = service.config.model_copy(
+        update={
+            "health": HealthConfig(
+                enabled=True,
+                apt_updates_enabled=False,
+                reboot_required_enabled=False,
+                git_dirty_enabled=False,
+                docker_enabled=False,
+                disk_warn_percent=60,
+                disk_fail_percent=40,
+            )
+        }
+    )
+
+    class FakeUsage:
+        total = 100
+        free = 50
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _root: FakeUsage())
+    app = WsApp(service, monochrome=False, hostname="wf-test-host", onboarding=False)
+
+    async def wait_for_scan(pilot: Pilot) -> None:
+        for _ in range(40):
+            if not app._health_scanning:
+                return
+            await pilot.pause(0.05)
+
+    assert snap_compare(app, terminal_size=(120, 35), run_before=wait_for_scan)
 
 
 def test_warning_snapshot(

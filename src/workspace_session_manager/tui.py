@@ -1841,6 +1841,10 @@ def diagnostic_name(check: HealthCheck) -> str:
         "unmanaged-sessions": "Session ownership",
         "legacy-readonly": "Classic metadata",
         "disk-space": "Disk space",
+        "reboot-required": "Reboot required",
+        "apt-updates": "Apt updates",
+        "docker-containers": "Docker",
+        "git-dirty": "Dirty repos",
     }
     return labels.get(check.name, display_state(check.name))
 
@@ -1995,6 +1999,96 @@ class DiagnosticsScreen(ModalScreen[None]):
     def action_export(self) -> None:
         if not self.running:
             self.query_one("#diagnostics-export", Button).press()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class HealthAlertsScreen(ModalScreen[None]):
+    BINDINGS: ClassVar[list[BindingSpec]] = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close"),
+        Binding("r", "run", "Refresh now"),
+    ]
+
+    def __init__(self, service: SessionService) -> None:
+        super().__init__()
+        self.service = service
+        self.checks: list[HealthCheck] = service.cached_health_alerts()
+        self.running = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="diagnostics-dialog", classes="dialog diagnostics-dialog"):
+            yield Label("System Health", classes="dialog-title")
+            yield Static("", id="health-alerts-summary")
+            yield LoadingIndicator(id="health-alerts-loading")
+            with VerticalScroll(id="health-alerts-list"):
+                yield Static("", id="health-alerts-content")
+            yield Static(
+                "HEALTH ALERTS  r Refresh now   Tab Navigate   Esc Close",
+                classes="mode-help",
+            )
+            with Horizontal(classes="dialog-actions diagnostics-actions"):
+                yield Button("Refresh Now", id="health-alerts-run")
+                yield Button("Close", variant="primary", id="health-alerts-close")
+
+    def on_mount(self) -> None:
+        animate_modal_open(self)
+        self.query_one("#health-alerts-close", Button).focus()
+        self._render_report()
+        self.action_run()
+
+    def _render_report(self) -> None:
+        warnings = sum(check.status is HealthStatus.WARN for check in self.checks)
+        failures = sum(check.status is HealthStatus.FAIL for check in self.checks)
+        information = sum(check.status is HealthStatus.INFO for check in self.checks)
+        passed = sum(check.status is HealthStatus.PASS for check in self.checks)
+        self.query_one("#health-alerts-summary", Static).update(
+            f"{passed} ok   {warnings} warnings   {failures} failed   {information} information"
+        )
+        content = Text()
+        styles = {
+            HealthStatus.PASS: "green",
+            HealthStatus.WARN: "yellow",
+            HealthStatus.FAIL: "bold red",
+            HealthStatus.INFO: "#66aaff",
+        }
+        for check in self.checks:
+            content.append(f"{check.status.value.upper():<5}", styles[check.status])
+            content.append(f"{diagnostic_name(check):<22}", "bold")
+            content.append(f"{diagnostic_detail(check, expanded=True)}\n")
+            if check.status in {HealthStatus.WARN, HealthStatus.FAIL} and check.corrective_action:
+                content.append(f"     Action: {check.corrective_action}\n", "dim")
+        self.query_one("#health-alerts-content", Static).update(content)
+
+    def action_run(self) -> None:
+        if self.running:
+            return
+        self.running = True
+        self.query_one("#health-alerts-loading", LoadingIndicator).display = True
+        for selector in ("#health-alerts-run",):
+            self.query_one(selector, Button).disabled = True
+        self._run_refresh()
+
+    @work(thread=True, exclusive=True, group="health-alerts-detail")
+    def _run_refresh(self) -> None:
+        checks = self.service.refresh_health_alerts(force=True)
+        self.app.call_from_thread(self._finish_refresh, checks)
+
+    def _finish_refresh(self, checks: list[HealthCheck]) -> None:
+        self.checks = checks
+        self.running = False
+        self.query_one("#health-alerts-loading", LoadingIndicator).display = False
+        for selector in ("#health-alerts-run",):
+            self.query_one(selector, Button).disabled = False
+        self._render_report()
+
+    @on(Button.Pressed)
+    def button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "health-alerts-close":
+            self.dismiss(None)
+        elif event.button.id == "health-alerts-run":
+            self.action_run()
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -2647,6 +2741,11 @@ class WsCommandProvider(Provider):
                 app.action_diagnostics,
             ),
             (
+                "System · Health alerts",
+                "Disk space, apt updates, reboot flag, dirty repos, Docker",
+                app.action_health_alerts,
+            ),
+            (
                 "Interface · Switch theme                         t",
                 "Cycle dark, light, and monochrome themes",
                 app.action_cycle_theme,
@@ -2729,6 +2828,10 @@ class WsApp(App[str | None]):
         self._attention_baseline_established = False
         self._attention_scan_error = ""
         self._attention_scan_error_notified = False
+        self._health_checks: list[HealthCheck] = []
+        self._health_scanning = False
+        self._health_scan_generation = 0
+        self._health_scan_error = ""
         self._attention_context: DashboardModeContext | None = None
         self.interaction_mode = InteractionMode.NORMAL
         self._mode_context: DashboardModeContext | None = None
@@ -2931,7 +3034,9 @@ class WsApp(App[str | None]):
         return True
 
     def compose(self) -> ComposeResult:
-        yield Static("", id="app-header")
+        with Vertical(id="header-band"):
+            yield Static("", id="app-header")
+            yield Static("", id="health-row")
         with Horizontal(id="search-mode"):
             yield Static("Search", id="search-label")
             yield Input(placeholder="name, tool, task, project, tag", id="search")
@@ -2978,6 +3083,10 @@ class WsApp(App[str | None]):
             self.service.config.refresh_interval,
             self.refresh_sessions,
         )
+        # Cache-only read: never blocks first paint on a live health check.
+        self._health_checks = self.service.cached_health_alerts()
+        self._render_health_row()
+        self._start_health_scan()
         self.call_after_refresh(self._maybe_show_onboarding)
 
     def on_unmount(self) -> None:
@@ -3265,6 +3374,58 @@ class WsApp(App[str | None]):
             self._render_header()
             self._render_attention_action()
 
+    def _start_health_scan(self, *, force: bool = False) -> None:
+        if (
+            self._health_scanning
+            or self._dashboard_refresh_suspensions
+            or len(self.screen_stack) > 1
+        ):
+            return
+        if not self.service.config.health.enabled:
+            return
+        stale = self.service.health_stale_names(datetime.now(UTC))
+        if not stale and not force:
+            return
+        self._health_scan_generation += 1
+        self._health_scanning = True
+        self._scan_health(self._health_scan_generation, None if force else frozenset(stale))
+
+    @work(thread=True, exclusive=True, group="health-scan")
+    def _scan_health(self, generation: int, only: frozenset[str] | None) -> None:
+        try:
+            checks = self.service.refresh_health_alerts(only=only)
+            error = ""
+        except (OSError, WsError) as exc:
+            checks = self.service.cached_health_alerts()
+            error = str(exc)
+        self.call_from_thread(self._finish_health_scan, generation, checks, error)
+
+    def _finish_health_scan(self, generation: int, checks: list[HealthCheck], error: str) -> None:
+        if generation != self._health_scan_generation:
+            return
+        self._health_scanning = False
+        self._health_scan_error = error
+        self._health_checks = checks
+        self._render_health_row()
+
+    def _render_health_row(self) -> None:
+        alerts = [
+            check
+            for check in self._health_checks
+            if check.status in {HealthStatus.WARN, HealthStatus.FAIL}
+        ]
+        if not alerts:
+            self.set_class(False, "has-alerts")
+            return
+        text = Text()
+        text.append("  !", "bold yellow")
+        summary = ", ".join(f"{diagnostic_name(check)}: {check.detail}" for check in alerts[:3])
+        if len(alerts) > 3:
+            summary += f", and {len(alerts) - 3} more"
+        text.append(f"  {summary}", "yellow")
+        self.query_one("#health-row", Static).update(text)
+        self.set_class(True, "has-alerts")
+
     def refresh_sessions(self) -> None:
         if not self.query("#app-header"):
             return
@@ -3336,6 +3497,7 @@ class WsApp(App[str | None]):
                 timeout=0,
             )
         self._start_attention_scan()
+        self._start_health_scan()
 
     def _notice_for(self, session: SessionView) -> ActivityNotice:
         derived = detect_activity(session, "")
@@ -4624,6 +4786,13 @@ class WsApp(App[str | None]):
         self._begin_overlay(InteractionMode.FORM)
         self.push_screen(
             DiagnosticsScreen(self.service),
+            lambda _result: self._restore_dashboard_mode(),
+        )
+
+    def action_health_alerts(self) -> None:
+        self._begin_overlay(InteractionMode.FORM)
+        self.push_screen(
+            HealthAlertsScreen(self.service),
             lambda _result: self._restore_dashboard_mode(),
         )
 

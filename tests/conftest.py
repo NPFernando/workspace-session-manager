@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from workspace_session_manager.config import AppConfig, ToolProfile
+from workspace_session_manager.config import AppConfig, HealthConfig, ToolProfile
 from workspace_session_manager.errors import SessionExistsError, SessionNotFoundError, TmuxError
 from workspace_session_manager.legacy import LegacyMetadataReader
 from workspace_session_manager.models import TmuxSession, Tool
@@ -196,6 +196,10 @@ def app_config() -> AppConfig:
             Tool.SHELL: ToolProfile(command=("/bin/bash", "-l")),
         },
         legacy_state_dirs=(),
+        # Hermetic by default: no test should shell out to real apt/docker/git
+        # or scan real project directories in the background. Tests targeting
+        # the health-cockpit feature construct their own AppConfig instead.
+        health=HealthConfig(enabled=False, project_scan_roots=()),
     )
 
 

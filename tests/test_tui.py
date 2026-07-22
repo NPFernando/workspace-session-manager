@@ -11,10 +11,13 @@ from textual.pilot import Pilot
 from textual.widgets import Button, Input, OptionList, Select, Static, Switch, TextArea
 
 from conftest import FakeBackend
+from workspace_session_manager.config import HealthConfig
 from workspace_session_manager.errors import TmuxError
 from workspace_session_manager.models import (
     AgentState,
     CreateRequest,
+    HealthCheck,
+    HealthStatus,
     InputState,
     OutputSource,
     RuntimeState,
@@ -32,6 +35,7 @@ from workspace_session_manager.tui import (
     DiagnosticsScreen,
     FilterScreen,
     FilterState,
+    HealthAlertsScreen,
     IdentityOrganizationScreen,
     InteractionMode,
     LogScreen,
@@ -102,6 +106,37 @@ async def wait_for_attention_scan(pilot: Pilot[object], app: WsApp) -> None:
             return
         await pilot.pause(0.05)
     raise AssertionError("attention scan did not complete")
+
+
+async def wait_for_health_scan(pilot: Pilot[object], app: WsApp) -> None:
+    for _ in range(120):
+        if not app._health_scanning:
+            return
+        await pilot.pause(0.05)
+    raise AssertionError("health scan did not complete")
+
+
+def enable_health(
+    service: SessionService, *, disk_warn_percent: int = 10, disk_fail_percent: int = 2
+) -> None:
+    """Health checks are disabled by the shared `service` fixture (hermetic
+    by default); tests exercising the health-cockpit feature opt in here with
+    only the disk-space check enabled, so no real apt/docker/git subprocess
+    ever runs during a TUI test."""
+    service.config = service.config.model_copy(
+        update={
+            "health": HealthConfig(
+                enabled=True,
+                apt_updates_enabled=False,
+                reboot_required_enabled=False,
+                git_dirty_enabled=False,
+                docker_enabled=False,
+                disk_ttl_seconds=5.0,
+                disk_warn_percent=disk_warn_percent,
+                disk_fail_percent=disk_fail_percent,
+            )
+        }
+    )
 
 
 @pytest.mark.asyncio
@@ -1840,3 +1875,128 @@ async def test_failed_refresh_preserves_selection_and_filters(
         assert app.filter_query == "ref"
         assert not app.tmux_connected
         assert "tmux unavailable" in str(app.query_one("#app-header", Static).content)
+
+
+@pytest.mark.asyncio
+async def test_health_disabled_by_default_never_scans(service: SessionService) -> None:
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.pause()
+        assert app._health_checks == []
+        assert not app._health_scanning
+        assert not app.has_class("has-alerts")
+
+
+@pytest.mark.asyncio
+async def test_cached_health_alert_shown_instantly_without_a_live_probe(
+    service: SessionService,
+) -> None:
+    enable_health(service)
+    cached_check = HealthCheck(
+        name="disk-space", status=HealthStatus.WARN, detail="fabricated cached value"
+    )
+    service._write_health_cache("disk-space", cached_check)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)):
+        # Asserted before any pilot.pause(): the cached value must already be
+        # rendered synchronously from on_mount, before any background worker
+        # could possibly have completed a fresh probe.
+        assert app._health_checks == [cached_check]
+        assert app.has_class("has-alerts")
+        assert "fabricated cached value" in str(app.query_one("#health-row", Static).content)
+
+
+@pytest.mark.asyncio
+async def test_health_row_toggles_has_alerts_with_scan_results(
+    service: SessionService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    enable_health(service, disk_warn_percent=60, disk_fail_percent=40)
+
+    class FakeUsage:
+        total = 100
+        free = 50
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _root: FakeUsage())
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_health_scan(pilot, app)
+        assert app.has_class("has-alerts")
+        assert any(check.status is HealthStatus.WARN for check in app._health_checks)
+        assert "Disk space" in str(app.query_one("#health-row", Static).content)
+
+
+@pytest.mark.asyncio
+async def test_health_row_hidden_when_all_checks_pass(
+    service: SessionService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    enable_health(service)
+
+    class FakeUsage:
+        total = 100
+        free = 90
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _root: FakeUsage())
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_health_scan(pilot, app)
+        assert not app.has_class("has-alerts")
+
+
+@pytest.mark.asyncio
+async def test_finish_health_scan_discards_stale_generation(service: SessionService) -> None:
+    enable_health(service)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)):
+        app._health_checks = []
+        stale_result = [
+            HealthCheck(name="disk-space", status=HealthStatus.FAIL, detail="should be ignored")
+        ]
+        app._finish_health_scan(app._health_scan_generation - 1, stale_result, "")
+        assert app._health_checks == []
+        assert not app.has_class("has-alerts")
+
+
+@pytest.mark.asyncio
+async def test_health_scan_does_not_start_while_a_modal_is_open(
+    service: SessionService,
+) -> None:
+    enable_health(service)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_health_scan(pilot, app)
+        app.action_diagnostics()
+        await pilot.pause()
+        assert len(app.screen_stack) > 1
+        app._health_scanning = False
+        app._start_health_scan(force=True)
+        assert not app._health_scanning
+
+
+@pytest.mark.asyncio
+async def test_health_alerts_screen_opens_shows_checks_and_refreshes(
+    service: SessionService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    enable_health(service, disk_warn_percent=60, disk_fail_percent=40)
+
+    class FakeUsage:
+        total = 100
+        free = 50
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _root: FakeUsage())
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_health_scan(pilot, app)
+        app.action_health_alerts()
+        await pilot.pause()
+        assert isinstance(app.screen, HealthAlertsScreen)
+        screen = app.screen
+        for _ in range(40):
+            if not screen.running:
+                break
+            await pilot.pause(0.05)
+        assert any(check.name == "disk-space" for check in screen.checks)
+        assert "Disk space" in str(screen.query_one("#health-alerts-content", Static).content)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, HealthAlertsScreen)

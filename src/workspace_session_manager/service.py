@@ -1018,7 +1018,7 @@ class SessionService:
         return (
             HealthCheckSpec(
                 name="disk-space",
-                enabled=health.disk_space_enabled,
+                enabled=health.enabled and health.disk_space_enabled,
                 ttl_seconds=health.disk_ttl_seconds,
                 run=lambda: disk_space_check(
                     disk_root,
@@ -1028,25 +1028,25 @@ class SessionService:
             ),
             HealthCheckSpec(
                 name="reboot-required",
-                enabled=health.reboot_required_enabled,
+                enabled=health.enabled and health.reboot_required_enabled,
                 ttl_seconds=health.reboot_required_ttl_seconds,
                 run=reboot_required_check,
             ),
             HealthCheckSpec(
                 name="apt-updates",
-                enabled=health.apt_updates_enabled,
+                enabled=health.enabled and health.apt_updates_enabled,
                 ttl_seconds=health.apt_updates_ttl_seconds,
                 run=lambda: apt_updates_check(self.runner, timeout=health.subprocess_timeout),
             ),
             HealthCheckSpec(
                 name="docker-containers",
-                enabled=health.docker_enabled,
+                enabled=health.enabled and health.docker_enabled,
                 ttl_seconds=health.docker_ttl_seconds,
                 run=lambda: docker_containers_check(self.runner, timeout=health.subprocess_timeout),
             ),
             HealthCheckSpec(
                 name="git-dirty",
-                enabled=health.git_dirty_enabled,
+                enabled=health.enabled and health.git_dirty_enabled,
                 ttl_seconds=health.git_dirty_ttl_seconds,
                 run=lambda: git_dirty_repos_check(
                     health.project_scan_roots,
