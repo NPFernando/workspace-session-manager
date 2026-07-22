@@ -1128,7 +1128,8 @@ async def test_ctrl_enter_requires_current_validation_and_creates_incrementally(
         assert service.get("claude-api-refactor").display_name == "api_refactor"
         created = service.get("claude-api-refactor")
         option = app.query_one("#sessions", OptionList).get_option(f"session:{created.session_id}")
-        assert any("#243d55" in str(span.style) for span in option.prompt.spans)
+        flash_color = app._theme_colors.get("primary", "#243d55")
+        assert any(flash_color in str(span.style) for span in option.prompt.spans)
 
 
 @pytest.mark.asyncio
@@ -1810,15 +1811,16 @@ async def test_theme_cycle_covers_every_mode(service: SessionService) -> None:
     app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
         assert app.ui_theme == "ithaca"
+        assert app.theme == "ithaca"
         for expected in THEME_MODES[1:]:
             app.action_cycle_theme()
             await pilot.pause()
             assert app.ui_theme == expected
-            if expected != "ithaca":
-                assert app.has_class(expected)
+            assert app.theme == expected
         app.action_cycle_theme()
         await pilot.pause()
         assert app.ui_theme == "ithaca"
+        assert app.theme == "ithaca"
 
 
 @pytest.mark.asyncio
@@ -1832,7 +1834,7 @@ async def test_no_color_starts_in_monochrome_mode(
     assert app.ui_theme == "monochrome"
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.pause()
-        assert app.has_class("monochrome")
+        assert app.theme == "monochrome"
 
 
 def test_motion_can_be_disabled_by_cli_env_and_monochrome(

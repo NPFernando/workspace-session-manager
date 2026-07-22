@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from time import perf_counter
-from typing import Any, ClassVar
+from typing import Any, ClassVar, NamedTuple
 
 from rich.text import Text
 from textual import events, on, work
@@ -22,6 +22,7 @@ from textual.binding import Binding
 from textual.command import CommandPalette, DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
+from textual.theme import Theme
 from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import (
@@ -69,7 +70,126 @@ THEME_MODES = (
     "terminal",
     "paper",
 )
-LIGHT_THEME_MODES = ("light", "paper")
+
+
+class _ThemePalette(NamedTuple):
+    primary: str
+    accent: str
+    background: str
+    surface: str
+    panel: str
+    foreground: str
+    dark: bool
+    warning: str | None = None
+    error: str | None = None
+    success: str | None = None
+
+
+def _build_theme_definitions() -> dict[str, Theme]:
+    """Base tokens for each named theme, reusing the palettes shipped previously.
+
+    warning/error/success stay a shared neutral triad across themes (they're
+    semantic status colors, not identity colors) except monochrome, which
+    intentionally collapses everything to gray for its no-color mode.
+    """
+    neutral_warning, neutral_error, neutral_success = "#e9b44c", "#ef6b73", "#72c78e"
+    palettes: dict[str, _ThemePalette] = {
+        "ithaca": _ThemePalette(
+            primary="#3f8a9d",
+            accent="#e06c75",
+            background="#282c34",
+            surface="#2c3038",
+            panel="#333844",
+            foreground="#c9d8e0",
+            dark=True,
+        ),
+        "dark": _ThemePalette(
+            primary="#3f6e9d",
+            accent="#24598a",
+            background="#101316",
+            surface="#12171a",
+            panel="#181d21",
+            foreground="#e8edf0",
+            dark=True,
+        ),
+        "midnight": _ThemePalette(
+            primary="#4d8cff",
+            accent="#4d8cff",
+            background="#070b14",
+            surface="#0a1220",
+            panel="#0d1524",
+            foreground="#dfe6f0",
+            dark=True,
+        ),
+        "cyberpunk": _ThemePalette(
+            primary="#00e5ff",
+            accent="#ff2e88",
+            background="#0d0221",
+            surface="#170a2c",
+            panel="#1a0d33",
+            foreground="#f2f2f2",
+            dark=True,
+        ),
+        "terminal": _ThemePalette(
+            primary="#1fae4a",
+            accent="#33ff66",
+            background="#0a0f0a",
+            surface="#0d130d",
+            panel="#10160f",
+            foreground="#33ff66",
+            dark=True,
+        ),
+        "light": _ThemePalette(
+            primary="#3f6e9d",
+            accent="#24598a",
+            background="#f4f6f7",
+            surface="#edf1f3",
+            panel="#e7ecef",
+            foreground="#20272b",
+            dark=False,
+        ),
+        "monochrome": _ThemePalette(
+            primary="#9e9e9e",
+            accent="#d7d7d7",
+            background="#111111",
+            surface="#111111",
+            panel="#111111",
+            foreground="#e6e6e6",
+            warning="#d7d7d7",
+            error="#d7d7d7",
+            success="#d7d7d7",
+            dark=True,
+        ),
+        "paper": _ThemePalette(
+            primary="#9a6a35",
+            accent="#8a5a2b",
+            background="#f7f3e9",
+            surface="#efe9d8",
+            panel="#efe6d3",
+            foreground="#2b2620",
+            dark=False,
+        ),
+    }
+    themes: dict[str, Theme] = {}
+    for name, palette in palettes.items():
+        themes[name] = Theme(
+            name=name,
+            primary=palette.primary,
+            secondary=palette.primary,
+            accent=palette.accent,
+            background=palette.background,
+            surface=palette.surface,
+            panel=palette.panel,
+            foreground=palette.foreground,
+            warning=palette.warning or neutral_warning,
+            error=palette.error or neutral_error,
+            success=palette.success or neutral_success,
+            dark=palette.dark,
+        )
+    return themes
+
+
+THEME_DEFINITIONS = _build_theme_definitions()
 ATTENTION_PREVIEW_LINES = 20
 ATTENTION_PREVIEW_BYTES = 8_192
 USAGE_LIMIT_PATTERN = re.compile(
@@ -230,11 +350,11 @@ def detect_activity(session: SessionView, output: str) -> ActivityNotice:
     )
 
 
-def summarize_output(output: str, notice: ActivityNotice) -> Text:
+def summarize_output(output: str, notice: ActivityNotice, warning_color: str = "yellow") -> Text:
     """Render a conservative activity summary without exposing CLI chrome by default."""
     summary = Text()
     if notice.kind == "usage-limit":
-        summary.append(notice.title, "bold yellow")
+        summary.append(notice.title, f"bold {warning_color}")
         summary.append(f"\n{notice.detail}\n")
         summary.append("The tmux session remains active, but the agent cannot continue yet.")
         return summary
@@ -310,6 +430,8 @@ def session_row(
     ascii_only: bool = False,
     notice: ActivityNotice | None = None,
     pulse_dim: bool = False,
+    warning_color: str = "yellow",
+    warning_dim_color: str = "#8a7a2a",
 ) -> Text:
     """Build a stable two-line row sized to its current pane."""
     alert = notice or detect_activity(session, "")
@@ -319,7 +441,13 @@ def session_row(
     name_width = max(10, width - len(tool) - len(when) - 7)
     name = truncate(session.name, name_width, ascii_only=ascii_only)
     first = Text()
-    marker_style = "" if marker == " " else "#8a7a2a" if (marker == "!" and pulse_dim) else "yellow"
+    marker_style = (
+        ""
+        if marker == " "
+        else warning_dim_color
+        if (marker == "!" and pulse_dim)
+        else warning_color
+    )
     first.append(f"{marker} ", style=marker_style)
     first.append(f"{tool:<7}", style=TOOL_STYLES[session.tool])
     first.append(f"{name:<{name_width}} ", style="bold")
@@ -1494,11 +1622,7 @@ class ManageSessionScreen(ModalScreen[ManageSelection | None]):
         prompt.append(" " * padding)
         prompt.append(status, "dim" if action.enabled else "#7f8a90")
         if action.destructive:
-            danger_color = (
-                "#b33b47"
-                if getattr(self.app, "ui_theme", "ithaca") in LIGHT_THEME_MODES
-                else "#ef8a91"
-            )
+            danger_color = getattr(self.app, "_theme_colors", {}).get("text-error", "#ef8a91")
             prompt.stylize(danger_color, 0, len(marker) + len(label))
         return prompt
 
@@ -1513,11 +1637,7 @@ class ManageSessionScreen(ModalScreen[ManageSelection | None]):
                 continue
             header = Text(category.upper(), style="bold #8fa0a9")
             if category == "Danger":
-                danger_color = (
-                    "#a9323e"
-                    if getattr(self.app, "ui_theme", "ithaca") in LIGHT_THEME_MODES
-                    else "#d9757d"
-                )
+                danger_color = getattr(self.app, "_theme_colors", {}).get("text-error", "#d9757d")
                 header.stylize(f"bold {danger_color}")
             options.add_option(
                 Option(header, id=f"manage-category:{category.casefold()}", disabled=True)
@@ -1957,11 +2077,12 @@ class DiagnosticsScreen(ModalScreen[None]):
             f"{passed} passed   {warnings} warnings   {failed} failed   {information} information"
         )
         content = Text()
+        theme_colors = getattr(self.app, "_theme_colors", {})
         for check in self.report.checks:
             styles = {
                 HealthStatus.PASS: "green",
-                HealthStatus.WARN: "yellow",
-                HealthStatus.FAIL: "bold red",
+                HealthStatus.WARN: theme_colors.get("warning", "yellow"),
+                HealthStatus.FAIL: f"bold {theme_colors.get('error', 'red')}",
                 HealthStatus.INFO: "#66aaff",
             }
             style = styles[check.status]
@@ -2094,10 +2215,11 @@ class HealthAlertsScreen(ModalScreen[None]):
             f"{passed} ok   {warnings} warnings   {failures} failed   {information} information"
         )
         content = Text()
+        theme_colors = getattr(self.app, "_theme_colors", {})
         styles = {
             HealthStatus.PASS: "green",
-            HealthStatus.WARN: "yellow",
-            HealthStatus.FAIL: "bold red",
+            HealthStatus.WARN: theme_colors.get("warning", "yellow"),
+            HealthStatus.FAIL: f"bold {theme_colors.get('error', 'red')}",
             HealthStatus.INFO: "#66aaff",
         }
         for check in self.checks:
@@ -2471,7 +2593,13 @@ class LogScreen(Screen[str | None]):
         follow.label = "Following" if self.follow_output else "Paused"
         follow.set_class(self.follow_output, "active")
 
-        alert = Text(notice.title, "bold yellow" if notice.level == "warning" else "bold red")
+        theme_colors = getattr(self.app, "_theme_colors", {})
+        alert = Text(
+            notice.title,
+            f"bold {theme_colors.get('warning', 'yellow')}"
+            if notice.level == "warning"
+            else f"bold {theme_colors.get('error', 'red')}",
+        )
         alert.append(f"  {notice.detail}")
         self.query_one("#log-alert", Static).update(alert if notice.warning else "")
         self.query_one("#log-error", Static).update(
@@ -2910,6 +3038,10 @@ class WsApp(App[str | None]):
         no_color = bool(os.environ.get("NO_COLOR"))
         self.monochrome = no_color if monochrome is None else monochrome
         self.ui_theme = theme_mode or ("monochrome" if self.monochrome else "ithaca")
+        self._theme_colors: dict[str, str] = {}
+        for theme in THEME_DEFINITIONS.values():
+            self.register_theme(theme)
+        self.theme = self.ui_theme
         self.hostname = hostname or socket.gethostname()
         configured_motion: str = self.service.config.interface.animations
         env_motion = os.environ.get("WS_MOTION", "").strip().lower()
@@ -3135,6 +3267,7 @@ class WsApp(App[str | None]):
         self.set_class(self.motion == "off", "motion-off")
         self._set_interaction_mode(InteractionMode.NORMAL)
         self._set_layout_classes(self.size.width, self.size.height)
+        self._refresh_theme_colors()
         self.refresh_sessions()
         self.query_one("#sessions", OptionList).focus()
         self._dashboard_refresh_timer = self.set_interval(
@@ -3184,7 +3317,6 @@ class WsApp(App[str | None]):
             "narrow",
             "short",
             "too-small",
-            *THEME_MODES[1:],
         ):
             self.remove_class(name)
         if width < 80 or height < 24:
@@ -3204,8 +3336,22 @@ class WsApp(App[str | None]):
             self.add_class("narrow")
         if not self.has_class("too-small") and height <= 35:
             self.add_class("short")
-        if self.ui_theme in THEME_MODES[1:]:
-            self.add_class(self.ui_theme)
+
+    def _refresh_theme_colors(self) -> None:
+        variables = self.get_css_variables()
+        for key in (
+            "warning",
+            "warning-muted",
+            "text-warning",
+            "error",
+            "text-error",
+            "accent",
+            "primary",
+            "primary-muted",
+        ):
+            value = variables.get(key)
+            if value:
+                self._theme_colors[key] = value
 
     def _maybe_show_onboarding(self) -> None:
         if self._onboarding_checked:
@@ -3370,6 +3516,8 @@ class WsApp(App[str | None]):
                 session,
                 self._row_width(),
                 ascii_only=self.ascii_only,
+                warning_color=self._theme_colors.get("warning", "yellow"),
+                warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=self._notice_for(session),
                 pulse_dim=self._marker_pulse_phase,
             )
@@ -3524,11 +3672,11 @@ class WsApp(App[str | None]):
             self.set_class(False, "has-alerts")
             return
         text = Text()
-        text.append("  !", "bold yellow")
+        text.append("  !", f"bold {self._theme_colors.get('warning', 'yellow')}")
         summary = ", ".join(f"{diagnostic_name(check)}: {check.detail}" for check in alerts[:3])
         if len(alerts) > 3:
             summary += f", and {len(alerts) - 3} more"
-        text.append(f"  {summary}", "yellow")
+        text.append(f"  {summary}", self._theme_colors.get("warning", "yellow"))
         self.query_one("#health-row", Static).update(text)
         self.set_class(True, "has-alerts")
 
@@ -3635,6 +3783,8 @@ class WsApp(App[str | None]):
                 session,
                 self._row_width(),
                 ascii_only=self.ascii_only,
+                warning_color=self._theme_colors.get("warning", "yellow"),
+                warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=notice,
             )
             if self.motion != "off" and notice.warning and notice.kind != previous.kind:
@@ -3661,6 +3811,8 @@ class WsApp(App[str | None]):
                 session,
                 self._row_width(),
                 ascii_only=self.ascii_only,
+                warning_color=self._theme_colors.get("warning", "yellow"),
+                warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=self._notice_for(session),
             ),
         )
@@ -3793,6 +3945,8 @@ class WsApp(App[str | None]):
                             session,
                             self._row_width(),
                             ascii_only=self.ascii_only,
+                            warning_color=self._theme_colors.get("warning", "yellow"),
+                            warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                             notice=self._notice_for(session),
                         ),
                         id=option_id,
@@ -3880,7 +4034,7 @@ class WsApp(App[str | None]):
                 f"  {truncate(selected.name, available, ascii_only=self.ascii_only)}", "bold"
             )
             if warning:
-                text.append("  !", "bold yellow")
+                text.append("  !", f"bold {self._theme_colors.get('warning', 'yellow')}")
         elif self.has_class("very-wide"):
             product = truncate("Workspace Session Manager", 60, ascii_only=self.ascii_only)
             text.append(f"  {product}  v{__version__}")
@@ -4055,9 +4209,16 @@ class WsApp(App[str | None]):
                 )
         identity.append(identity_name, style="bold")
         if session.pinned:
-            identity.append("  *" if self.ascii_only else "  ★", "yellow")
+            identity.append(
+                "  *" if self.ascii_only else "  ★",
+                self._theme_colors.get("accent", "yellow"),
+            )
         if notice.warning:
-            alert_style = "bold yellow" if notice.level == "warning" else "bold red"
+            alert_style = (
+                f"bold {self._theme_colors.get('warning', 'yellow')}"
+                if notice.level == "warning"
+                else f"bold {self._theme_colors.get('error', 'red')}"
+            )
             identity.append(f"  ! {alert_title}", alert_style)
         identity.append(
             "\n"
@@ -4105,17 +4266,19 @@ class WsApp(App[str | None]):
         activity_card = self.query_one("#activity-card", Vertical)
         activity_card.remove_class("warning", "error", "success")
         if notice.level == "warning":
-            activity.stylize("yellow", 0, len(notice.title))
+            activity.stylize(self._theme_colors.get("warning", "yellow"), 0, len(notice.title))
             activity_card.add_class("warning")
         elif notice.level == "error":
-            activity.stylize("red", 0, len(notice.title))
+            activity.stylize(self._theme_colors.get("error", "red"), 0, len(notice.title))
             activity_card.add_class("error")
         else:
             activity_card.add_class("success")
         self.query_one("#activity", Static).update(activity)
         preview = Text()
         if self.output_mode == "summary":
-            preview = summarize_output(details.preview, notice)
+            preview = summarize_output(
+                details.preview, notice, self._theme_colors.get("warning", "yellow")
+            )
         else:
             if details.preview_truncated:
                 preview.append("[older output truncated]\n", "dim")
@@ -4316,7 +4479,10 @@ class WsApp(App[str | None]):
     def action_cycle_theme(self) -> None:
         self.ui_theme = THEME_MODES[(THEME_MODES.index(self.ui_theme) + 1) % len(THEME_MODES)]
         self.monochrome = self.ui_theme == "monochrome"
+        self.theme = self.ui_theme
+        self._refresh_theme_colors()
         self._set_layout_classes(self.size.width, self.size.height)
+        self._render_health_row()
         self._render_options()
         self.notify(f"Theme: {self.ui_theme}")
 
@@ -4391,6 +4557,8 @@ class WsApp(App[str | None]):
             session,
             self._row_width(),
             ascii_only=self.ascii_only,
+            warning_color=self._theme_colors.get("warning", "yellow"),
+            warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
             notice=self._notice_for(session),
         )
         self._option_sessions[option_id] = session
@@ -4414,9 +4582,11 @@ class WsApp(App[str | None]):
         self._render_action_bar()
 
     def _highlight_created_session(self, name: str, session_id: str) -> None:
-        self._flash_session_row(name, session_id, "on #243d55")
+        bright = self._theme_colors.get("primary", "#243d55")
+        dim = self._theme_colors.get("primary-muted", "#1a2c3d")
+        self._flash_session_row(name, session_id, f"on {bright}")
         fade_delay = 0.35 if self.motion == "full" else 0.25
-        self.set_timer(fade_delay, lambda: self._flash_session_row(name, session_id, "on #1a2c3d"))
+        self.set_timer(fade_delay, lambda: self._flash_session_row(name, session_id, f"on {dim}"))
         self.set_timer(fade_delay + 0.25, lambda: self._restore_session_row(name, session_id))
 
     def _flash_session_row(self, name: str, session_id: str, style: str) -> None:
@@ -4433,6 +4603,8 @@ class WsApp(App[str | None]):
             session,
             self._row_width(),
             ascii_only=self.ascii_only,
+            warning_color=self._theme_colors.get("warning", "yellow"),
+            warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
             notice=self._notice_for(session),
         )
         prompt.stylize(style)
