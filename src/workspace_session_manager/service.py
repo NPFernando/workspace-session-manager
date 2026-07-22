@@ -143,6 +143,7 @@ class TailResult:
     text: str
     offset: int
     rotated: bool
+    truncated: bool = False
 
 
 def slugify_name(value: str) -> str:
@@ -736,7 +737,12 @@ class SessionService:
                     bounded = bounded_output(
                         content, max_lines=self.config.log_lines, max_bytes=bytes_cap
                     )
-                    return TailResult(text=bounded.text, offset=size, rotated=True)
+                    return TailResult(
+                        text=bounded.text,
+                        offset=size,
+                        rotated=True,
+                        truncated=bounded.truncated,
+                    )
                 new_bytes = size - offset
                 if new_bytes <= 0:
                     return TailResult(text="", offset=offset, rotated=False)
@@ -744,7 +750,12 @@ class SessionService:
                 start = size - read_size
                 os.lseek(descriptor, start, os.SEEK_SET)
                 content = os.read(descriptor, read_size).decode("utf-8", errors="replace")
-                return TailResult(text=redact_text(content), offset=size, rotated=start > offset)
+                return TailResult(
+                    text=redact_text(content),
+                    offset=size,
+                    rotated=False,
+                    truncated=start > offset,
+                )
             finally:
                 os.close(descriptor)
         except OSError as error:

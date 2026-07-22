@@ -432,8 +432,114 @@ async def test_logs_switch_between_live_and_saved_sources(
         await pilot.click("#log-source-saved")
         await wait_for_log_refresh(pilot, screen)
         assert screen.output_source is OutputSource.SAVED
-        assert screen.rendered_output == "saved history"
+        assert screen.rendered_output == "saved history\n"
         assert screen.query_one("#log-source-saved", Button).has_class("active")
+
+
+@pytest.mark.asyncio
+async def test_logs_saved_source_tails_incrementally_for_logged_sessions(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    created = service.create(
+        CreateRequest(
+            name="tail-append",
+            tool=Tool.SHELL,
+            cwd=Path("/tmp"),
+            logging_enabled=True,
+        )
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    path = service.paths.logs_dir / f"{record.record_id}.log"
+    path.write_text("first line\n", encoding="utf-8")
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("l")
+        screen = app.screen
+        assert isinstance(screen, LogScreen)
+        await wait_for_log_refresh(pilot, screen)
+        await pilot.click("#log-source-saved")
+        await wait_for_log_refresh(pilot, screen)
+        assert screen._tailing
+        assert screen.rendered_output == "first line\n"
+        assert "live tail" in str(screen.query_one("#log-status").render())
+
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write("second line\n")
+        screen.action_refresh()
+        await wait_for_log_refresh(pilot, screen)
+        assert screen.rendered_output == "first line\nsecond line\n"
+
+
+@pytest.mark.asyncio
+async def test_logs_saved_source_falls_back_to_snapshot_without_logging(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    created = service.create(
+        CreateRequest(
+            name="tail-fallback",
+            tool=Tool.SHELL,
+            cwd=Path("/tmp"),
+            logging_enabled=False,
+        )
+    )
+    # A saved log can still exist from before logging was disabled; the saved
+    # source stays selectable, it just can't be tailed without logging_enabled.
+    record = service.store.load(created.name)
+    assert record is not None
+    service.paths.logs_dir.mkdir(parents=True, exist_ok=True)
+    path = service.paths.logs_dir / f"{record.record_id}.log"
+    path.write_text("legacy output\n", encoding="utf-8")
+    fake_backend.previews[created.name] = "live output"
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("l")
+        screen = app.screen
+        assert isinstance(screen, LogScreen)
+        await wait_for_log_refresh(pilot, screen)
+        await pilot.click("#log-source-saved")
+        await wait_for_log_refresh(pilot, screen)
+        assert not screen._tailing
+        assert screen.rendered_output == "legacy output"
+        assert "snapshot" in str(screen.query_one("#log-status").render())
+
+
+@pytest.mark.asyncio
+async def test_logs_tail_resyncs_after_rotation(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    created = service.create(
+        CreateRequest(
+            name="tail-rotate-ui",
+            tool=Tool.SHELL,
+            cwd=Path("/tmp"),
+            logging_enabled=True,
+        )
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    path = service.paths.logs_dir / f"{record.record_id}.log"
+    path.write_text("before rotation\n", encoding="utf-8")
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("l")
+        screen = app.screen
+        assert isinstance(screen, LogScreen)
+        await wait_for_log_refresh(pilot, screen)
+        await pilot.click("#log-source-saved")
+        await wait_for_log_refresh(pilot, screen)
+        assert screen.rendered_output == "before rotation\n"
+
+        path.write_text("after rotation\n", encoding="utf-8")
+        screen.action_refresh()
+        await wait_for_log_refresh(pilot, screen)
+        assert screen.rendered_output == "after rotation"
 
 
 @pytest.mark.asyncio
