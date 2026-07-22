@@ -3020,6 +3020,8 @@ class WsApp(App[str | None]):
         self.filter_query = ""
         self.filters = FilterState()
         self._search_before = ""
+        self._detail_generation = 0
+        self._detail_refreshing = False
         self._rendering_options = False
         self._expected_option_id: str | None = None
         self._option_sessions: dict[str, SessionView] = {}
@@ -4219,18 +4221,43 @@ class WsApp(App[str | None]):
         self.query_one("#output-meta", Static).update("")
 
     def _render_details(self, name: str) -> None:
+        self._detail_generation += 1
+        generation = self._detail_generation
+        self._detail_refreshing = True
+        self._load_details(name, generation)
+
+    @work(thread=True, exclusive=True, group="detail-refresh")
+    def _load_details(self, name: str, generation: int) -> None:
+        try:
+            details = self.service.inspect(name)
+        except WsError as error:
+            self.call_from_thread(self._finish_details, generation, None, str(error))
+            return
+        self.call_from_thread(self._finish_details, generation, details, "")
+
+    def _finish_details(
+        self,
+        generation: int,
+        details: SessionDetails | None,
+        error: str,
+    ) -> None:
+        if generation != self._detail_generation or not self.is_running:
+            return
+        self._detail_refreshing = False
         scroller = self.query_one("#inspector-scroll", VerticalScroll)
         output_scroller = self.query_one("#recent-output-scroll", VerticalScroll)
         old_scroll = scroller.scroll_offset.y
         old_output_scroll = output_scroller.scroll_offset.y
-        try:
-            details = self.service.inspect(name)
-        except WsError as error:
-            self.query_one("#overview", Static).update(str(error))
+        if error:
+            self.query_one("#overview", Static).update(error)
             return
+        assert details is not None
         session = details.session
         notice = detect_activity(session, details.preview)
         self._store_notice(session, notice, observed_at=datetime.now(UTC))
+        if not self._attention_scanning and self._attention_complete():
+            self._attention_baseline_established = True
+            self._stop_attention_dots()
         separator = " / " if self.ascii_only else " · "
         identity = Text()
         identity.append(
