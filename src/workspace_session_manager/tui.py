@@ -223,6 +223,24 @@ RUNTIME_STYLES = {
     RuntimeState.FAILED: "bold #ef6b73",
     RuntimeState.UNKNOWN: "#9aa6ad",
 }
+# Monochrome/NO_COLOR mode strips hue but keeps brightness contrast so tool and
+# runtime states stay scannable without color.
+MONO_TOOL_STYLE = "bold #e6e6e6"
+MONO_RUNTIME_STYLES = {
+    RuntimeState.ATTACHED: "#e6e6e6",
+    RuntimeState.DETACHED: "#9e9e9e",
+    RuntimeState.STOPPED: "#b8b8b8",
+    RuntimeState.FAILED: "bold #ffffff",
+    RuntimeState.UNKNOWN: "#9e9e9e",
+}
+
+
+def tool_style(tool: Tool, *, monochrome: bool = False) -> str:
+    return MONO_TOOL_STYLE if monochrome else TOOL_STYLES[tool]
+
+
+def runtime_style(runtime: RuntimeState, *, monochrome: bool = False) -> str:
+    return MONO_RUNTIME_STYLES[runtime] if monochrome else RUNTIME_STYLES[runtime]
 
 
 def display_path(path: Path) -> str:
@@ -432,6 +450,7 @@ def session_row(
     pulse_dim: bool = False,
     warning_color: str = "yellow",
     warning_dim_color: str = "#8a7a2a",
+    monochrome: bool = False,
 ) -> Text:
     """Build a stable two-line row sized to its current pane."""
     alert = notice or detect_activity(session, "")
@@ -449,7 +468,7 @@ def session_row(
         else warning_color
     )
     first.append(f"{marker} ", style=marker_style)
-    first.append(f"{tool:<7}", style=TOOL_STYLES[session.tool])
+    first.append(f"{tool:<7}", style=tool_style(session.tool, monochrome=monochrome))
     first.append(f"{name:<{name_width}} ", style="bold")
     first.append(when, style="dim")
     separator = " / " if ascii_only else " · "
@@ -460,7 +479,7 @@ def session_row(
         statuses.append("Unmanaged")
     second_value = truncate(separator.join(statuses), max(12, width - 3), ascii_only=ascii_only)
     first.append("\n  ")
-    first.append(second_value, style=RUNTIME_STYLES[session.runtime])
+    first.append(second_value, style=runtime_style(session.runtime, monochrome=monochrome))
     return first
 
 
@@ -2080,10 +2099,10 @@ class DiagnosticsScreen(ModalScreen[None]):
         theme_colors = getattr(self.app, "_theme_colors", {})
         for check in self.report.checks:
             styles = {
-                HealthStatus.PASS: "green",
+                HealthStatus.PASS: theme_colors.get("success", "green"),
                 HealthStatus.WARN: theme_colors.get("warning", "yellow"),
                 HealthStatus.FAIL: f"bold {theme_colors.get('error', 'red')}",
-                HealthStatus.INFO: "#66aaff",
+                HealthStatus.INFO: theme_colors.get("accent", "#66aaff"),
             }
             style = styles[check.status]
             content.append(f"{check.status.value.upper():<5}", style)
@@ -2217,10 +2236,10 @@ class HealthAlertsScreen(ModalScreen[None]):
         content = Text()
         theme_colors = getattr(self.app, "_theme_colors", {})
         styles = {
-            HealthStatus.PASS: "green",
+            HealthStatus.PASS: theme_colors.get("success", "green"),
             HealthStatus.WARN: theme_colors.get("warning", "yellow"),
             HealthStatus.FAIL: f"bold {theme_colors.get('error', 'red')}",
-            HealthStatus.INFO: "#66aaff",
+            HealthStatus.INFO: theme_colors.get("accent", "#66aaff"),
         }
         for check in self.checks:
             content.append(f"{check.status.value.upper():<5}", styles[check.status])
@@ -2566,7 +2585,10 @@ class LogScreen(Screen[str | None]):
         notice = detect_activity(self.session, self.rendered_output)
         self.set_class(notice.warning, "has-log-alert")
         header = Text("ws  Logs  ", "bold")
-        header.append(TOOL_LABELS[self.session.tool].upper(), TOOL_STYLES[self.session.tool])
+        header.append(
+            TOOL_LABELS[self.session.tool].upper(),
+            tool_style(self.session.tool, monochrome=getattr(self.app, "monochrome", False)),
+        )
         header.append(f"  {self.session.name}", "bold")
         self.query_one("#log-header", Static).update(header)
 
@@ -3348,6 +3370,7 @@ class WsApp(App[str | None]):
             "accent",
             "primary",
             "primary-muted",
+            "success",
         ):
             value = variables.get(key)
             if value:
@@ -3516,6 +3539,7 @@ class WsApp(App[str | None]):
                 session,
                 self._row_width(),
                 ascii_only=self.ascii_only,
+                monochrome=self.monochrome,
                 warning_color=self._theme_colors.get("warning", "yellow"),
                 warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=self._notice_for(session),
@@ -3783,6 +3807,7 @@ class WsApp(App[str | None]):
                 session,
                 self._row_width(),
                 ascii_only=self.ascii_only,
+                monochrome=self.monochrome,
                 warning_color=self._theme_colors.get("warning", "yellow"),
                 warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=notice,
@@ -3811,6 +3836,7 @@ class WsApp(App[str | None]):
                 session,
                 self._row_width(),
                 ascii_only=self.ascii_only,
+                monochrome=self.monochrome,
                 warning_color=self._theme_colors.get("warning", "yellow"),
                 warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=self._notice_for(session),
@@ -3859,7 +3885,8 @@ class WsApp(App[str | None]):
     def _quick_option(self, label: str, action: str, symbol: str) -> Option:
         option_id = f"quick:{action}"
         self._option_actions[option_id] = action
-        return Option(Text.assemble((f"{symbol} ", "bold #66aaff"), label), id=option_id)
+        accent = self._theme_colors.get("accent", "#66aaff")
+        return Option(Text.assemble((f"{symbol} ", f"bold {accent}"), label), id=option_id)
 
     def _warning_count(self) -> int:
         return sum(is_warning(session, self._notice_for(session)) for session in self.sessions)
@@ -3881,22 +3908,28 @@ class WsApp(App[str | None]):
         self._option_actions[option_id] = "toggle_unmanaged"
         symbol = "x" if self.ascii_only else "◐"
         label = "Managed sessions only" if self.show_unmanaged else "Show all tmux sessions"
-        return Option(Text.assemble((f"{symbol} ", "bold #66aaff"), label), id=option_id)
+        accent = self._theme_colors.get("accent", "#66aaff")
+        return Option(Text.assemble((f"{symbol} ", f"bold {accent}"), label), id=option_id)
+
+    def _attention_style(self) -> str:
+        accent = self._theme_colors.get("accent", "#66aaff")
+        warning = self._theme_colors.get("warning", "#e9b44c")
+        return f"bold {warning}" if self._warning_count() else f"bold {accent}"
 
     def _attention_option(self) -> Option:
         option_id = "quick:attention"
         self._option_actions[option_id] = "attention"
-        style = "bold #e9b44c" if self._warning_count() else "bold #66aaff"
-        return Option(Text.assemble(("! ", style), self._attention_label()), id=option_id)
+        return Option(
+            Text.assemble(("! ", self._attention_style()), self._attention_label()), id=option_id
+        )
 
     def _render_attention_action(self) -> None:
         option_id = "quick:attention"
         if option_id not in self._option_actions:
             return
-        style = "bold #e9b44c" if self._warning_count() else "bold #66aaff"
         self.query_one("#sessions", OptionList).replace_option_prompt(
             option_id,
-            Text.assemble(("! ", style), self._attention_label()),
+            Text.assemble(("! ", self._attention_style()), self._attention_label()),
         )
 
     def _render_options(self) -> None:
@@ -3945,6 +3978,7 @@ class WsApp(App[str | None]):
                             session,
                             self._row_width(),
                             ascii_only=self.ascii_only,
+                            monochrome=self.monochrome,
                             warning_color=self._theme_colors.get("warning", "yellow"),
                             warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                             notice=self._notice_for(session),
@@ -4027,7 +4061,9 @@ class WsApp(App[str | None]):
         selected = self._selected()
         if self.narrow_detail_open and selected is not None:
             text.append("  Session  ", "dim")
-            text.append(selected.tool.value.upper(), TOOL_STYLES[selected.tool])
+            text.append(
+                selected.tool.value.upper(), tool_style(selected.tool, monochrome=self.monochrome)
+            )
             warning = is_warning(selected, self._notice_for(selected))
             available = max(12, self.size.width - 23 - (3 if warning else 0))
             text.append(
@@ -4040,12 +4076,22 @@ class WsApp(App[str | None]):
             text.append(f"  {product}  v{__version__}")
             text.append(f"    {counts}{filter_text}", "dim")
             text.append(f"    {truncate(self.hostname, 22, ascii_only=self.ascii_only)}")
-            text.append(f"{separator}{connection}", "green" if self.tmux_connected else "red")
+            text.append(
+                f"{separator}{connection}",
+                self._theme_colors.get("success", "green")
+                if self.tmux_connected
+                else self._theme_colors.get("error", "red"),
+            )
         elif self.has_class("wide"):
             product = truncate("Workspace Session Manager", 60, ascii_only=self.ascii_only)
             text.append(f"  {product}")
             text.append(f"    {counts}{filter_text}", "dim")
-            text.append(f"{separator}{connection}", "green" if self.tmux_connected else "red")
+            text.append(
+                f"{separator}{connection}",
+                self._theme_colors.get("success", "green")
+                if self.tmux_connected
+                else self._theme_colors.get("error", "red"),
+            )
         elif self.has_class("medium"):
             product = truncate("Workspace Session Manager", 60, ascii_only=self.ascii_only)
             text.append(f"  {product}")
@@ -4187,7 +4233,10 @@ class WsApp(App[str | None]):
         self._store_notice(session, notice, observed_at=datetime.now(UTC))
         separator = " / " if self.ascii_only else " · "
         identity = Text()
-        identity.append(f"{session.tool.value.upper():<7}", style=TOOL_STYLES[session.tool])
+        identity.append(
+            f"{session.tool.value.upper():<7}",
+            style=tool_style(session.tool, monochrome=self.monochrome),
+        )
         identity_name = session.name
         alert_title = notice.title
         if self.has_class("narrow"):
@@ -4229,7 +4278,7 @@ class WsApp(App[str | None]):
                     f"Last active {relative_activity(session.last_active_at)} ago",
                 )
             ),
-            RUNTIME_STYLES[session.runtime],
+            runtime_style(session.runtime, monochrome=self.monochrome),
         )
         self.query_one("#identity", Static).update(identity)
         overview_values = [
@@ -4557,6 +4606,7 @@ class WsApp(App[str | None]):
             session,
             self._row_width(),
             ascii_only=self.ascii_only,
+            monochrome=self.monochrome,
             warning_color=self._theme_colors.get("warning", "yellow"),
             warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
             notice=self._notice_for(session),
@@ -4603,6 +4653,7 @@ class WsApp(App[str | None]):
             session,
             self._row_width(),
             ascii_only=self.ascii_only,
+            monochrome=self.monochrome,
             warning_color=self._theme_colors.get("warning", "yellow"),
             warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
             notice=self._notice_for(session),
