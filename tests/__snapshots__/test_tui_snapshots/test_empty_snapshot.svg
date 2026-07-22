@@ -36,11 +36,11 @@
 .terminal-r2 { fill: #72c78e;font-weight: bold }
 .terminal-r3 { fill: #c9d8e0 }
 .terminal-r4 { fill: #96a1aa }
-.terminal-r5 { fill: #98e024 }
+.terminal-r5 { fill: #72c78e }
 .terminal-r6 { fill: #3f8a9d }
 .terminal-r7 { fill: #8a949c }
 .terminal-r8 { fill: #6a727a;font-weight: bold }
-.terminal-r9 { fill: #66aaff;font-weight: bold }
+.terminal-r9 { fill: #df6c75;font-weight: bold }
 .terminal-r10 { fill: #8a949c;font-weight: bold }
 .terminal-r11 { fill: #b4c3ca }
 .terminal-r12 { fill: #deedf5;font-weight: bold }

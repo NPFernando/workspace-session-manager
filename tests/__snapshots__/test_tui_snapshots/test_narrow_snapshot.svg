@@ -40,8 +40,8 @@
 .terminal-r6 { fill: #6a727a;font-weight: bold }
 .terminal-r7 { fill: #333840 }
 .terminal-r8 { fill: #c9d8e0 }
-.terminal-r9 { fill: #66aaff;font-weight: bold }
-.terminal-r10 { fill: #e9b44c;font-weight: bold }
+.terminal-r9 { fill: #df6c75;font-weight: bold }
+.terminal-r10 { fill: #e8b44c;font-weight: bold }
 .terminal-r11 { fill: #ffffff }
 .terminal-r12 { fill: #e8b44c }
 .terminal-r13 { fill: #c792ea;font-weight: bold }
@@ -51,8 +51,9 @@
 .terminal-r17 { fill: #c9d8e0;font-weight: bold }
 .terminal-r18 { fill: #96a1a9 }
 .terminal-r19 { fill: #9aa6ad }
-.terminal-r20 { fill: #181c23 }
-.terminal-r21 { fill: #b4c3ca }
+.terminal-r20 { fill: #66aaff;font-weight: bold }
+.terminal-r21 { fill: #181c23 }
+.terminal-r22 { fill: #b4c3ca }
     </style>
 
     <defs>
@@ -160,10 +161,10 @@
 </text><text class="terminal-r6" x="24.4" y="434.8" textLength="97.6" clip-path="url(#terminal-line-17)">DETACHED</text><text class="terminal-r1" x="976" y="434.8" textLength="12.2" clip-path="url(#terminal-line-17)">
 </text><text class="terminal-r2" x="48.8" y="459.2" textLength="85.4" clip-path="url(#terminal-line-18)">SHELL&#160;&#160;</text><text class="terminal-r17" x="134.2" y="459.2" textLength="744.2" clip-path="url(#terminal-line-18)">maintenance-shell&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-r18" x="878.4" y="459.2" textLength="36.6" clip-path="url(#terminal-line-18)">&lt;1m</text><text class="terminal-r1" x="976" y="459.2" textLength="12.2" clip-path="url(#terminal-line-18)">
 </text><text class="terminal-r19" x="48.8" y="483.6" textLength="268.4" clip-path="url(#terminal-line-19)">Detached&#160;·&#160;Unspecified</text><text class="terminal-r1" x="976" y="483.6" textLength="12.2" clip-path="url(#terminal-line-19)">
-</text><text class="terminal-r9" x="48.8" y="508" textLength="85.4" clip-path="url(#terminal-line-20)">CODEX&#160;&#160;</text><text class="terminal-r17" x="134.2" y="508" textLength="744.2" clip-path="url(#terminal-line-20)">codex-astrology-website&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-r18" x="878.4" y="508" textLength="36.6" clip-path="url(#terminal-line-20)">&lt;1m</text><text class="terminal-r20" x="939.4" y="508" textLength="24.4" clip-path="url(#terminal-line-20)">▆▆</text><text class="terminal-r1" x="976" y="508" textLength="12.2" clip-path="url(#terminal-line-20)">
+</text><text class="terminal-r20" x="48.8" y="508" textLength="85.4" clip-path="url(#terminal-line-20)">CODEX&#160;&#160;</text><text class="terminal-r17" x="134.2" y="508" textLength="744.2" clip-path="url(#terminal-line-20)">codex-astrology-website&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-r18" x="878.4" y="508" textLength="36.6" clip-path="url(#terminal-line-20)">&lt;1m</text><text class="terminal-r21" x="939.4" y="508" textLength="24.4" clip-path="url(#terminal-line-20)">▆▆</text><text class="terminal-r1" x="976" y="508" textLength="12.2" clip-path="url(#terminal-line-20)">
 </text><text class="terminal-r19" x="48.8" y="532.4" textLength="268.4" clip-path="url(#terminal-line-21)">Detached&#160;·&#160;In&#160;progress</text><text class="terminal-r1" x="976" y="532.4" textLength="12.2" clip-path="url(#terminal-line-21)">
 </text><text class="terminal-r4" x="0" y="556.8" textLength="976" clip-path="url(#terminal-line-22)">────────────────────────────────────────────────────────────────────────────────</text><text class="terminal-r1" x="976" y="556.8" textLength="12.2" clip-path="url(#terminal-line-22)">
-</text><text class="terminal-r21" x="12.2" y="581.2" textLength="890.6" clip-path="url(#terminal-line-23)">↑↓/jk&#160;Nav&#160;&#160;&#160;Enter&#160;Open&#160;&#160;&#160;c&#160;Create&#160;&#160;&#160;/&#160;Search&#160;&#160;&#160;f&#160;Filter&#160;&#160;&#160;?&#160;Help&#160;&#160;&#160;q&#160;Quit</text>
+</text><text class="terminal-r22" x="12.2" y="581.2" textLength="890.6" clip-path="url(#terminal-line-23)">↑↓/jk&#160;Nav&#160;&#160;&#160;Enter&#160;Open&#160;&#160;&#160;c&#160;Create&#160;&#160;&#160;/&#160;Search&#160;&#160;&#160;f&#160;Filter&#160;&#160;&#160;?&#160;Help&#160;&#160;&#160;q&#160;Quit</text>
     </g>
     </g>
 </svg>
