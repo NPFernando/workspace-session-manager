@@ -366,6 +366,18 @@ def test_light_snapshot(
     assert snap_compare(app, terminal_size=(120, 35))
 
 
+@pytest.mark.parametrize("theme", ["dark", "midnight", "cyberpunk", "terminal", "paper"])
+def test_named_theme_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    theme: str,
+) -> None:
+    app = populated_app(service, fake_backend)
+    app.ui_theme = theme
+    assert snap_compare(app, terminal_size=(120, 35))
+
+
 def test_diagnostics_modal_snapshot(
     snap_compare: SnapCompare,
     service: SessionService,
@@ -488,7 +500,10 @@ def test_manage_disabled_snapshot(
     assert snap_compare(app, terminal_size=(120, 35), run_before=open_manage)
 
 
-@pytest.mark.parametrize("theme", ["light", "monochrome"])
+@pytest.mark.parametrize(
+    "theme",
+    ["dark", "light", "monochrome", "midnight", "cyberpunk", "terminal", "paper"],
+)
 def test_manage_theme_snapshot(
     snap_compare: SnapCompare,
     service: SessionService,
@@ -666,7 +681,10 @@ def test_logs_empty_snapshot(
     assert snap_compare(app, terminal_size=(120, 35), run_before=show_empty)
 
 
-@pytest.mark.parametrize("theme", ["light", "monochrome"])
+@pytest.mark.parametrize(
+    "theme",
+    ["dark", "light", "monochrome", "midnight", "cyberpunk", "terminal", "paper"],
+)
 def test_logs_theme_snapshot(
     snap_compare: SnapCompare,
     service: SessionService,
@@ -791,7 +809,10 @@ def test_narrow_detail_long_content_snapshot(
     assert snap_compare(app, terminal_size=(99, 30), run_before=show_detail)
 
 
-@pytest.mark.parametrize("theme", ["light", "monochrome"])
+@pytest.mark.parametrize(
+    "theme",
+    ["dark", "light", "monochrome", "midnight", "cyberpunk", "terminal", "paper"],
+)
 def test_narrow_detail_theme_snapshot(
     snap_compare: SnapCompare,
     service: SessionService,

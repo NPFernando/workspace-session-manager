@@ -33,9 +33,9 @@
     }
 
     .terminal-r1 { fill: #c5c8c6 }
-.terminal-r2 { fill: #596b76 }
-.terminal-r3 { fill: #eef3f6;font-weight: bold }
-.terminal-r4 { fill: #9eabb3 }
+.terminal-r2 { fill: #5f8996 }
+.terminal-r3 { fill: #dbe6ec;font-weight: bold }
+.terminal-r4 { fill: #93a3ac }
 .terminal-r5 { fill: #e6e6e6 }
 .terminal-r6 { fill: #8fa0a9;font-weight: bold }
 .terminal-r7 { fill: #000000;font-weight: bold }
@@ -43,8 +43,8 @@
 .terminal-r9 { fill: #9d9d9d }
 .terminal-r10 { fill: #d9757d;font-weight: bold }
 .terminal-r11 { fill: #ef8a91 }
-.terminal-r12 { fill: #41515b }
-.terminal-r13 { fill: #82919a }
+.terminal-r12 { fill: #4d7986 }
+.terminal-r13 { fill: #7e8f99 }
 .terminal-r14 { fill: #e0e0e0;font-weight: bold }
     </style>
 
