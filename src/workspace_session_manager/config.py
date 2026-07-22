@@ -89,6 +89,15 @@ class HealthConfig(BaseModel):
         return fail
 
 
+class NotificationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    telegram_enabled: bool = False
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    telegram_api_base: str = "https://api.telegram.org"
+    subprocess_timeout: float = Field(default=5.0, ge=1.0, le=30.0)
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: int = Field(default=1, ge=1, le=1)
@@ -100,6 +109,7 @@ class AppConfig(BaseModel):
     log_bytes: int = Field(default=262_144, ge=4096, le=4_194_304)
     interface: InterfaceConfig = Field(default_factory=InterfaceConfig)
     health: HealthConfig = Field(default_factory=HealthConfig)
+    notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     legacy_state_dirs: tuple[Path, ...] = Field(
         default_factory=lambda: (
             Path.home() / ".local" / "state" / "wf" / "sessions",

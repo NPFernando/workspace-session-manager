@@ -57,6 +57,7 @@ from workspace_session_manager.models import (
     Tool,
     normalize_tags,
 )
+from workspace_session_manager.notifier import send_telegram
 from workspace_session_manager.service import SessionService, TailResult, normalized_session_name
 
 BindingSpec = Binding | tuple[str, str] | tuple[str, str, str]
@@ -3754,18 +3755,21 @@ class WsApp(App[str | None]):
             names = ", ".join(new_warnings[:3])
             if len(new_warnings) > 3:
                 names = f"{names}, and {len(new_warnings) - 3} more"
-            self.notify(
+            message = (
                 f"{len(new_warnings)} session{'s' if len(new_warnings) != 1 else ''} "
-                f"need attention: {names}",
-                title="New session warning",
-                severity="warning",
-                timeout=8,
+                f"need attention: {names}"
             )
+            self.notify(message, title="New session warning", severity="warning", timeout=8)
+            self._send_telegram_alert(f"ws: {message}")
         if warning_membership_changed and self.filters.warnings_only:
             self._render_options()
         else:
             self._render_header()
             self._render_attention_action()
+
+    @work(thread=True, group="telegram-alert")
+    def _send_telegram_alert(self, text: str) -> None:
+        send_telegram(self.service.config.notifications, text)
 
     def _start_health_scan(self, *, force: bool = False) -> None:
         if (
