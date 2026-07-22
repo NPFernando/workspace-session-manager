@@ -138,6 +138,13 @@ class RenameValidation:
         return not self.name_error
 
 
+@dataclass(frozen=True, slots=True)
+class TailResult:
+    text: str
+    offset: int
+    rotated: bool
+
+
 def slugify_name(value: str) -> str:
     ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
     normalized = re.sub(r"[^a-z0-9]+", "-", ascii_value.lower())
@@ -695,6 +702,53 @@ class SessionService:
         except OSError as error:
             raise StateError(f"unable to inspect log for {name}: {error}") from error
         return stat.S_ISREG(details.st_mode) and details.st_uid == os.getuid()
+
+    def tail_log(self, name: str, offset: int, *, max_bytes: int | None = None) -> TailResult:
+        """Read content appended to a session's saved log since `offset`.
+
+        `stream_to_log` (log_sink.py) already redacts/sanitizes each line as
+        it's written, so a plain incremental read is safe here; rotation
+        (log_sink.py's `_rotate`) can shrink the file out from under a stale
+        offset, which this detects (`size < offset`) and reports as
+        `rotated=True` with a fresh bounded tail instead of a negative read.
+        """
+        bytes_cap = max_bytes or self.config.log_bytes
+        record = self.store.load(name)
+        if record is None:
+            return TailResult(text="", offset=0, rotated=False)
+        path = self._log_path(record)
+        if not path.exists() or path.is_symlink():
+            return TailResult(text="", offset=0, rotated=False)
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            descriptor = os.open(path, flags)
+            try:
+                details = os.fstat(descriptor)
+                if not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid():
+                    raise StateError(f"refusing unsafe log: {path.name}")
+                size = details.st_size
+                if size < offset:
+                    start = max(0, size - bytes_cap)
+                    os.lseek(descriptor, start, os.SEEK_SET)
+                    content = os.read(descriptor, bytes_cap).decode("utf-8", errors="replace")
+                    bounded = bounded_output(
+                        content, max_lines=self.config.log_lines, max_bytes=bytes_cap
+                    )
+                    return TailResult(text=bounded.text, offset=size, rotated=True)
+                new_bytes = size - offset
+                if new_bytes <= 0:
+                    return TailResult(text="", offset=offset, rotated=False)
+                read_size = min(new_bytes, bytes_cap)
+                start = size - read_size
+                os.lseek(descriptor, start, os.SEEK_SET)
+                content = os.read(descriptor, read_size).decode("utf-8", errors="replace")
+                return TailResult(text=redact_text(content), offset=size, rotated=start > offset)
+            finally:
+                os.close(descriptor)
+        except OSError as error:
+            raise StateError(f"unable to tail log for {name}: {error}") from error
 
     def _managed_record(self, name: str, *, require_live: bool = False) -> SessionMetadata:
         record = self.store.load(name)

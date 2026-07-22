@@ -271,7 +271,7 @@ class CreateRequest(BaseModel):
     tags: Annotated[list[str], Field(max_length=12)] = Field(default_factory=list)
     task_state: TaskState = TaskState.IN_PROGRESS
     input_state: InputState = InputState.NONE
-    logging_enabled: bool = False
+    logging_enabled: bool = True
     automatic_prefix: bool = True
 
     @field_validator("tags")
