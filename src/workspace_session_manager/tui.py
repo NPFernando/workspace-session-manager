@@ -277,6 +277,8 @@ def is_warning(session: SessionView, notice: ActivityNotice | None = None) -> bo
 
 def session_group(session: SessionView, *, now: datetime | None = None) -> str:
     """Assign each session to exactly one dashboard group."""
+    if not session.owned:
+        return "Unmanaged"
     if session.input_state is InputState.REQUIRED or session.task_state is TaskState.NEEDS_INPUT:
         return "Needs Input"
     if session.pinned:
@@ -313,6 +315,8 @@ def session_row(
     statuses = [display_state(session.runtime.value), display_state(session.task_state.value)]
     if session.input_state is InputState.REQUIRED:
         statuses.append("Input required")
+    if not session.owned:
+        statuses.append("Unmanaged")
     second_value = truncate(separator.join(statuses), max(12, width - 3), ascii_only=ascii_only)
     first.append("\n  ")
     first.append(second_value, style=RUNTIME_STYLES[session.runtime])
@@ -2731,6 +2735,11 @@ class WsCommandProvider(Provider):
                 app.action_attention,
             ),
             (
+                "Dashboard · Show all tmux sessions                  u",
+                "Include sessions ws doesn't manage (or hide them again)",
+                app.action_toggle_unmanaged,
+            ),
+            (
                 "Dashboard · Refresh sessions                     r",
                 "Refresh tmux and metadata state",
                 app.action_refresh,
@@ -2789,6 +2798,7 @@ class WsApp(App[str | None]):
         Binding("r", "refresh", "Refresh"),
         Binding("/", "search", "Search"),
         Binding("f", "filter", "Filter"),
+        Binding("u", "toggle_unmanaged", "All sessions", show=False),
         Binding("p", "command_palette", "Palette"),
         Binding("a", "advanced_details", "Advanced", show=False),
         Binding("t", "cycle_theme", "Theme", show=False),
@@ -2811,6 +2821,7 @@ class WsApp(App[str | None]):
         self.service = service
         self.sessions: list[SessionView] = []
         self.visible_sessions: list[SessionView] = []
+        self.show_unmanaged = False
         self.selected_name: str | None = None
         self.selected_session_id: str | None = None
         self.filter_query = ""
@@ -3432,7 +3443,7 @@ class WsApp(App[str | None]):
         self.add_class("refreshing")
         self._render_header()
         try:
-            sessions = self.service.list_sessions()
+            sessions = self.service.list_sessions(include_unmanaged=self.show_unmanaged)
         except WsError as error:
             self.tmux_connected = False
             self.refresh_error = str(error)
@@ -3614,6 +3625,13 @@ class WsApp(App[str | None]):
             return "Attention (checking)"
         return "Attention"
 
+    def _unmanaged_option(self) -> Option:
+        option_id = "quick:toggle_unmanaged"
+        self._option_actions[option_id] = "toggle_unmanaged"
+        symbol = "x" if self.ascii_only else "◐"
+        label = "Managed sessions only" if self.show_unmanaged else "Show all tmux sessions"
+        return Option(Text.assemble((f"{symbol} ", "bold #66aaff"), label), id=option_id)
+
     def _attention_option(self) -> Option:
         option_id = "quick:attention"
         self._option_actions[option_id] = "attention"
@@ -3645,6 +3663,7 @@ class WsApp(App[str | None]):
         options.add_option(self._quick_option("Search", "search", "/"))
         options.add_option(self._quick_option("Filter sessions", "filter", "="))
         options.add_option(self._quick_option("Recent activity", "recent", "@"))
+        options.add_option(self._unmanaged_option())
         options.add_option(self._attention_option())
 
         self.visible_sessions = [item for item in self.sessions if self._matches_query(item)]
@@ -3655,6 +3674,7 @@ class WsApp(App[str | None]):
             "Failed": [],
             "Stopped": [],
             "Detached": [],
+            "Unmanaged": [],
         }
         now = datetime.now(UTC)
         for session in self.visible_sessions:
@@ -4096,6 +4116,18 @@ class WsApp(App[str | None]):
             self._restore_attention_view(restore_focus=False)
         self.filters = FilterState(recent_only=True)
         self._render_options()
+
+    def action_toggle_unmanaged(self) -> None:
+        if self.interaction_mode is not InteractionMode.NORMAL:
+            return
+        self.show_unmanaged = not self.show_unmanaged
+        self.refresh_sessions()
+        self.notify(
+            "Showing every tmux session, including ones ws doesn't manage."
+            if self.show_unmanaged
+            else "Back to managed sessions only.",
+            timeout=2,
+        )
 
     def action_attention(self) -> None:
         if (
@@ -4828,6 +4860,7 @@ class WsApp(App[str | None]):
             "l        View logs\n"
             "*        Toggle pin\n"
             "d        Manage session\n"
+            "u        Show all tmux sessions (unmanaged too)\n"
             "r        Refresh\n"
             "p        Command palette\n"
             "t        Cycle color theme\n"
