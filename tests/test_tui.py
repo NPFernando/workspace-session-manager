@@ -101,6 +101,14 @@ async def wait_for_log_refresh(pilot: Pilot[object], screen: LogScreen) -> None:
     raise AssertionError("log refresh did not complete")
 
 
+async def wait_for_detail_refresh(pilot: Pilot[object], app: WsApp) -> None:
+    for _ in range(80):
+        if not app._detail_refreshing:
+            return
+        await pilot.pause(0.05)
+    raise AssertionError("detail refresh did not complete")
+
+
 async def wait_for_attention_scan(pilot: Pilot[object], app: WsApp) -> None:
     for _ in range(120):
         if not app._attention_scanning:
@@ -221,7 +229,7 @@ async def test_narrow_detail_restores_viewports_after_forms_logs_and_back(
         assert app.narrow_detail_open
         app.output_mode = "raw"
         app._render_details(name)
-        await pilot.pause()
+        await wait_for_detail_refresh(pilot, app)
         inspector = app.query_one("#inspector-scroll", VerticalScroll)
         output = app.query_one("#recent-output-scroll", VerticalScroll)
         await pilot.press("j")
@@ -1251,6 +1259,7 @@ async def test_attention_scan_finds_unselected_warning_and_restores_temporary_vi
     )
 
     async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_detail_refresh(pilot, app)
         await wait_for_attention_scan(pilot, app)
         assert app.selected_name == selected
         assert "1 warning" in str(app.query_one("#app-header", Static).content)
@@ -1324,6 +1333,7 @@ async def test_attention_scan_notifies_once_after_baseline_and_clears_resolution
     )
 
     async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_detail_refresh(pilot, app)
         await wait_for_attention_scan(pilot, app)
         assert app._attention_baseline_established
         assert notifications == []
