@@ -1,14 +1,14 @@
 Screen {
-    background: #282c34;
-    color: #c9d8e0;
+    background: $background;
+    color: $foreground;
 }
 
 #log-header {
     dock: top;
     height: 3;
     padding: 1 2 0 2;
-    background: #333844;
-    border-bottom: solid #355a66;
+    background: $panel;
+    border-bottom: solid $border;
     overflow: hidden;
 }
 
@@ -20,8 +20,8 @@ Screen {
 #app-header {
     height: 3;
     padding: 1 2 0 2;
-    background: #333844;
-    border-bottom: solid #355a66;
+    background: $panel;
+    border-bottom: solid $border;
     overflow: hidden;
 }
 
@@ -34,8 +34,8 @@ Screen {
     display: none;
     height: 3;
     padding: 0 2;
-    background: #333844;
-    border-bottom: solid #355a66;
+    background: $panel;
+    border-bottom: solid $border;
 }
 
 .searching #search-mode {
@@ -52,8 +52,8 @@ Screen {
     display: none;
     height: 2;
     padding: 0 2;
-    background: #333844;
-    border-bottom: solid #355a66;
+    background: $panel;
+    border-bottom: solid $border;
 }
 
 .has-alerts #health-row {
@@ -68,21 +68,21 @@ Screen {
     width: 9;
     height: 3;
     padding-top: 1;
-    color: #93a3ac;
+    color: $foreground-muted;
 }
 
 #search {
     width: 1fr;
     height: 3;
-    border: tall #3f8a9d;
-    background: #23262e;
+    border: tall $primary;
+    background: $background-darken-1;
 }
 
 #search-hint {
     width: 25;
     height: 3;
     padding: 1 0 0 2;
-    color: #7e8f99;
+    color: $text-muted;
 }
 
 #workspace {
@@ -92,8 +92,8 @@ Screen {
 #session-pane {
     width: 36%;
     min-width: 36;
-    border-right: solid #355a66;
-    background: #262a32;
+    border-right: solid $border;
+    background: $surface;
 }
 
 .medium #session-pane {
@@ -103,10 +103,10 @@ Screen {
 #sessions {
     height: 1fr;
     padding: 0 1;
-    background: #262a32;
+    background: $surface;
     border: none;
-    scrollbar-color: #47545c;
-    scrollbar-background: #2a2e36;
+    scrollbar-color: $scrollbar;
+    scrollbar-background: $scrollbar-background;
 }
 
 OptionList > .option-list--option {
@@ -114,25 +114,25 @@ OptionList > .option-list--option {
 }
 
 OptionList > .option-list--option:hover {
-    background: #19242c;
+    background: $background-lighten-1;
 }
 
 OptionList > .option-list--option-highlighted {
-    background: #2f6b7a;
+    background: $primary;
     color: #ffffff;
     text-style: none;
 }
 
 OptionList > .option-list--option-disabled {
-    color: #78868f;
-    background: #262a32;
+    color: $foreground-muted;
+    background: $surface;
     padding-top: 1;
 }
 
 #detail-pane {
     width: 64%;
     min-width: 40;
-    background: #282c34;
+    background: $background;
     align-horizontal: center;
 }
 
@@ -146,8 +146,8 @@ OptionList > .option-list--option-disabled {
     height: auto;
     min-height: 4;
     padding: 1 2;
-    background: #2e323b;
-    border-bottom: solid #355a66;
+    background: $panel-lighten-1;
+    border-bottom: solid $border;
 }
 
 #inspector-scroll {
@@ -155,8 +155,8 @@ OptionList > .option-list--option-disabled {
     max-width: 120;
     height: 1fr;
     padding: 1 2 0 2;
-    scrollbar-color: #47545c;
-    scrollbar-background: #282c34;
+    scrollbar-color: $scrollbar;
+    scrollbar-background: $scrollbar-background;
 }
 
 #overview-status-row {
@@ -184,35 +184,35 @@ OptionList > .option-list--option-disabled {
     min-height: 3;
     margin-bottom: 1;
     padding: 0 1 1 1;
-    background: #2c3038;
-    border-left: solid #3f6470;
+    background: $surface;
+    border-left: solid $border;
 }
 
 .inspector-card.warning {
-    border-left: solid #c5903c;
-    background: #1d1b15;
+    border-left: solid $warning;
+    background: $warning-muted;
 }
 
 .inspector-card.error {
-    border-left: solid #c75b64;
-    background: #211719;
+    border-left: solid $error;
+    background: $error-muted;
 }
 
 .inspector-card.success {
-    border-left: solid #477c59;
+    border-left: solid $success;
 }
 
 .section-title {
     height: 2;
     padding-top: 1;
-    color: #8998a1;
+    color: $foreground-muted;
     text-style: bold;
 }
 
 .section-body {
     height: auto;
     min-height: 1;
-    color: #c7d3da;
+    color: $foreground-darken-1;
 }
 
 #activity-card {
@@ -241,13 +241,13 @@ OptionList > .option-list--option-disabled {
     margin-top: 1;
     padding: 0 1;
     border: none;
-    color: #7e8f99;
-    background: #2c3038;
+    color: $text-muted;
+    background: $surface;
 }
 
 .output-mode.active {
-    color: #dbe6ec;
-    background: #35606b;
+    color: $foreground-lighten-1;
+    background: $primary-muted;
     text-style: bold;
 }
 
@@ -256,24 +256,24 @@ OptionList > .option-list--option-disabled {
     height: 2;
     padding-top: 1;
     text-align: right;
-    color: #78868f;
+    color: $foreground-muted;
     overflow: hidden;
 }
 
 #recent-output-scroll {
     height: 1fr;
     min-height: 6;
-    background: #1c1f26;
-    border-top: solid #33414a;
-    scrollbar-color: #47545c;
-    scrollbar-background: #1c1f26;
+    background: $background-darken-2;
+    border-top: solid $border;
+    scrollbar-color: $scrollbar;
+    scrollbar-background: $scrollbar-background;
 }
 
 .output-body {
     height: auto;
     min-height: 100%;
     padding: 1;
-    color: #b7c4cc;
+    color: $foreground-darken-1;
 }
 
 #actions-card {
@@ -283,9 +283,9 @@ OptionList > .option-list--option-disabled {
     min-height: 5;
     margin-bottom: 0;
     padding: 0 2;
-    border-top: solid #355a66;
+    border-top: solid $border;
     border-left: none;
-    background: #2c3038;
+    background: $surface;
 }
 
 #session-actions {
@@ -297,9 +297,9 @@ OptionList > .option-list--option-disabled {
     dock: bottom;
     height: 2;
     padding: 0 2;
-    background: #333844;
-    color: #b2c0c8;
-    border-top: solid #355a66;
+    background: $panel;
+    color: $foreground-darken-1;
+    border-top: solid $border;
     content-align: left middle;
     overflow: hidden;
 }
@@ -310,7 +310,7 @@ OptionList > .option-list--option-disabled {
     height: 100%;
     content-align: center middle;
     text-align: center;
-    color: #c7d3da;
+    color: $foreground-darken-1;
 }
 
 .short #identity {
@@ -375,7 +375,7 @@ OptionList > .option-list--option-disabled {
 }
 
 .narrow.narrow-detail #inspector-scroll:focus {
-    border-left: solid #3f8a9d;
+    border-left: solid $primary;
 }
 
 .narrow.narrow-detail #output-heading .section-title {
@@ -425,10 +425,10 @@ ModalScreen {
     height: auto;
     max-height: 92%;
     padding: 1 2;
-    border: solid #5f8996;
-    background: #333844;
-    scrollbar-color: #47545c;
-    scrollbar-background: #333844;
+    border: solid $border;
+    background: $panel;
+    scrollbar-color: $scrollbar;
+    scrollbar-background: $scrollbar-background;
 }
 
 .create-dialog {
@@ -449,8 +449,8 @@ ModalScreen {
 #create-advanced {
     height: 1fr;
     min-height: 8;
-    scrollbar-color: #47545c;
-    scrollbar-background: #333844;
+    scrollbar-color: $scrollbar;
+    scrollbar-background: $scrollbar-background;
 }
 
 .form-row {
@@ -465,32 +465,32 @@ ModalScreen {
 .task-row TextArea {
     width: 1fr;
     height: 3;
-    border: tall #45707d;
-    background: #23262e;
+    border: tall $border;
+    background: $background-darken-1;
 }
 
 .field-status {
     height: auto;
     min-height: 1;
     margin-left: 18;
-    color: #7e8f99;
+    color: $text-muted;
 }
 
 .field-status.valid {
-    color: #72c78e;
+    color: $success;
 }
 
 .field-status.invalid,
 #create-submit-reason.invalid {
-    color: #ef6b73;
+    color: $error;
 }
 
 .field-status.warning {
-    color: #e9b44c;
+    color: $warning;
 }
 
 .field-status.checking {
-    color: #7e8f99;
+    color: $text-muted;
 }
 
 .form-row .field-label,
@@ -512,14 +512,14 @@ ModalScreen {
 .create-dialog Select {
     height: 1;
     border: none;
-    background: #23262e;
+    background: $background-darken-1;
 }
 
 .create-dialog Input:focus,
 .create-dialog Select:focus {
     border: none;
-    background: #2a3742;
-    color: #dbe6ec;
+    background: $primary-muted;
+    color: $foreground-lighten-1;
 }
 
 #create-cwd {
@@ -563,10 +563,10 @@ ModalScreen {
 #manage-actions {
     height: 1fr;
     min-height: 10;
-    background: #292d35;
+    background: $surface;
     border: none;
-    scrollbar-color: #47545c;
-    scrollbar-background: #333844;
+    scrollbar-color: $scrollbar;
+    scrollbar-background: $scrollbar-background;
 }
 
 #manage-actions > .option-list--option {
@@ -579,14 +579,14 @@ ModalScreen {
     height: 1;
     min-height: 1;
     padding: 0 1;
-    background: #262a32;
+    background: $surface;
 }
 
 #manage-search {
     display: none;
     height: 1;
     border: none;
-    background: #262a32;
+    background: $surface;
 }
 
 .finding #manage-search {
@@ -597,9 +597,9 @@ ModalScreen {
     height: 3;
     min-height: 3;
     padding: 0 1;
-    border-left: solid #4d7986;
-    background: #2c3038;
-    color: #b7c4cc;
+    border-left: solid $border;
+    background: $surface;
+    color: $foreground-darken-1;
 }
 
 #manage-help {
@@ -646,13 +646,13 @@ ModalScreen {
 .identity-dialog Input {
     height: 1;
     border: none;
-    background: #23262e;
+    background: $background-darken-1;
 }
 
 .identity-dialog Input:focus {
     border: none;
-    background: #2a3742;
-    color: #dbe6ec;
+    background: $primary-muted;
+    color: $foreground-lighten-1;
 }
 
 .identity-dialog .field-status {
@@ -667,8 +667,8 @@ ModalScreen {
 #note-value {
     height: 1fr;
     min-height: 6;
-    border: tall #45707d;
-    background: #23262e;
+    border: tall $border;
+    background: $background-darken-1;
 }
 
 #note-status {
@@ -687,13 +687,13 @@ ModalScreen {
 
 #diagnostics-meta {
     height: 1;
-    color: #7e8f99;
+    color: $text-muted;
 }
 
 #diagnostics-loading {
     height: 1;
     display: none;
-    color: #5fc2d6;
+    color: $primary-lighten-1;
 }
 
 .message-dialog {
@@ -703,31 +703,31 @@ ModalScreen {
 
 .dialog-title {
     height: 2;
-    color: #dbe6ec;
+    color: $foreground-lighten-1;
     text-style: bold;
 }
 
 .dialog-context, .confirm-name {
     height: auto;
     margin-bottom: 1;
-    color: #93a3ac;
+    color: $foreground-muted;
 }
 
 .mode-help {
     height: auto;
     min-height: 1;
     margin-top: 1;
-    color: #7e8f99;
+    color: $text-muted;
 }
 
 .field-label {
     height: 1;
     margin-top: 1;
-    color: #a0aeb5;
+    color: $foreground-muted;
 }
 
 .secondary-field {
-    color: #7d8a92;
+    color: $foreground-muted;
 }
 
 .dialog Input,
@@ -737,8 +737,8 @@ ModalScreen {
 
 Input:focus,
 Select:focus {
-    border: tall #5fc2d6;
-    background: #2a2f3a;
+    border: tall $primary-lighten-1;
+    background: $background-lighten-1;
 }
 
 Button {
@@ -746,28 +746,28 @@ Button {
 }
 
 Button:hover {
-    background: #2b3943;
+    background: $background-lighten-1;
 }
 
 Button:focus {
-    border: tall #7fd0e0;
+    border: tall $primary-lighten-2;
     text-style: bold;
 }
 
 Button:disabled {
-    color: #66737b;
-    background: #33373d;
-    border: tall #30383d;
+    color: $foreground-disabled;
+    background: $panel-darken-1;
+    border: tall $panel-lighten-1;
     text-style: none;
 }
 
 Button.-error {
-    color: #fff1f2;
-    background: #7f333b;
+    color: $foreground;
+    background: $error-muted;
 }
 
 Button.-error:focus {
-    border: tall #ff8c95;
+    border: tall $error-lighten-1;
 }
 
 #logging-row {
@@ -791,13 +791,13 @@ Button.-error:focus {
 #prefix-state {
     width: 1fr;
     height: 1;
-    color: #b7c4cc;
+    color: $foreground-darken-1;
 }
 
 #logging-hint {
     height: 2;
     margin-left: 18;
-    color: #7e8f99;
+    color: $text-muted;
 }
 
 #command-preview,
@@ -806,13 +806,13 @@ Button.-error:focus {
     height: auto;
     min-height: 1;
     padding: 0 1;
-    background: #1c1f26;
-    color: #b7c4cc;
+    background: $background-darken-2;
+    color: $foreground-darken-1;
 }
 
 #create-submit-reason {
     margin-top: 0;
-    color: #7e8f99;
+    color: $text-muted;
 }
 
 #create-summary {
@@ -821,13 +821,13 @@ Button.-error:focus {
     max-height: 6;
     margin-top: 1;
     padding: 0 1;
-    border-left: solid #3e6d55;
-    background: #121a17;
+    border-left: solid $success-muted;
+    background: $success-muted;
 }
 
 #create-form-help {
     height: 1;
-    color: #7e8f99;
+    color: $text-muted;
     text-align: right;
 }
 
@@ -839,14 +839,14 @@ Button.-error:focus {
     margin-left: 18;
     border: none;
     background: transparent;
-    color: #93a3ac;
+    color: $foreground-muted;
     text-align: left;
 }
 
 #create-advanced-toggle:focus {
     border: none;
-    background: #2a3742;
-    color: #7fd0e0;
+    background: $primary-muted;
+    color: $primary-lighten-2;
 }
 
 #create-advanced.collapsed {
@@ -856,7 +856,7 @@ Button.-error:focus {
 .field-help {
     height: 1;
     margin-left: 18;
-    color: #7e8f99;
+    color: $text-muted;
 }
 
 #create-advanced-content {
@@ -883,8 +883,8 @@ Button.-error:focus {
 .compact-form #create-basic {
     height: 1fr;
     overflow-y: auto;
-    scrollbar-color: #47545c;
-    scrollbar-background: #333844;
+    scrollbar-color: $scrollbar;
+    scrollbar-background: $scrollbar-background;
 }
 
 .dialog-actions {
@@ -917,11 +917,11 @@ Button.-error:focus {
 }
 
 .danger-dialog {
-    border: solid #b94f59;
+    border: solid $error;
 }
 
 .danger-title {
-    color: #ef6b73;
+    color: $error;
 }
 
 .confirm-copy {
@@ -938,8 +938,8 @@ Button.-error:focus {
 #diagnostics-summary {
     height: 2;
     padding: 0 1;
-    background: #23262e;
-    color: #b7c4cc;
+    background: $background-darken-1;
+    color: $foreground-darken-1;
 }
 
 #diagnostics-list {
@@ -947,7 +947,7 @@ Button.-error:focus {
     min-height: 10;
     margin-top: 1;
     padding: 1;
-    background: #23262e;
+    background: $background-darken-1;
 }
 
 #diagnostics-content {
@@ -960,7 +960,7 @@ Button.-error:focus {
 }
 
 .logs-workspace {
-    background: #282c34;
+    background: $background;
 }
 
 .logs-workspace #log-header {
@@ -972,8 +972,8 @@ Button.-error:focus {
 #log-status {
     height: 1;
     padding: 0 2;
-    background: #2c3038;
-    color: #a2adb3;
+    background: $surface;
+    color: $foreground-muted;
     overflow: hidden;
 }
 
@@ -981,8 +981,8 @@ Button.-error:focus {
     height: 2;
     min-height: 2;
     padding: 0 2;
-    background: #2c3038;
-    border-bottom: solid #355a66;
+    background: $surface;
+    border-bottom: solid $border;
 }
 
 #log-controls Button {
@@ -992,25 +992,25 @@ Button.-error:focus {
     min-height: 1;
     margin-right: 1;
     border: none;
-    background: #343841;
-    color: #a0aeb5;
+    background: $panel-lighten-1;
+    color: $foreground-muted;
 }
 
 #log-controls Button.active {
-    background: #2f6b7a;
+    background: $primary;
     color: #ffffff;
     text-style: bold;
 }
 
 #log-controls Button:focus {
     border: none;
-    background: #3a8494;
+    background: $primary-lighten-1;
 }
 
 #log-controls Button:disabled {
     border: none;
-    background: #2a2e36;
-    color: #5d6a70;
+    background: $background-darken-1;
+    color: $foreground-disabled;
 }
 
 #log-follow {
@@ -1021,7 +1021,7 @@ Button.-error:focus {
 #log-output-meta {
     width: 1fr;
     height: 1;
-    color: #7e8f99;
+    color: $text-muted;
     text-align: right;
     overflow: hidden;
 }
@@ -1036,16 +1036,16 @@ Button.-error:focus {
 
 .has-log-alert #log-alert {
     display: block;
-    background: #302814;
-    color: #f0c66c;
-    border-bottom: solid #80682f;
+    background: $warning-muted;
+    color: $text-warning;
+    border-bottom: solid $warning;
 }
 
 .has-log-error #log-error {
     display: block;
-    background: #31191c;
-    color: #ef8a91;
-    border-bottom: solid #8d3f47;
+    background: $error-muted;
+    color: $text-error;
+    border-bottom: solid $error;
 }
 
 #log-find {
@@ -1053,7 +1053,7 @@ Button.-error:focus {
     height: 1;
     min-height: 1;
     padding: 0 2;
-    background: #2a3540;
+    background: $panel-lighten-1;
 }
 
 .finding #log-find {
@@ -1062,7 +1062,7 @@ Button.-error:focus {
 
 #log-find-label {
     width: 7;
-    color: #7fd0e0;
+    color: $primary-lighten-2;
     text-style: bold;
 }
 
@@ -1070,18 +1070,18 @@ Button.-error:focus {
     width: 1fr;
     height: 1;
     border: none;
-    background: #23262e;
+    background: $background-darken-1;
 }
 
 #log-find-input:focus {
     border: none;
-    background: #2a3742;
+    background: $primary-muted;
 }
 
 #log-find-count {
     width: 14;
     padding-left: 1;
-    color: #93a3ac;
+    color: $foreground-muted;
     text-align: right;
 }
 
@@ -1090,24 +1090,24 @@ Button.-error:focus {
     min-height: 8;
     padding: 0 1;
     border: none;
-    background: #282c34;
-    color: #c3ccd2;
-    scrollbar-color: #47545c;
-    scrollbar-background: #282c34;
+    background: $background;
+    color: $foreground-darken-1;
+    scrollbar-color: $scrollbar;
+    scrollbar-background: $scrollbar-background;
 }
 
 #log-output:focus {
-    border-left: solid #3f8a9d;
-    background: #23262e;
+    border-left: solid $primary;
+    background: $background-darken-1;
 }
 
 #log-action-bar {
     height: 2;
     min-height: 2;
     padding: 0 2;
-    background: #333844;
-    color: #b7c4cc;
-    border-top: solid #355a66;
+    background: $panel;
+    color: $foreground-darken-1;
+    border-top: solid $border;
     overflow: hidden;
 }
 
@@ -1143,2440 +1143,11 @@ Button.-error:focus {
     width: 100%;
     height: 100%;
     padding: 3 4;
-    color: #c3ccd2;
-    background: #282c34;
+    color: $foreground-darken-1;
+    background: $background;
 }
 
-.light Screen,
-.light #detail-pane,
-.light #inspector-scroll {
-    background: #f4f6f7;
-    color: #20272b;
-}
-
-.light #app-header,
-.light #session-pane,
-.light #action-bar,
-.light #identity,
-.light #actions-card {
-    background: #e7ecef;
-    color: #20272b;
-}
-
-.light #sessions,
-.light OptionList > .option-list--option-disabled {
-    background: #edf1f3;
-    color: #58666e;
-}
-
-.light OptionList > .option-list--option:hover {
-    background: #dce5ea;
-}
-
-.light OptionList > .option-list--option-highlighted {
-    color: #ffffff;
-    background: #24598a;
-}
-
-.light .inspector-card {
-    background: #ffffff;
-    color: #20272b;
-}
-
-.light .section-body,
-.light .output-body {
-    color: #20272b;
-}
-
-.light .logs-workspace,
-.light #log-output,
-.light #log-output:focus {
-    background: #f8fafb;
-    color: #20272b;
-}
-
-.light #log-header,
-.light #log-status,
-.light #log-controls,
-.light #log-action-bar {
-    background: #e7ecef;
-    color: #3d4a51;
-}
-
-.light #log-find {
-    background: #dce8f0;
-}
-
-.light #log-find-input,
-.light #log-find-input:focus {
-    background: #ffffff;
-    color: #20272b;
-}
-
-.light #log-output-meta,
-.light #log-find-count {
-    color: #52616a;
-}
-
-.light .has-log-alert #log-alert {
-    background: #fff5d7;
-    color: #795700;
-}
-
-.light .has-log-error #log-error {
-    background: #fdebed;
-    color: #9d2633;
-}
-
-.light #recent-output-scroll,
-.light #command-preview,
-.light #create-submit-reason,
-.light #diagnostics-list,
-.light #diagnostics-summary,
-.light #manage-actions,
-.light #manage-detail,
-.light #manage-search {
-    background: #f8fafb;
-    color: #20272b;
-}
-
-.light .manage-dialog,
-.light .identity-dialog,
-.light .task-dialog,
-.light .status-dialog {
-    background: #edf1f3;
-    color: #20272b;
-}
-
-.light .dialog-title {
-    color: #20272b;
-}
-
-.light .dialog-context,
-.light .mode-help,
-.light .field-label {
-    color: #52616a;
-}
-
-.light .identity-dialog Input,
-.light .task-dialog TextArea,
-.light .status-dialog Select {
-    background: #ffffff;
-    color: #20272b;
-}
-
-.light .identity-dialog Input:focus,
-.light .task-dialog TextArea:focus,
-.light .status-dialog Select:focus {
-    background: #e3edf4;
-    color: #20272b;
-}
-
-.light #manage-actions > .option-list--option-disabled {
-    background: #e4e9ec;
-}
-
-.monochrome Screen,
-.monochrome #app-header,
-.monochrome #session-pane,
-.monochrome #detail-pane,
-.monochrome #action-bar,
-.monochrome #identity,
-.monochrome .inspector-card,
-.monochrome OptionList > .option-list--option-disabled {
-    color: #e6e6e6;
-    background: #111111;
-}
-
-.monochrome OptionList > .option-list--option-highlighted {
-    color: #000000;
-    background: #d7d7d7;
-    text-style: bold;
-}
-
-.monochrome #recent-output-scroll,
-.monochrome #command-preview,
-.monochrome #create-submit-reason,
-.monochrome #manage-actions,
-.monochrome #manage-detail,
-.monochrome #manage-search,
-.monochrome #log-output,
-.monochrome #log-output:focus {
-    color: #e6e6e6;
-    background: #080808;
-}
-
-.monochrome #log-header,
-.monochrome #log-status,
-.monochrome #log-controls,
-.monochrome #log-action-bar,
-.monochrome #log-find,
-.monochrome #log-alert,
-.monochrome #log-error {
-    color: #e6e6e6;
-    background: #111111;
-}
-
-.monochrome #log-controls Button.active {
-    color: #000000;
-    background: #d7d7d7;
-}
-
-.monochrome .manage-dialog,
-.monochrome .identity-dialog,
-.monochrome .task-dialog,
-.monochrome .status-dialog,
-.monochrome #manage-actions > .option-list--option-disabled {
-    color: #e6e6e6;
-    background: #111111;
-}
-
-/* ===== .dark theme ===== */
-
-.dark Screen {
-    background: #101316;
-    color: #e8edf0;
-}
-
-.dark #log-header {
-    background: #181d21;
-    border-bottom: solid #303941;
-}
-
-.dark #app-header {
-    background: #181d21;
-    border-bottom: solid #303941;
-}
-
-.dark #search-mode {
-    background: #181d21;
-    border-bottom: solid #303941;
-}
-
-.dark #health-row {
-    background: #181d21;
-    border-bottom: solid #303941;
-}
-
-.dark #search-label {
-    color: #9eabb3;
-}
-
-.dark #search {
-    border: tall #3f6e9d;
-    background: #11161a;
-}
-
-.dark #search-hint {
-    color: #82919a;
-}
-
-.dark #session-pane {
-    border-right: solid #303941;
-    background: #12171a;
-}
-
-.dark #sessions {
-    background: #12171a;
-    scrollbar-color: #47545c;
-    scrollbar-background: #171c20;
-}
-
-.dark OptionList > .option-list--option:hover {
-    background: #19242c;
-}
-
-.dark OptionList > .option-list--option-highlighted {
-    background: #24598a;
-    color: #ffffff;
-}
-
-.dark OptionList > .option-list--option-disabled {
-    color: #7e8c95;
-    background: #12171a;
-}
-
-.dark #detail-pane {
-    background: #101316;
-}
-
-.dark #identity {
-    background: #161b1f;
-    border-bottom: solid #303941;
-}
-
-.dark #inspector-scroll {
-    scrollbar-color: #47545c;
-    scrollbar-background: #101316;
-}
-
-.dark .inspector-card {
-    background: #151a1e;
-    border-left: solid #34424b;
-}
-
-.dark .inspector-card.warning {
-    border-left: solid #c5903c;
-    background: #1d1b15;
-}
-
-.dark .inspector-card.error {
-    border-left: solid #c75b64;
-    background: #211719;
-}
-
-.dark .inspector-card.success {
-    border-left: solid #477c59;
-}
-
-.dark .section-title {
-    color: #91a1aa;
-}
-
-.dark .section-body {
-    color: #dce3e7;
-}
-
-.dark .output-mode {
-    color: #82919a;
-    background: #151a1e;
-}
-
-.dark .output-mode.active {
-    color: #eef3f6;
-    background: #2c4c68;
-}
-
-.dark #output-meta {
-    color: #7f8d96;
-}
-
-.dark #recent-output-scroll {
-    background: #0b0e10;
-    border-top: solid #273139;
-    scrollbar-color: #47545c;
-    scrollbar-background: #0b0e10;
-}
-
-.dark .output-body {
-    color: #cbd3d8;
-}
-
-.dark #actions-card {
-    border-top: solid #303941;
-    background: #151a1e;
-}
-
-.dark #action-bar {
-    background: #181d21;
-    color: #c4cdd2;
-    border-top: solid #303941;
-}
-
-.dark #small-terminal {
-    color: #dce3e7;
-}
-
-.dark .narrow.narrow-detail #inspector-scroll:focus {
-    border-left: solid #3f6e9d;
-}
-
-.dark ModalScreen {
-    background: #080a0c 70%;
-}
-
-.dark .dialog {
-    border: solid #596b76;
-    background: #181d21;
-    scrollbar-color: #47545c;
-    scrollbar-background: #181d21;
-}
-
-.dark #create-advanced {
-    scrollbar-color: #47545c;
-    scrollbar-background: #181d21;
-}
-
-.dark .task-row TextArea {
-    border: tall #3a464e;
-    background: #11161a;
-}
-
-.dark .field-status {
-    color: #82919a;
-}
-
-.dark .field-status.valid {
-    color: #72c78e;
-}
-
-.dark .field-status.invalid,
-.dark #create-submit-reason.invalid {
-    color: #ef6b73;
-}
-
-.dark .field-status.warning {
-    color: #e9b44c;
-}
-
-.dark .field-status.checking {
-    color: #82919a;
-}
-
-.dark .create-dialog Input,
-.dark .create-dialog Select {
-    background: #11161a;
-}
-
-.dark .create-dialog Input:focus,
-.dark .create-dialog Select:focus {
-    background: #162433;
-    color: #eef3f6;
-}
-
-.dark #manage-actions {
-    background: #13181c;
-    scrollbar-color: #47545c;
-    scrollbar-background: #181d21;
-}
-
-.dark #manage-actions > .option-list--option-disabled {
-    background: #101417;
-}
-
-.dark #manage-search {
-    background: #101417;
-}
-
-.dark #manage-detail {
-    border-left: solid #41515b;
-    background: #151a1e;
-    color: #cbd3d8;
-}
-
-.dark .identity-dialog Input {
-    background: #11161a;
-}
-
-.dark .identity-dialog Input:focus {
-    background: #162433;
-    color: #eef3f6;
-}
-
-.dark #note-value {
-    border: tall #3a464e;
-    background: #11161a;
-}
-
-.dark #diagnostics-meta {
-    color: #82919a;
-}
-
-.dark #diagnostics-loading {
-    color: #66aaff;
-}
-
-.dark .dialog-title {
-    color: #eef3f6;
-}
-
-.dark .dialog-context,
-.dark .confirm-name {
-    color: #9eabb3;
-}
-
-.dark .mode-help {
-    color: #82919a;
-}
-
-.dark .field-label {
-    color: #aeb9bf;
-}
-
-.dark .secondary-field {
-    color: #839098;
-}
-
-.dark Input:focus,
-.dark Select:focus {
-    border: tall #66aaff;
-    background: #111820;
-}
-
-.dark Button:hover {
-    background: #2b3943;
-}
-
-.dark Button:focus {
-    border: tall #7db7ee;
-}
-
-.dark Button:disabled {
-    color: #68747b;
-    background: #20262a;
-    border: tall #30383d;
-}
-
-.dark Button.-error {
-    color: #fff1f2;
-    background: #7f333b;
-}
-
-.dark Button.-error:focus {
-    border: tall #ff8c95;
-}
-
-.dark #logging-state,
-.dark #prefix-state {
-    color: #cbd3d8;
-}
-
-.dark #logging-hint {
-    color: #82919a;
-}
-
-.dark #command-preview,
-.dark #create-submit-reason {
-    background: #0b0e10;
-    color: #cbd3d8;
-}
-
-.dark #create-submit-reason {
-    color: #82919a;
-}
-
-.dark #create-summary {
-    border-left: solid #3e6d55;
-    background: #121a17;
-}
-
-.dark #create-form-help {
-    color: #82919a;
-}
-
-.dark #create-advanced-toggle {
-    color: #9eabb3;
-}
-
-.dark #create-advanced-toggle:focus {
-    background: #1d2a34;
-    color: #7db7ee;
-}
-
-.dark .field-help {
-    color: #82919a;
-}
-
-.dark .compact-form #create-basic {
-    scrollbar-color: #47545c;
-    scrollbar-background: #181d21;
-}
-
-.dark .danger-dialog {
-    border: solid #b94f59;
-}
-
-.dark .danger-title {
-    color: #ef6b73;
-}
-
-.dark #diagnostics-summary {
-    background: #11161a;
-    color: #cbd3d8;
-}
-
-.dark #diagnostics-list {
-    background: #11161a;
-}
-
-.dark .logs-workspace {
-    background: #101316;
-}
-
-.dark #log-status {
-    background: #151a1e;
-    color: #aab5bb;
-}
-
-.dark #log-controls {
-    background: #151a1e;
-    border-bottom: solid #303941;
-}
-
-.dark #log-controls Button {
-    background: #20272c;
-    color: #aeb9bf;
-}
-
-.dark #log-controls Button.active {
-    background: #24598a;
-    color: #ffffff;
-}
-
-.dark #log-controls Button:focus {
-    background: #316b9f;
-}
-
-.dark #log-controls Button:disabled {
-    background: #171c20;
-    color: #5f6a70;
-}
-
-.dark #log-output-meta {
-    color: #82919a;
-}
-
-.dark .has-log-alert #log-alert {
-    background: #302814;
-    color: #f0c66c;
-    border-bottom: solid #80682f;
-}
-
-.dark .has-log-error #log-error {
-    background: #31191c;
-    color: #ef8a91;
-    border-bottom: solid #8d3f47;
-}
-
-.dark #log-find {
-    background: #18232c;
-}
-
-.dark #log-find-label {
-    color: #7db7ee;
-}
-
-.dark #log-find-input {
-    background: #101820;
-}
-
-.dark #log-find-input:focus {
-    background: #162433;
-}
-
-.dark #log-find-count {
-    color: #9eabb3;
-}
-
-.dark #log-output {
-    background: #101316;
-    color: #d5dde1;
-    scrollbar-color: #47545c;
-    scrollbar-background: #101316;
-}
-
-.dark #log-output:focus {
-    border-left: solid #3f6e9d;
-    background: #11161a;
-}
-
-.dark #log-action-bar {
-    background: #181d21;
-    color: #cbd3d8;
-    border-top: solid #303941;
-}
-
-.dark .log-too-small #log-small-terminal {
-    color: #d5dde1;
-    background: #101316;
-}
-
-/* ===== .midnight theme ===== */
-
-.midnight Screen {
-    background: #070b14;
-    color: #dfe6f0;
-}
-
-.midnight #log-header {
-    background: #0d1524;
-    border-bottom: solid #1c2a3d;
-}
-
-.midnight #app-header {
-    background: #0d1524;
-    border-bottom: solid #1c2a3d;
-}
-
-.midnight #search-mode {
-    background: #0d1524;
-    border-bottom: solid #1c2a3d;
-}
-
-.midnight #health-row {
-    background: #0d1524;
-    border-bottom: solid #1c2a3d;
-}
-
-.midnight #search-label {
-    color: #96a6b8;
-}
-
-.midnight #search {
-    border: tall #4d8cff;
-    background: #0a0f1c;
-}
-
-.midnight #search-hint {
-    color: #8a99ab;
-}
-
-.midnight #session-pane {
-    border-right: solid #1c2a3d;
-    background: #0a1220;
-}
-
-.midnight #sessions {
-    background: #0a1220;
-    scrollbar-color: #47545c;
-    scrollbar-background: #0b1420;
-}
-
-.midnight OptionList > .option-list--option:hover {
-    background: #19242c;
-}
-
-.midnight OptionList > .option-list--option-highlighted {
-    background: #2d5fb8;
-    color: #ffffff;
-}
-
-.midnight OptionList > .option-list--option-disabled {
-    color: #7c8ba0;
-    background: #0a1220;
-}
-
-.midnight #detail-pane {
-    background: #070b14;
-}
-
-.midnight #identity {
-    background: #0f1826;
-    border-bottom: solid #1c2a3d;
-}
-
-.midnight #inspector-scroll {
-    scrollbar-color: #47545c;
-    scrollbar-background: #070b14;
-}
-
-.midnight .inspector-card {
-    background: #0d1420;
-    border-left: solid #24344a;
-}
-
-.midnight .inspector-card.warning {
-    border-left: solid #c5903c;
-    background: #1d1b15;
-}
-
-.midnight .inspector-card.error {
-    border-left: solid #c75b64;
-    background: #211719;
-}
-
-.midnight .inspector-card.success {
-    border-left: solid #477c59;
-}
-
-.midnight .section-title {
-    color: #8fa0b5;
-}
-
-.midnight .section-body {
-    color: #d7e2ec;
-}
-
-.midnight .output-mode {
-    color: #8a99ab;
-    background: #0d1420;
-}
-
-.midnight .output-mode.active {
-    color: #e8f0f7;
-    background: #2a4a80;
-}
-
-.midnight #output-meta {
-    color: #7c8ba0;
-}
-
-.midnight #recent-output-scroll {
-    background: #05080f;
-    border-top: solid #1a2738;
-    scrollbar-color: #47545c;
-    scrollbar-background: #05080f;
-}
-
-.midnight .output-body {
-    color: #cdd8e2;
-}
-
-.midnight #actions-card {
-    border-top: solid #1c2a3d;
-    background: #0d1420;
-}
-
-.midnight #action-bar {
-    background: #0d1524;
-    color: #c2cfdc;
-    border-top: solid #1c2a3d;
-}
-
-.midnight #small-terminal {
-    color: #d7e2ec;
-}
-
-.midnight .narrow.narrow-detail #inspector-scroll:focus {
-    border-left: solid #4d8cff;
-}
-
-.midnight ModalScreen {
-    background: #080a0c 70%;
-}
-
-.midnight .dialog {
-    border: solid #3a5170;
-    background: #0d1524;
-    scrollbar-color: #47545c;
-    scrollbar-background: #0d1524;
-}
-
-.midnight #create-advanced {
-    scrollbar-color: #47545c;
-    scrollbar-background: #0d1524;
-}
-
-.midnight .task-row TextArea {
-    border: tall #28394f;
-    background: #0a0f1c;
-}
-
-.midnight .field-status {
-    color: #8a99ab;
-}
-
-.midnight .field-status.valid {
-    color: #72c78e;
-}
-
-.midnight .field-status.invalid,
-.midnight #create-submit-reason.invalid {
-    color: #ef6b73;
-}
-
-.midnight .field-status.warning {
-    color: #e9b44c;
-}
-
-.midnight .field-status.checking {
-    color: #8a99ab;
-}
-
-.midnight .create-dialog Input,
-.midnight .create-dialog Select {
-    background: #0a0f1c;
-}
-
-.midnight .create-dialog Input:focus,
-.midnight .create-dialog Select:focus {
-    background: #16283a;
-    color: #e8f0f7;
-}
-
-.midnight #manage-actions {
-    background: #0c1522;
-    scrollbar-color: #47545c;
-    scrollbar-background: #0d1524;
-}
-
-.midnight #manage-actions > .option-list--option-disabled {
-    background: #0a1220;
-}
-
-.midnight #manage-search {
-    background: #0a1220;
-}
-
-.midnight #manage-detail {
-    border-left: solid #2d3f57;
-    background: #0d1420;
-    color: #cdd8e2;
-}
-
-.midnight .identity-dialog Input {
-    background: #0a0f1c;
-}
-
-.midnight .identity-dialog Input:focus {
-    background: #16283a;
-    color: #e8f0f7;
-}
-
-.midnight #note-value {
-    border: tall #28394f;
-    background: #0a0f1c;
-}
-
-.midnight #diagnostics-meta {
-    color: #8a99ab;
-}
-
-.midnight #diagnostics-loading {
-    color: #6fa3ff;
-}
-
-.midnight .dialog-title {
-    color: #e8f0f7;
-}
-
-.midnight .dialog-context,
-.midnight .confirm-name {
-    color: #96a6b8;
-}
-
-.midnight .mode-help {
-    color: #8a99ab;
-}
-
-.midnight .field-label {
-    color: #a6b4c2;
-}
-
-.midnight .secondary-field {
-    color: #839aad;
-}
-
-.midnight Input:focus,
-.midnight Select:focus {
-    border: tall #6fa3ff;
-    background: #0e1830;
-}
-
-.midnight Button:hover {
-    background: #2b3943;
-}
-
-.midnight Button:focus {
-    border: tall #86b8ff;
-}
-
-.midnight Button:disabled {
-    color: #69788c;
-    background: #141c28;
-    border: tall #30383d;
-}
-
-.midnight Button.-error {
-    color: #fff1f2;
-    background: #7f333b;
-}
-
-.midnight Button.-error:focus {
-    border: tall #ff8c95;
-}
-
-.midnight #logging-state,
-.midnight #prefix-state {
-    color: #cdd8e2;
-}
-
-.midnight #logging-hint {
-    color: #8a99ab;
-}
-
-.midnight #command-preview,
-.midnight #create-submit-reason {
-    background: #05080f;
-    color: #cdd8e2;
-}
-
-.midnight #create-submit-reason {
-    color: #8a99ab;
-}
-
-.midnight #create-summary {
-    border-left: solid #3e6d55;
-    background: #121a17;
-}
-
-.midnight #create-form-help {
-    color: #8a99ab;
-}
-
-.midnight #create-advanced-toggle {
-    color: #96a6b8;
-}
-
-.midnight #create-advanced-toggle:focus {
-    background: #16283a;
-    color: #86b8ff;
-}
-
-.midnight .field-help {
-    color: #8a99ab;
-}
-
-.midnight .compact-form #create-basic {
-    scrollbar-color: #47545c;
-    scrollbar-background: #0d1524;
-}
-
-.midnight .danger-dialog {
-    border: solid #b94f59;
-}
-
-.midnight .danger-title {
-    color: #ef6b73;
-}
-
-.midnight #diagnostics-summary {
-    background: #0a0f1c;
-    color: #cdd8e2;
-}
-
-.midnight #diagnostics-list {
-    background: #0a0f1c;
-}
-
-.midnight .logs-workspace {
-    background: #070b14;
-}
-
-.midnight #log-status {
-    background: #0d1420;
-    color: #a9b8c8;
-}
-
-.midnight #log-controls {
-    background: #0d1420;
-    border-bottom: solid #1c2a3d;
-}
-
-.midnight #log-controls Button {
-    background: #15202e;
-    color: #a6b4c2;
-}
-
-.midnight #log-controls Button.active {
-    background: #2d5fb8;
-    color: #ffffff;
-}
-
-.midnight #log-controls Button:focus {
-    background: #3a6fc4;
-}
-
-.midnight #log-controls Button:disabled {
-    background: #0b1420;
-    color: #5f7285;
-}
-
-.midnight #log-output-meta {
-    color: #8a99ab;
-}
-
-.midnight .has-log-alert #log-alert {
-    background: #302814;
-    color: #f0c66c;
-    border-bottom: solid #80682f;
-}
-
-.midnight .has-log-error #log-error {
-    background: #31191c;
-    color: #ef8a91;
-    border-bottom: solid #8d3f47;
-}
-
-.midnight #log-find {
-    background: #0e1e30;
-}
-
-.midnight #log-find-label {
-    color: #86b8ff;
-}
-
-.midnight #log-find-input {
-    background: #0a0f1c;
-}
-
-.midnight #log-find-input:focus {
-    background: #16283a;
-}
-
-.midnight #log-find-count {
-    color: #96a6b8;
-}
-
-.midnight #log-output {
-    background: #070b14;
-    color: #d2ddea;
-    scrollbar-color: #47545c;
-    scrollbar-background: #070b14;
-}
-
-.midnight #log-output:focus {
-    border-left: solid #4d8cff;
-    background: #0a0f1c;
-}
-
-.midnight #log-action-bar {
-    background: #0d1524;
-    color: #cdd8e2;
-    border-top: solid #1c2a3d;
-}
-
-.midnight .log-too-small #log-small-terminal {
-    color: #d2ddea;
-    background: #070b14;
-}
-
-/* ===== .cyberpunk theme ===== */
-
-.cyberpunk Screen {
-    background: #0d0221;
-    color: #f2f2f2;
-}
-
-.cyberpunk #log-header {
-    background: #1a0d33;
-    border-bottom: solid #3d1a5c;
-}
-
-.cyberpunk #app-header {
-    background: #1a0d33;
-    border-bottom: solid #3d1a5c;
-}
-
-.cyberpunk #search-mode {
-    background: #1a0d33;
-    border-bottom: solid #3d1a5c;
-}
-
-.cyberpunk #health-row {
-    background: #1a0d33;
-    border-bottom: solid #3d1a5c;
-}
-
-.cyberpunk #search-label {
-    color: #a996c4;
-}
-
-.cyberpunk #search {
-    border: tall #00b8d4;
-    background: #140826;
-}
-
-.cyberpunk #search-hint {
-    color: #9a86b8;
-}
-
-.cyberpunk #session-pane {
-    border-right: solid #3d1a5c;
-    background: #170a2c;
-}
-
-.cyberpunk #sessions {
-    background: #170a2c;
-    scrollbar-color: #47545c;
-    scrollbar-background: #160a2a;
-}
-
-.cyberpunk OptionList > .option-list--option:hover {
-    background: #19242c;
-}
-
-.cyberpunk OptionList > .option-list--option-highlighted {
-    background: #b8146e;
-    color: #ffffff;
-}
-
-.cyberpunk OptionList > .option-list--option-disabled {
-    color: #8a749e;
-    background: #170a2c;
-}
-
-.cyberpunk #detail-pane {
-    background: #0d0221;
-}
-
-.cyberpunk #identity {
-    background: #1b0e34;
-    border-bottom: solid #3d1a5c;
-}
-
-.cyberpunk #inspector-scroll {
-    scrollbar-color: #47545c;
-    scrollbar-background: #0d0221;
-}
-
-.cyberpunk .inspector-card {
-    background: #190c30;
-    border-left: solid #4a2270;
-}
-
-.cyberpunk .inspector-card.warning {
-    border-left: solid #c5903c;
-    background: #1d1b15;
-}
-
-.cyberpunk .inspector-card.error {
-    border-left: solid #c75b64;
-    background: #211719;
-}
-
-.cyberpunk .inspector-card.success {
-    border-left: solid #477c59;
-}
-
-.cyberpunk .section-title {
-    color: #9c88b4;
-}
-
-.cyberpunk .section-body {
-    color: #e6dcf5;
-}
-
-.cyberpunk .output-mode {
-    color: #9a86b8;
-    background: #190c30;
-}
-
-.cyberpunk .output-mode.active {
-    color: #faf5ff;
-    background: #7a1450;
-}
-
-.cyberpunk #output-meta {
-    color: #8a749e;
-}
-
-.cyberpunk #recent-output-scroll {
-    background: #0a0119;
-    border-top: solid #341560;
-    scrollbar-color: #47545c;
-    scrollbar-background: #0a0119;
-}
-
-.cyberpunk .output-body {
-    color: #e3d9f0;
-}
-
-.cyberpunk #actions-card {
-    border-top: solid #3d1a5c;
-    background: #190c30;
-}
-
-.cyberpunk #action-bar {
-    background: #1a0d33;
-    color: #d8cdea;
-    border-top: solid #3d1a5c;
-}
-
-.cyberpunk #small-terminal {
-    color: #e6dcf5;
-}
-
-.cyberpunk .narrow.narrow-detail #inspector-scroll:focus {
-    border-left: solid #00b8d4;
-}
-
-.cyberpunk ModalScreen {
-    background: #080a0c 70%;
-}
-
-.cyberpunk .dialog {
-    border: solid #6a3496;
-    background: #1a0d33;
-    scrollbar-color: #47545c;
-    scrollbar-background: #1a0d33;
-}
-
-.cyberpunk #create-advanced {
-    scrollbar-color: #47545c;
-    scrollbar-background: #1a0d33;
-}
-
-.cyberpunk .task-row TextArea {
-    border: tall #522478;
-    background: #140826;
-}
-
-.cyberpunk .field-status {
-    color: #9a86b8;
-}
-
-.cyberpunk .field-status.valid {
-    color: #72c78e;
-}
-
-.cyberpunk .field-status.invalid,
-.cyberpunk #create-submit-reason.invalid {
-    color: #ef6b73;
-}
-
-.cyberpunk .field-status.warning {
-    color: #e9b44c;
-}
-
-.cyberpunk .field-status.checking {
-    color: #9a86b8;
-}
-
-.cyberpunk .create-dialog Input,
-.cyberpunk .create-dialog Select {
-    background: #140826;
-}
-
-.cyberpunk .create-dialog Input:focus,
-.cyberpunk .create-dialog Select:focus {
-    background: #2a1442;
-    color: #faf5ff;
-}
-
-.cyberpunk #manage-actions {
-    background: #170b2e;
-    scrollbar-color: #47545c;
-    scrollbar-background: #1a0d33;
-}
-
-.cyberpunk #manage-actions > .option-list--option-disabled {
-    background: #170a2c;
-}
-
-.cyberpunk #manage-search {
-    background: #170a2c;
-}
-
-.cyberpunk #manage-detail {
-    border-left: solid #5a2a82;
-    background: #190c30;
-    color: #e3d9f0;
-}
-
-.cyberpunk .identity-dialog Input {
-    background: #140826;
-}
-
-.cyberpunk .identity-dialog Input:focus {
-    background: #2a1442;
-    color: #faf5ff;
-}
-
-.cyberpunk #note-value {
-    border: tall #522478;
-    background: #140826;
-}
-
-.cyberpunk #diagnostics-meta {
-    color: #9a86b8;
-}
-
-.cyberpunk #diagnostics-loading {
-    color: #00e5ff;
-}
-
-.cyberpunk .dialog-title {
-    color: #faf5ff;
-}
-
-.cyberpunk .dialog-context,
-.cyberpunk .confirm-name {
-    color: #a996c4;
-}
-
-.cyberpunk .mode-help {
-    color: #9a86b8;
-}
-
-.cyberpunk .field-label {
-    color: #c2b3d8;
-}
-
-.cyberpunk .secondary-field {
-    color: #9482a8;
-}
-
-.cyberpunk Input:focus,
-.cyberpunk Select:focus {
-    border: tall #00e5ff;
-    background: #1c0f3a;
-}
-
-.cyberpunk Button:hover {
-    background: #2b3943;
-}
-
-.cyberpunk Button:focus {
-    border: tall #4de8ff;
-}
-
-.cyberpunk Button:disabled {
-    color: #6f5c82;
-    background: #241436;
-    border: tall #30383d;
-}
-
-.cyberpunk Button.-error {
-    color: #fff1f2;
-    background: #7f333b;
-}
-
-.cyberpunk Button.-error:focus {
-    border: tall #ff8c95;
-}
-
-.cyberpunk #logging-state,
-.cyberpunk #prefix-state {
-    color: #e3d9f0;
-}
-
-.cyberpunk #logging-hint {
-    color: #9a86b8;
-}
-
-.cyberpunk #command-preview,
-.cyberpunk #create-submit-reason {
-    background: #0a0119;
-    color: #e3d9f0;
-}
-
-.cyberpunk #create-submit-reason {
-    color: #9a86b8;
-}
-
-.cyberpunk #create-summary {
-    border-left: solid #3e6d55;
-    background: #121a17;
-}
-
-.cyberpunk #create-form-help {
-    color: #9a86b8;
-}
-
-.cyberpunk #create-advanced-toggle {
-    color: #a996c4;
-}
-
-.cyberpunk #create-advanced-toggle:focus {
-    background: #2a1442;
-    color: #4de8ff;
-}
-
-.cyberpunk .field-help {
-    color: #9a86b8;
-}
-
-.cyberpunk .compact-form #create-basic {
-    scrollbar-color: #47545c;
-    scrollbar-background: #1a0d33;
-}
-
-.cyberpunk .danger-dialog {
-    border: solid #b94f59;
-}
-
-.cyberpunk .danger-title {
-    color: #ef6b73;
-}
-
-.cyberpunk #diagnostics-summary {
-    background: #140826;
-    color: #e3d9f0;
-}
-
-.cyberpunk #diagnostics-list {
-    background: #140826;
-}
-
-.cyberpunk .logs-workspace {
-    background: #0d0221;
-}
-
-.cyberpunk #log-status {
-    background: #190c30;
-    color: #b3a2c6;
-}
-
-.cyberpunk #log-controls {
-    background: #190c30;
-    border-bottom: solid #3d1a5c;
-}
-
-.cyberpunk #log-controls Button {
-    background: #261638;
-    color: #c2b3d8;
-}
-
-.cyberpunk #log-controls Button.active {
-    background: #b8146e;
-    color: #ffffff;
-}
-
-.cyberpunk #log-controls Button:focus {
-    background: #d81f7a;
-}
-
-.cyberpunk #log-controls Button:disabled {
-    background: #160a2a;
-    color: #6a5878;
-}
-
-.cyberpunk #log-output-meta {
-    color: #9a86b8;
-}
-
-.cyberpunk .has-log-alert #log-alert {
-    background: #302814;
-    color: #f0c66c;
-    border-bottom: solid #80682f;
-}
-
-.cyberpunk .has-log-error #log-error {
-    background: #31191c;
-    color: #ef8a91;
-    border-bottom: solid #8d3f47;
-}
-
-.cyberpunk #log-find {
-    background: #1e1040;
-}
-
-.cyberpunk #log-find-label {
-    color: #4de8ff;
-}
-
-.cyberpunk #log-find-input {
-    background: #140826;
-}
-
-.cyberpunk #log-find-input:focus {
-    background: #2a1442;
-}
-
-.cyberpunk #log-find-count {
-    color: #a996c4;
-}
-
-.cyberpunk #log-output {
-    background: #0d0221;
-    color: #e0d4f0;
-    scrollbar-color: #47545c;
-    scrollbar-background: #0d0221;
-}
-
-.cyberpunk #log-output:focus {
-    border-left: solid #00b8d4;
-    background: #140826;
-}
-
-.cyberpunk #log-action-bar {
-    background: #1a0d33;
-    color: #e3d9f0;
-    border-top: solid #3d1a5c;
-}
-
-.cyberpunk .log-too-small #log-small-terminal {
-    color: #e0d4f0;
-    background: #0d0221;
-}
-
-/* ===== .terminal theme ===== */
-
-.terminal Screen {
-    background: #0a0f0a;
-    color: #33ff66;
-}
-
-.terminal #log-header {
-    background: #10160f;
-    border-bottom: solid #1a3320;
-}
-
-.terminal #app-header {
-    background: #10160f;
-    border-bottom: solid #1a3320;
-}
-
-.terminal #search-mode {
-    background: #10160f;
-    border-bottom: solid #1a3320;
-}
-
-.terminal #health-row {
-    background: #10160f;
-    border-bottom: solid #1a3320;
-}
-
-.terminal #search-label {
-    color: #26a648;
-}
-
-.terminal #search {
-    border: tall #1fae4a;
-    background: #0b100b;
-}
-
-.terminal #search-hint {
-    color: #1f8f3d;
-}
-
-.terminal #session-pane {
-    border-right: solid #1a3320;
-    background: #0d130d;
-}
-
-.terminal #sessions {
-    background: #0d130d;
-    scrollbar-color: #47545c;
-    scrollbar-background: #0c110c;
-}
-
-.terminal OptionList > .option-list--option:hover {
-    background: #19242c;
-}
-
-.terminal OptionList > .option-list--option-highlighted {
-    background: #145c2a;
-    color: #ffffff;
-}
-
-.terminal OptionList > .option-list--option-disabled {
-    color: #1c7a35;
-    background: #0d130d;
-}
-
-.terminal #detail-pane {
-    background: #0a0f0a;
-}
-
-.terminal #identity {
-    background: #111811;
-    border-bottom: solid #1a3320;
-}
-
-.terminal #inspector-scroll {
-    scrollbar-color: #47545c;
-    scrollbar-background: #0a0f0a;
-}
-
-.terminal .inspector-card {
-    background: #0f150f;
-    border-left: solid #1f3d26;
-}
-
-.terminal .inspector-card.warning {
-    border-left: solid #c5903c;
-    background: #1d1b15;
-}
-
-.terminal .inspector-card.error {
-    border-left: solid #c75b64;
-    background: #211719;
-}
-
-.terminal .inspector-card.success {
-    border-left: solid #477c59;
-}
-
-.terminal .section-title {
-    color: #26a648;
-}
-
-.terminal .section-body {
-    color: #30e05e;
-}
-
-.terminal .output-mode {
-    color: #1f8f3d;
-    background: #0f150f;
-}
-
-.terminal .output-mode.active {
-    color: #8dffb0;
-    background: #155224;
-}
-
-.terminal #output-meta {
-    color: #1c7a35;
-}
-
-.terminal #recent-output-scroll {
-    background: #070a07;
-    border-top: solid #16291a;
-    scrollbar-color: #47545c;
-    scrollbar-background: #070a07;
-}
-
-.terminal .output-body {
-    color: #29d956;
-}
-
-.terminal #actions-card {
-    border-top: solid #1a3320;
-    background: #0f150f;
-}
-
-.terminal #action-bar {
-    background: #10160f;
-    color: #2ecc60;
-    border-top: solid #1a3320;
-}
-
-.terminal #small-terminal {
-    color: #30e05e;
-}
-
-.terminal .narrow.narrow-detail #inspector-scroll:focus {
-    border-left: solid #1fae4a;
-}
-
-.terminal ModalScreen {
-    background: #080a0c 70%;
-}
-
-.terminal .dialog {
-    border: solid #2f5c37;
-    background: #10160f;
-    scrollbar-color: #47545c;
-    scrollbar-background: #10160f;
-}
-
-.terminal #create-advanced {
-    scrollbar-color: #47545c;
-    scrollbar-background: #10160f;
-}
-
-.terminal .task-row TextArea {
-    border: tall #24462b;
-    background: #0b100b;
-}
-
-.terminal .field-status {
-    color: #1f8f3d;
-}
-
-.terminal .field-status.valid {
-    color: #72c78e;
-}
-
-.terminal .field-status.invalid,
-.terminal #create-submit-reason.invalid {
-    color: #ef6b73;
-}
-
-.terminal .field-status.warning {
-    color: #e9b44c;
-}
-
-.terminal .field-status.checking {
-    color: #1f8f3d;
-}
-
-.terminal .create-dialog Input,
-.terminal .create-dialog Select {
-    background: #0b100b;
-}
-
-.terminal .create-dialog Input:focus,
-.terminal .create-dialog Select:focus {
-    background: #1c261c;
-    color: #8dffb0;
-}
-
-.terminal #manage-actions {
-    background: #0e140e;
-    scrollbar-color: #47545c;
-    scrollbar-background: #10160f;
-}
-
-.terminal #manage-actions > .option-list--option-disabled {
-    background: #0d130d;
-}
-
-.terminal #manage-search {
-    background: #0d130d;
-}
-
-.terminal #manage-detail {
-    border-left: solid #294f30;
-    background: #0f150f;
-    color: #29d956;
-}
-
-.terminal .identity-dialog Input {
-    background: #0b100b;
-}
-
-.terminal .identity-dialog Input:focus {
-    background: #1c261c;
-    color: #8dffb0;
-}
-
-.terminal #note-value {
-    border: tall #24462b;
-    background: #0b100b;
-}
-
-.terminal #diagnostics-meta {
-    color: #1f8f3d;
-}
-
-.terminal #diagnostics-loading {
-    color: #4dffa0;
-}
-
-.terminal .dialog-title {
-    color: #8dffb0;
-}
-
-.terminal .dialog-context,
-.terminal .confirm-name {
-    color: #26a648;
-}
-
-.terminal .mode-help {
-    color: #1f8f3d;
-}
-
-.terminal .field-label {
-    color: #26b34d;
-}
-
-.terminal .secondary-field {
-    color: #1f8f3d;
-}
-
-.terminal Input:focus,
-.terminal Select:focus {
-    border: tall #4dffa0;
-    background: #121a12;
-}
-
-.terminal Button:hover {
-    background: #2b3943;
-}
-
-.terminal Button:focus {
-    border: tall #6dffb3;
-}
-
-.terminal Button:disabled {
-    color: #176029;
-    background: #182018;
-    border: tall #30383d;
-}
-
-.terminal Button.-error {
-    color: #fff1f2;
-    background: #7f333b;
-}
-
-.terminal Button.-error:focus {
-    border: tall #ff8c95;
-}
-
-.terminal #logging-state,
-.terminal #prefix-state {
-    color: #29d956;
-}
-
-.terminal #logging-hint {
-    color: #1f8f3d;
-}
-
-.terminal #command-preview,
-.terminal #create-submit-reason {
-    background: #070a07;
-    color: #29d956;
-}
-
-.terminal #create-submit-reason {
-    color: #1f8f3d;
-}
-
-.terminal #create-summary {
-    border-left: solid #3e6d55;
-    background: #121a17;
-}
-
-.terminal #create-form-help {
-    color: #1f8f3d;
-}
-
-.terminal #create-advanced-toggle {
-    color: #26a648;
-}
-
-.terminal #create-advanced-toggle:focus {
-    background: #1c261c;
-    color: #6dffb3;
-}
-
-.terminal .field-help {
-    color: #1f8f3d;
-}
-
-.terminal .compact-form #create-basic {
-    scrollbar-color: #47545c;
-    scrollbar-background: #10160f;
-}
-
-.terminal .danger-dialog {
-    border: solid #b94f59;
-}
-
-.terminal .danger-title {
-    color: #ef6b73;
-}
-
-.terminal #diagnostics-summary {
-    background: #0b100b;
-    color: #29d956;
-}
-
-.terminal #diagnostics-list {
-    background: #0b100b;
-}
-
-.terminal .logs-workspace {
-    background: #0a0f0a;
-}
-
-.terminal #log-status {
-    background: #0f150f;
-    color: #2bb852;
-}
-
-.terminal #log-controls {
-    background: #0f150f;
-    border-bottom: solid #1a3320;
-}
-
-.terminal #log-controls Button {
-    background: #1a221a;
-    color: #26b34d;
-}
-
-.terminal #log-controls Button.active {
-    background: #145c2a;
-    color: #ffffff;
-}
-
-.terminal #log-controls Button:focus {
-    background: #1c7a3d;
-}
-
-.terminal #log-controls Button:disabled {
-    background: #0c110c;
-    color: #145624;
-}
-
-.terminal #log-output-meta {
-    color: #1f8f3d;
-}
-
-.terminal .has-log-alert #log-alert {
-    background: #302814;
-    color: #f0c66c;
-    border-bottom: solid #80682f;
-}
-
-.terminal .has-log-error #log-error {
-    background: #31191c;
-    color: #ef8a91;
-    border-bottom: solid #8d3f47;
-}
-
-.terminal #log-find {
-    background: #131c13;
-}
-
-.terminal #log-find-label {
-    color: #6dffb3;
-}
-
-.terminal #log-find-input {
-    background: #0b100b;
-}
-
-.terminal #log-find-input:focus {
-    background: #1c261c;
-}
-
-.terminal #log-find-count {
-    color: #26a648;
-}
-
-.terminal #log-output {
-    background: #0a0f0a;
-    color: #34e864;
-    scrollbar-color: #47545c;
-    scrollbar-background: #0a0f0a;
-}
-
-.terminal #log-output:focus {
-    border-left: solid #1fae4a;
-    background: #0b100b;
-}
-
-.terminal #log-action-bar {
-    background: #10160f;
-    color: #29d956;
-    border-top: solid #1a3320;
-}
-
-.terminal .log-too-small #log-small-terminal {
-    color: #34e864;
-    background: #0a0f0a;
-}
-
-/* ===== .paper theme ===== */
-
-.paper Screen {
-    background: #f7f3e9;
-    color: #2b2620;
-}
-
-.paper #log-header {
-    background: #efe6d3;
-    border-bottom: solid #ddd3b8;
-}
-
-.paper #app-header {
-    background: #efe6d3;
-    border-bottom: solid #ddd3b8;
-}
-
-.paper #search-mode {
-    background: #efe6d3;
-    border-bottom: solid #ddd3b8;
-}
-
-.paper #health-row {
-    background: #efe6d3;
-    border-bottom: solid #ddd3b8;
-}
-
-.paper #search-label {
-    color: #5e5240;
-}
-
-.paper #search {
-    border: tall #9a6a35;
-    background: #fbf8f0;
-}
-
-.paper #search-hint {
-    color: #6b5f4d;
-}
-
-.paper #session-pane {
-    border-right: solid #ddd3b8;
-    background: #f2ecdd;
-}
-
-.paper #sessions {
-    background: #f2ecdd;
-    scrollbar-color: #47545c;
-    scrollbar-background: #e8ddc4;
-}
-
-.paper OptionList > .option-list--option:hover {
-    background: #19242c;
-}
-
-.paper OptionList > .option-list--option-highlighted {
-    background: #8a5a2b;
-    color: #ffffff;
-}
-
-.paper OptionList > .option-list--option-disabled {
-    color: #766a56;
-    background: #f2ecdd;
-}
-
-.paper #detail-pane {
-    background: #f7f3e9;
-}
-
-.paper #identity {
-    background: #ede4cf;
-    border-bottom: solid #ddd3b8;
-}
-
-.paper #inspector-scroll {
-    scrollbar-color: #47545c;
-    scrollbar-background: #f7f3e9;
-}
-
-.paper .inspector-card {
-    background: #efe9d8;
-    border-left: solid #d4c8a5;
-}
-
-.paper .inspector-card.warning {
-    border-left: solid #c5903c;
-    background: #1d1b15;
-}
-
-.paper .inspector-card.error {
-    border-left: solid #c75b64;
-    background: #211719;
-}
-
-.paper .inspector-card.success {
-    border-left: solid #477c59;
-}
-
-.paper .section-title {
-    color: #665a48;
-}
-
-.paper .section-body {
-    color: #3a3128;
-}
-
-.paper .output-mode {
-    color: #6b5f4d;
-    background: #efe9d8;
-}
-
-.paper .output-mode.active {
-    color: #1c1712;
-    background: #6b4420;
-}
-
-.paper #output-meta {
-    color: #766a56;
-}
-
-.paper #recent-output-scroll {
-    background: #fbf9f3;
-    border-top: solid #ddd0ab;
-    scrollbar-color: #47545c;
-    scrollbar-background: #fbf9f3;
-}
-
-.paper .output-body {
-    color: #352e26;
-}
-
-.paper #actions-card {
-    border-top: solid #ddd3b8;
-    background: #efe9d8;
-}
-
-.paper #action-bar {
-    background: #efe6d3;
-    color: #453b30;
-    border-top: solid #ddd3b8;
-}
-
-.paper #small-terminal {
-    color: #3a3128;
-}
-
-.paper .narrow.narrow-detail #inspector-scroll:focus {
-    border-left: solid #9a6a35;
-}
-
-.paper ModalScreen {
-    background: #080a0c 70%;
-}
-
-.paper .dialog {
-    border: solid #c2b285;
-    background: #efe6d3;
-    scrollbar-color: #47545c;
-    scrollbar-background: #efe6d3;
-}
-
-.paper #create-advanced {
-    scrollbar-color: #47545c;
-    scrollbar-background: #efe6d3;
-}
-
-.paper .task-row TextArea {
-    border: tall #d0c39d;
-    background: #fbf8f0;
-}
-
-.paper .field-status {
-    color: #6b5f4d;
-}
-
-.paper .field-status.valid {
-    color: #72c78e;
-}
-
-.paper .field-status.invalid,
-.paper #create-submit-reason.invalid {
-    color: #ef6b73;
-}
-
-.paper .field-status.warning {
-    color: #e9b44c;
-}
-
-.paper .field-status.checking {
-    color: #6b5f4d;
-}
-
-.paper .create-dialog Input,
-.paper .create-dialog Select {
-    background: #fbf8f0;
-}
-
-.paper .create-dialog Input:focus,
-.paper .create-dialog Select:focus {
-    background: #ecdfc5;
-    color: #1c1712;
-}
-
-.paper #manage-actions {
-    background: #eee6d2;
-    scrollbar-color: #47545c;
-    scrollbar-background: #efe6d3;
-}
-
-.paper #manage-actions > .option-list--option-disabled {
-    background: #f2ecdd;
-}
-
-.paper #manage-search {
-    background: #f2ecdd;
-}
-
-.paper #manage-detail {
-    border-left: solid #c9bb92;
-    background: #efe9d8;
-    color: #352e26;
-}
-
-.paper .identity-dialog Input {
-    background: #fbf8f0;
-}
-
-.paper .identity-dialog Input:focus {
-    background: #ecdfc5;
-    color: #1c1712;
-}
-
-.paper #note-value {
-    border: tall #d0c39d;
-    background: #fbf8f0;
-}
-
-.paper #diagnostics-meta {
-    color: #6b5f4d;
-}
-
-.paper #diagnostics-loading {
-    color: #8a5a2b;
-}
-
-.paper .dialog-title {
-    color: #1c1712;
-}
-
-.paper .dialog-context,
-.paper .confirm-name {
-    color: #5e5240;
-}
-
-.paper .mode-help {
-    color: #6b5f4d;
-}
-
-.paper .field-label {
-    color: #4d4335;
-}
-
-.paper .secondary-field {
-    color: #6a5f4d;
-}
-
-.paper Input:focus,
-.paper Select:focus {
-    border: tall #8a5a2b;
-    background: #f0e6d0;
-}
-
-.paper Button:hover {
-    background: #2b3943;
-}
-
-.paper Button:focus {
-    border: tall #a06f3a;
-}
-
-.paper Button:disabled {
-    color: #8a7e68;
-    background: #e2d8c2;
-    border: tall #30383d;
-}
-
-.paper Button.-error {
-    color: #fff1f2;
-    background: #7f333b;
-}
-
-.paper Button.-error:focus {
-    border: tall #ff8c95;
-}
-
-.paper #logging-state,
-.paper #prefix-state {
-    color: #352e26;
-}
-
-.paper #logging-hint {
-    color: #6b5f4d;
-}
-
-.paper #command-preview,
-.paper #create-submit-reason {
-    background: #fbf9f3;
-    color: #352e26;
-}
-
-.paper #create-submit-reason {
-    color: #6b5f4d;
-}
-
-.paper #create-summary {
-    border-left: solid #3e6d55;
-    background: #121a17;
-}
-
-.paper #create-form-help {
-    color: #6b5f4d;
-}
-
-.paper #create-advanced-toggle {
-    color: #5e5240;
-}
-
-.paper #create-advanced-toggle:focus {
-    background: #ecdfc5;
-    color: #a06f3a;
-}
-
-.paper .field-help {
-    color: #6b5f4d;
-}
-
-.paper .compact-form #create-basic {
-    scrollbar-color: #47545c;
-    scrollbar-background: #efe6d3;
-}
-
-.paper .danger-dialog {
-    border: solid #b94f59;
-}
-
-.paper .danger-title {
-    color: #ef6b73;
-}
-
-.paper #diagnostics-summary {
-    background: #fbf8f0;
-    color: #352e26;
-}
-
-.paper #diagnostics-list {
-    background: #fbf8f0;
-}
-
-.paper .logs-workspace {
-    background: #f7f3e9;
-}
-
-.paper #log-status {
-    background: #efe9d8;
-    color: #59503f;
-}
-
-.paper #log-controls {
-    background: #efe9d8;
-    border-bottom: solid #ddd3b8;
-}
-
-.paper #log-controls Button {
-    background: #e6dcc7;
-    color: #4d4335;
-}
-
-.paper #log-controls Button.active {
-    background: #8a5a2b;
-    color: #ffffff;
-}
-
-.paper #log-controls Button:focus {
-    background: #764a22;
-}
-
-.paper #log-controls Button:disabled {
-    background: #e8ddc4;
-    color: #776b57;
-}
-
-.paper #log-output-meta {
-    color: #6b5f4d;
-}
-
-.paper .has-log-alert #log-alert {
-    background: #302814;
-    color: #f0c66c;
-    border-bottom: solid #80682f;
-}
-
-.paper .has-log-error #log-error {
-    background: #31191c;
-    color: #ef8a91;
-    border-bottom: solid #8d3f47;
-}
-
-.paper #log-find {
-    background: #e6d9c0;
-}
-
-.paper #log-find-label {
-    color: #a06f3a;
-}
-
-.paper #log-find-input {
-    background: #fbf8f0;
-}
-
-.paper #log-find-input:focus {
-    background: #ecdfc5;
-}
-
-.paper #log-find-count {
-    color: #5e5240;
-}
-
-.paper #log-output {
-    background: #f7f3e9;
-    color: #3e352b;
-    scrollbar-color: #47545c;
-    scrollbar-background: #f7f3e9;
-}
-
-.paper #log-output:focus {
-    border-left: solid #9a6a35;
-    background: #fbf8f0;
-}
-
-.paper #log-action-bar {
-    background: #efe6d3;
-    color: #352e26;
-    border-top: solid #ddd3b8;
-}
 
-.paper .log-too-small #log-small-terminal {
-    color: #3e352b;
-    background: #f7f3e9;
+Toast {
+    border-left: outer $accent;
 }

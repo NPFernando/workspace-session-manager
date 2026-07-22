@@ -363,6 +363,8 @@ def test_light_snapshot(
 ) -> None:
     app = populated_app(service, fake_backend)
     app.ui_theme = "light"
+    app.theme = "light"
+    app._refresh_theme_colors()
     assert snap_compare(app, terminal_size=(120, 35))
 
 
@@ -375,7 +377,31 @@ def test_named_theme_snapshot(
 ) -> None:
     app = populated_app(service, fake_backend)
     app.ui_theme = theme
+    app.theme = theme
+    app._refresh_theme_colors()
     assert snap_compare(app, terminal_size=(120, 35))
+
+
+@pytest.mark.parametrize("theme", ["ithaca", "cyberpunk", "paper"])
+def test_toast_theme_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+    theme: str,
+) -> None:
+    app = populated_app(service, fake_backend)
+    app.ui_theme = theme
+    app.theme = theme
+    app._refresh_theme_colors()
+
+    def show_toast(pilot: Pilot) -> None:
+        app.notify("Theme toast styling check", severity="warning", timeout=30)
+
+    assert snap_compare(
+        app,
+        terminal_size=(120, 35),
+        run_before=show_toast,
+    )
 
 
 def test_diagnostics_modal_snapshot(
@@ -512,6 +538,8 @@ def test_manage_theme_snapshot(
 ) -> None:
     app = populated_app(service, fake_backend, monochrome=theme == "monochrome")
     app.ui_theme = theme
+    app.theme = theme
+    app._refresh_theme_colors()
 
     async def open_manage(pilot: Pilot) -> None:
         await pilot.press("d")
@@ -693,6 +721,8 @@ def test_logs_theme_snapshot(
 ) -> None:
     app, _name = logs_app(service, fake_backend, output="Sanitized output\nReady")
     app.ui_theme = theme
+    app.theme = theme
+    app._refresh_theme_colors()
     app.monochrome = theme == "monochrome"
 
     async def show_logs(pilot: Pilot) -> None:
@@ -821,6 +851,8 @@ def test_narrow_detail_theme_snapshot(
 ) -> None:
     app, _name = logs_app(service, fake_backend, output="Sanitized output\nReady")
     app.ui_theme = theme
+    app.theme = theme
+    app._refresh_theme_colors()
     app.monochrome = theme == "monochrome"
 
     async def show_detail(pilot: Pilot) -> None:
