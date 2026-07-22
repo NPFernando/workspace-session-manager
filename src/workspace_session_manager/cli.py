@@ -19,7 +19,13 @@ from workspace_session_manager.config import AppConfig, load_config
 from workspace_session_manager.errors import WsError
 from workspace_session_manager.legacy import LegacyMetadataReader
 from workspace_session_manager.migration import MigrationManager, MigrationPlan
-from workspace_session_manager.models import CreateRequest, InputState, TaskState, Tool
+from workspace_session_manager.models import (
+    CreateRequest,
+    DoctorReport,
+    InputState,
+    TaskState,
+    Tool,
+)
 from workspace_session_manager.paths import AppPaths
 from workspace_session_manager.service import SessionService
 from workspace_session_manager.store import MetadataStore
@@ -356,6 +362,28 @@ def doctor(
 ) -> None:
     """Check tmux, agent commands, state, and migration readiness."""
     report = runtime_from_context(context).service().doctor()
+    if as_json:
+        typer.echo(report.model_dump_json(indent=2))
+    else:
+        table = Table(show_header=True, header_style="bold cyan", box=None)
+        table.add_column("Check")
+        table.add_column("Result")
+        table.add_column("Detail")
+        for check in report.checks:
+            table.add_row(check.name, check.status.value, check.detail)
+        console.print(table)
+    if not report.healthy:
+        raise typer.Exit(1)
+
+
+@app.command()
+def health(
+    context: typer.Context,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Check disk space, apt updates, reboot flag, dirty repos, and Docker."""
+    checks = runtime_from_context(context).service().refresh_health_alerts(force=True)
+    report = DoctorReport(checks=checks)
     if as_json:
         typer.echo(report.model_dump_json(indent=2))
     else:

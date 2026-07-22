@@ -12,6 +12,27 @@ legacy_state_dirs = [
 animations = "subtle" # off, subtle, full
 reduce_motion = false
 
+[health]
+enabled = true
+disk_space_enabled = true
+apt_updates_enabled = true
+reboot_required_enabled = true
+git_dirty_enabled = true
+docker_enabled = true
+disk_warn_percent = 10
+disk_fail_percent = 2
+disk_ttl_seconds = 30.0
+apt_updates_ttl_seconds = 21600.0    # 6 hours
+reboot_required_ttl_seconds = 300.0  # 5 minutes
+git_dirty_ttl_seconds = 60.0
+docker_ttl_seconds = 30.0
+git_scan_budget = 20
+subprocess_timeout = 5.0
+project_scan_roots = [
+  "/srv/projects",
+  "~/workspace/projects",
+]
+
 [tools.claude]
 command = ["claude"]
 enabled = true
