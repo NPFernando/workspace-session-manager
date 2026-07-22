@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import socket
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -441,6 +442,30 @@ def session_group(session: SessionView, *, now: datetime | None = None) -> str:
     return "Detached"
 
 
+ACTIVITY_HISTORY_LENGTH = 8
+# A single completed scan cycle isn't a meaningful trend yet, and showing a
+# spark the instant one sample lands would make its appearance depend on
+# background scan timing rather than actual accumulated history.
+ACTIVITY_SPARK_MIN_SAMPLES = 3
+SPARKLINE_GLYPHS = "▁▂▃▄▅▆▇█"
+SPARKLINE_GLYPHS_ASCII = "_.-:=+*#"
+
+
+def sparkline(history: deque[int] | None, *, ascii_only: bool = False) -> str:
+    """Render a small bar-chart of recent activity magnitude, one glyph per sample."""
+    if not history:
+        return ""
+    glyphs = SPARKLINE_GLYPHS_ASCII if ascii_only else SPARKLINE_GLYPHS
+    peak = max(history)
+    if peak <= 0:
+        return glyphs[0] * len(history)
+    chars = []
+    for value in history:
+        level = min(len(glyphs) - 1, int((value / peak) * (len(glyphs) - 1)))
+        chars.append(glyphs[level])
+    return "".join(chars)
+
+
 def session_row(
     session: SessionView,
     width: int,
@@ -451,6 +476,7 @@ def session_row(
     warning_color: str = "yellow",
     warning_dim_color: str = "#8a7a2a",
     monochrome: bool = False,
+    activity_spark: str = "",
 ) -> Text:
     """Build a stable two-line row sized to its current pane."""
     alert = notice or detect_activity(session, "")
@@ -480,6 +506,9 @@ def session_row(
     second_value = truncate(separator.join(statuses), max(12, width - 3), ascii_only=ascii_only)
     first.append("\n  ")
     first.append(second_value, style=runtime_style(session.runtime, monochrome=monochrome))
+    if activity_spark:
+        first.append("  ")
+        first.append(activity_spark, style="dim")
     return first
 
 
@@ -3107,6 +3136,8 @@ class WsApp(App[str | None]):
         self._option_sessions: dict[str, SessionView] = {}
         self._option_actions: dict[str, str] = {}
         self._alerts: dict[tuple[str, str], ActivityNotice] = {}
+        self._activity_history: dict[tuple[str, str], deque[int]] = {}
+        self._last_preview: dict[tuple[str, str], str] = {}
         self._attention_scanned_at: dict[tuple[str, str], datetime] = {}
         self._attention_notice_revisions: dict[tuple[str, str], int] = {}
         self._attention_scan_generation = 0
@@ -3622,6 +3653,7 @@ class WsApp(App[str | None]):
                 self._row_width(),
                 ascii_only=self.ascii_only,
                 monochrome=self.monochrome,
+                activity_spark=self._activity_spark_for(session),
                 warning_color=self._theme_colors.get("warning", "yellow"),
                 warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=self._notice_for(session),
@@ -3697,6 +3729,7 @@ class WsApp(App[str | None]):
             previous = self._notice_for(current)
             notice = detect_activity(current, result.preview)
             self._store_notice(current, notice, observed_at=observed_at)
+            self._record_activity_sample(identity, result.preview)
             if previous.warning != notice.warning:
                 warning_membership_changed = True
             if baseline_was_established and notice.warning and notice.kind != previous.kind:
@@ -3845,6 +3878,16 @@ class WsApp(App[str | None]):
             for identity, viewport in self._detail_viewports.items()
             if identity in valid_identities
         }
+        self._activity_history = {
+            identity: history
+            for identity, history in self._activity_history.items()
+            if identity in valid_identities
+        }
+        self._last_preview = {
+            identity: preview
+            for identity, preview in self._last_preview.items()
+            if identity in valid_identities
+        }
         self._render_options()
         self.remove_class("refreshing")
         self.last_refreshed_at = datetime.now(UTC)
@@ -3868,6 +3911,26 @@ class WsApp(App[str | None]):
             return cached
         return derived
 
+    def _record_activity_sample(self, identity: tuple[str, str], preview: str) -> None:
+        previous = self._last_preview.get(identity, "")
+        self._last_preview[identity] = preview
+        limit = min(len(previous), len(preview))
+        prefix_len = 0
+        while prefix_len < limit and previous[prefix_len] == preview[prefix_len]:
+            prefix_len += 1
+        changed = max(0, len(preview) - prefix_len)
+        history = self._activity_history.setdefault(identity, deque(maxlen=ACTIVITY_HISTORY_LENGTH))
+        history.append(changed)
+
+    def _activity_spark_for(self, session: SessionView) -> str:
+        if not self.has_class("wide") and not self.has_class("very-wide"):
+            return ""
+        identity = (session.name, session.session_id)
+        history = self._activity_history.get(identity)
+        if history is None or len(history) < ACTIVITY_SPARK_MIN_SAMPLES:
+            return ""
+        return sparkline(history, ascii_only=self.ascii_only)
+
     def _store_notice(
         self,
         session: SessionView,
@@ -3890,6 +3953,7 @@ class WsApp(App[str | None]):
                 self._row_width(),
                 ascii_only=self.ascii_only,
                 monochrome=self.monochrome,
+                activity_spark=self._activity_spark_for(session),
                 warning_color=self._theme_colors.get("warning", "yellow"),
                 warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=notice,
@@ -3919,6 +3983,7 @@ class WsApp(App[str | None]):
                 self._row_width(),
                 ascii_only=self.ascii_only,
                 monochrome=self.monochrome,
+                activity_spark=self._activity_spark_for(session),
                 warning_color=self._theme_colors.get("warning", "yellow"),
                 warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=self._notice_for(session),
@@ -4061,6 +4126,7 @@ class WsApp(App[str | None]):
                             self._row_width(),
                             ascii_only=self.ascii_only,
                             monochrome=self.monochrome,
+                            activity_spark=self._activity_spark_for(session),
                             warning_color=self._theme_colors.get("warning", "yellow"),
                             warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                             notice=self._notice_for(session),
@@ -4335,6 +4401,7 @@ class WsApp(App[str | None]):
         session = details.session
         notice = detect_activity(session, details.preview)
         self._store_notice(session, notice, observed_at=datetime.now(UTC))
+        self._record_activity_sample((session.name, session.session_id), details.preview)
         if not self._attention_scanning and self._attention_complete():
             self._attention_baseline_established = True
             self._stop_attention_dots()
@@ -4714,6 +4781,7 @@ class WsApp(App[str | None]):
             self._row_width(),
             ascii_only=self.ascii_only,
             monochrome=self.monochrome,
+            activity_spark=self._activity_spark_for(session),
             warning_color=self._theme_colors.get("warning", "yellow"),
             warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
             notice=self._notice_for(session),
@@ -4761,6 +4829,7 @@ class WsApp(App[str | None]):
             self._row_width(),
             ascii_only=self.ascii_only,
             monochrome=self.monochrome,
+            activity_spark=self._activity_spark_for(session),
             warning_color=self._theme_colors.get("warning", "yellow"),
             warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
             notice=self._notice_for(session),
