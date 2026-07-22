@@ -46,14 +46,14 @@ NEW_HOOK = """# BEGIN WORKSPACE SESSION MANAGER SSH HOOK
 if [[ $- == *i* ]] \\
   && [[ -n "${SSH_CONNECTION:-}" ]] \\
   && [[ -z "${TMUX:-}" ]] \\
+  && [[ -z "${NO_WF_MENU:-}" ]] \\
   && [[ -z "${NO_WS_MENU:-}" ]] \\
-  && [[ -z "${NO_WS_MENU:-}" ]] \\
-  && [[ -z "${WS_MENU_SHOWN:-}" ]] \\
+  && [[ -z "${WF_MENU_SHOWN:-}" ]] \\
   && [[ -z "${WS_MENU_SHOWN:-}" ]] \\
   && [[ "${TERM:-}" != "dumb" ]] \\
   && command -v tmux >/dev/null 2>&1 \\
   && command -v ws >/dev/null 2>&1; then
-  export WS_MENU_SHOWN=1
+  export WF_MENU_SHOWN=1
   export WS_MENU_SHOWN=1
   ws
 fi

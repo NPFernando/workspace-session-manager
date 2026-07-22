@@ -3601,16 +3601,19 @@ class WsApp(App[str | None]):
             if warning:
                 text.append("  !", "bold yellow")
         elif self.has_class("very-wide"):
-            text.append(f"  Workspace Session Manager  v{__version__}")
+            product = truncate("Workspace Session Manager", 60, ascii_only=self.ascii_only)
+            text.append(f"  {product}  v{__version__}")
             text.append(f"    {counts}{filter_text}", "dim")
             text.append(f"    {truncate(self.hostname, 22, ascii_only=self.ascii_only)}")
             text.append(f"{separator}{connection}", "green" if self.tmux_connected else "red")
         elif self.has_class("wide"):
-            text.append("  Workspace Session Manager")
+            product = truncate("Workspace Session Manager", 60, ascii_only=self.ascii_only)
+            text.append(f"  {product}")
             text.append(f"    {counts}{filter_text}", "dim")
             text.append(f"{separator}{connection}", "green" if self.tmux_connected else "red")
         elif self.has_class("medium"):
-            text.append("  Workspace Session Manager")
+            product = truncate("Workspace Session Manager", 60, ascii_only=self.ascii_only)
+            text.append(f"  {product}")
             text.append(f"\n{counts}{filter_text}", "dim")
         else:
             text.append(f"  {counts}{filter_text}", "dim")

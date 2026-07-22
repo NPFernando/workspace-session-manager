@@ -967,7 +967,7 @@ class SessionService:
         self.paths.diagnostics_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(self.paths.diagnostics_dir, 0o700)
         destination = (
-            self.paths.diagnostics_dir / f"wf-diagnostics-{utc_now():%Y%m%d-%H%M%S-%f}.txt"
+            self.paths.diagnostics_dir / f"ws-diagnostics-{utc_now():%Y%m%d-%H%M%S-%f}.txt"
         )
         lines = ["ws privacy-safe diagnostics", f"Generated: {utc_now().isoformat()}", ""]
         for check in report.checks:

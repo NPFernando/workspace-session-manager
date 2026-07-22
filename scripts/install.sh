@@ -102,11 +102,11 @@ fi
 if [[ -e "$target" || -L "$target" ]]; then
   current="$target"
 else
-  current="$(command -v ws 2>/dev/null || true)"
+  current="$(command -v WF 2>/dev/null || true)"
 fi
 
 if [[ -z "$current" || ! -e "$current" ]]; then
-  printf '%s\n' 'Cannot preserve classic ws: current command was not found.' >&2
+  printf '%s\n' 'Cannot preserve classic WF: current command was not found.' >&2
   exit 1
 fi
 

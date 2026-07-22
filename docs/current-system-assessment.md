@@ -76,7 +76,7 @@ This repository does not modify that hook, shell aliases, `PATH`, systemd, or gl
 
 A non-destructive archive was created before project implementation:
 
-- Location: `~/backups/workspace-session-manager/pre-migration-20260719-123344/legacy-wf.tar.gz`
+- Location: `~/backups/wf-session-manager/pre-migration-20260719-123344/legacy-wf.tar.gz`
 - Mode: owner-readable and owner-writable only
 - SHA-256: `4493ab0f20b9cb5ebc351028eced5b7d5e8840e1143a3f8e640674fd2bb8a6d5`
 
