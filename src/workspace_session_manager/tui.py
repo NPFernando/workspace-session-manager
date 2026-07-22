@@ -56,7 +56,7 @@ from workspace_session_manager.models import (
     Tool,
     normalize_tags,
 )
-from workspace_session_manager.service import SessionService, normalized_session_name
+from workspace_session_manager.service import SessionService, TailResult, normalized_session_name
 
 BindingSpec = Binding | tuple[str, str] | tuple[str, str, str]
 RECENT_WINDOW = timedelta(hours=24)
@@ -2395,6 +2395,8 @@ class LogScreen(Screen[str | None]):
         self.match_index = -1
         self._refresh_timer: Timer | None = None
         self._refresh_generation = 0
+        self._tail_offset = 0
+        self._tailing = False
         self._viewports: dict[
             OutputSource,
             tuple[tuple[int, int], tuple[int, int], int],
@@ -2484,7 +2486,11 @@ class LogScreen(Screen[str | None]):
             and OutputSource.SAVED not in self.available_sources
             else source
         )
-        self._load_output(generation, requested_source)
+        if requested_source is OutputSource.SAVED and self.session.logging_enabled:
+            self._load_tail(generation, self._tail_offset)
+        else:
+            self._tailing = False
+            self._load_output(generation, requested_source)
 
     @work(thread=True, exclusive=True, group="log-refresh")
     def _load_output(self, generation: int, source: OutputSource | None) -> None:
@@ -2494,6 +2500,74 @@ class LogScreen(Screen[str | None]):
             self.app.call_from_thread(self._finish_refresh, generation, None, str(error))
             return
         self.app.call_from_thread(self._finish_refresh, generation, details, "")
+
+    @work(thread=True, exclusive=True, group="log-refresh")
+    def _load_tail(self, generation: int, offset: int) -> None:
+        try:
+            session = self.service.get(self.session.name)
+            result = self.service.tail_log(session.name, offset)
+        except (OSError, WsError) as error:
+            self.app.call_from_thread(self._finish_tail, generation, None, None, str(error), offset)
+            return
+        self.app.call_from_thread(self._finish_tail, generation, session, result, "", offset)
+
+    def _finish_tail(
+        self,
+        generation: int,
+        session: SessionView | None,
+        result: TailResult | None,
+        error: str,
+        requested_offset: int,
+    ) -> None:
+        if generation != self._refresh_generation or not self.is_mounted:
+            return
+        self.refreshing = False
+        if error:
+            self.follow_output = False
+            self.error_message = error
+            self._render_workspace()
+            return
+        assert session is not None and result is not None
+        if session.session_id != self.session.session_id:
+            self.follow_output = False
+            self.error_message = (
+                "Session identity changed. Return to the dashboard and inspect the new session."
+            )
+            self._render_workspace()
+            return
+        self.session = session
+        self.output_source = OutputSource.SAVED
+        self.available_sources = (
+            *((OutputSource.PANE,) if session.runtime is not RuntimeState.STOPPED else ()),
+            OutputSource.SAVED,
+        )
+        self._tailing = True
+        if result.rotated or requested_offset == 0:
+            self.rendered_output = result.text
+            self._preview_truncated = result.truncated
+        elif result.text:
+            self.rendered_output = self._append_bounded(self.rendered_output, result.text)
+            if result.truncated:
+                self._preview_truncated = True
+        self._tail_offset = result.offset
+        self.captured_at = datetime.now(UTC)
+        self._load_text()
+        self._render_workspace()
+        if self.follow_output:
+            self._scroll_to_end()
+        else:
+            self._restore_viewport(self.output_source)
+
+    def _append_bounded(self, existing: str, new_text: str) -> str:
+        combined = existing + new_text
+        cap = self.service.config.log_bytes
+        encoded = combined.encode("utf-8")
+        if len(encoded) <= cap:
+            return combined
+        self._preview_truncated = True
+        trimmed = encoded[-cap:].decode("utf-8", errors="ignore")
+        newline = trimmed.find("\n")
+        return trimmed[newline + 1 :] if newline != -1 else trimmed
 
     def _finish_refresh(
         self,
@@ -2593,7 +2667,13 @@ class LogScreen(Screen[str | None]):
         self.query_one("#log-header", Static).update(header)
 
         agent = notice.agent_state.value
-        source = "Live pane" if self.output_source is OutputSource.PANE else "Saved log"
+        source = (
+            "Live pane"
+            if self.output_source is OutputSource.PANE
+            else "Saved log (live tail)"
+            if self._tailing
+            else "Saved log (snapshot)"
+        )
         status = (
             f"{display_state(self.session.runtime.value)}  |  "
             f"{display_state(self.session.task_state.value)}  |  "
