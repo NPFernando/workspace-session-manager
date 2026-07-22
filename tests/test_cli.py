@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 from conftest import FakeBackend
 from workspace_session_manager import cli
 from workspace_session_manager.cli import Runtime
-from workspace_session_manager.config import AppConfig
+from workspace_session_manager.config import AppConfig, HealthConfig
 from workspace_session_manager.legacy import LegacyMetadataReader
 from workspace_session_manager.migration import MigrationManager
 from workspace_session_manager.models import CreateRequest, InputState, TaskState, Tool
@@ -208,3 +208,55 @@ def test_migration_preview_requires_explicit_selection() -> None:
     result = CliRunner().invoke(cli.app, ["migrate", "preview"])
     assert result.exit_code == 2
     assert "choose --all or at least one --session" in result.output
+
+
+def test_health_command_reports_configured_checks(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service.config = service.config.model_copy(
+        update={
+            "health": HealthConfig(
+                enabled=True,
+                apt_updates_enabled=False,
+                reboot_required_enabled=False,
+                git_dirty_enabled=False,
+                docker_enabled=False,
+                disk_warn_percent=60,
+                disk_fail_percent=40,
+            )
+        }
+    )
+
+    class FakeUsage:
+        total = 100
+        free = 50
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _root: FakeUsage())
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    result = CliRunner().invoke(cli.app, ["health"])
+    assert result.exit_code == 0, result.output
+    assert "disk-space" in result.stdout
+    assert "warn" in result.stdout
+
+
+def test_health_command_json(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service.config = service.config.model_copy(
+        update={
+            "health": HealthConfig(
+                enabled=True,
+                apt_updates_enabled=False,
+                reboot_required_enabled=False,
+                git_dirty_enabled=False,
+                docker_enabled=False,
+            )
+        }
+    )
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    result = CliRunner().invoke(cli.app, ["health", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert any(check["name"] == "disk-space" for check in payload["checks"])

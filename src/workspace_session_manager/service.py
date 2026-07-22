@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -9,7 +10,7 @@ import shutil
 import stat
 import tomllib
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,12 @@ from workspace_session_manager.errors import (
     StateError,
     ToolUnavailableError,
     WsError,
+)
+from workspace_session_manager.health import (
+    apt_updates_check,
+    docker_containers_check,
+    git_dirty_repos_check,
+    reboot_required_check,
 )
 from workspace_session_manager.legacy import LegacyMetadataReader
 from workspace_session_manager.models import (
@@ -45,6 +52,7 @@ from workspace_session_manager.models import (
 from workspace_session_manager.paths import AppPaths
 from workspace_session_manager.security import BoundedOutput, bounded_output, redact_text
 from workspace_session_manager.store import MetadataStore
+from workspace_session_manager.tmux import Runner, subprocess_runner
 
 
 class SessionBackend(Protocol):
@@ -158,6 +166,34 @@ def infer_tool(name: str, current_command: str) -> Tool:
     return Tool.SHELL
 
 
+@dataclass(frozen=True)
+class HealthCheckSpec:
+    name: str
+    enabled: bool
+    ttl_seconds: float
+    run: Callable[[], HealthCheck]
+
+
+def disk_space_check(root: Path, *, warn_percent: int, fail_percent: int) -> HealthCheck:
+    usage = shutil.disk_usage(root)
+    available_percent = int((usage.free / usage.total) * 100) if usage.total else 0
+    status = (
+        HealthStatus.FAIL
+        if available_percent < fail_percent
+        else HealthStatus.WARN
+        if available_percent < warn_percent
+        else HealthStatus.PASS
+    )
+    return HealthCheck(
+        name="disk-space",
+        status=status,
+        detail=f"{available_percent}% available",
+        corrective_action="Free disk space before creating sessions or enabling logs."
+        if status is not HealthStatus.PASS
+        else "",
+    )
+
+
 def command_available(command: tuple[str, ...]) -> bool:
     executable = command[0]
     if "/" in executable:
@@ -191,12 +227,14 @@ class SessionService:
         config: AppConfig,
         paths: AppPaths,
         legacy: LegacyMetadataReader | None = None,
+        runner: Runner = subprocess_runner,
     ) -> None:
         self.backend = backend
         self.store = store
         self.config = config
         self.paths = paths
         self.legacy = legacy or LegacyMetadataReader(config.legacy_state_dirs)
+        self.runner = runner
 
     def list_sessions(self, *, include_unmanaged: bool = False) -> list[SessionView]:
         owned_records = self.store.load_all()
@@ -942,23 +980,11 @@ class SessionService:
         disk_root = (
             self.paths.state_dir if self.paths.state_dir.exists() else self.paths.state_dir.parent
         )
-        usage = shutil.disk_usage(disk_root)
-        available_percent = int((usage.free / usage.total) * 100) if usage.total else 0
-        disk_status = (
-            HealthStatus.FAIL
-            if available_percent < 2
-            else HealthStatus.WARN
-            if available_percent < 10
-            else HealthStatus.PASS
-        )
         checks.append(
-            HealthCheck(
-                name="disk-space",
-                status=disk_status,
-                detail=f"{available_percent}% available",
-                corrective_action="Free disk space before creating sessions or enabling logs."
-                if disk_status is not HealthStatus.PASS
-                else "",
+            disk_space_check(
+                disk_root,
+                warn_percent=self.config.health.disk_warn_percent,
+                fail_percent=self.config.health.disk_fail_percent,
             )
         )
         return DoctorReport(checks=checks)
@@ -983,6 +1009,130 @@ class SessionService:
             stream.write("\n".join(lines))
             stream.write("\n")
         return destination
+
+    def _health_check_specs(self) -> tuple[HealthCheckSpec, ...]:
+        health = self.config.health
+        disk_root = (
+            self.paths.state_dir if self.paths.state_dir.exists() else self.paths.state_dir.parent
+        )
+        return (
+            HealthCheckSpec(
+                name="disk-space",
+                enabled=health.enabled and health.disk_space_enabled,
+                ttl_seconds=health.disk_ttl_seconds,
+                run=lambda: disk_space_check(
+                    disk_root,
+                    warn_percent=health.disk_warn_percent,
+                    fail_percent=health.disk_fail_percent,
+                ),
+            ),
+            HealthCheckSpec(
+                name="reboot-required",
+                enabled=health.enabled and health.reboot_required_enabled,
+                ttl_seconds=health.reboot_required_ttl_seconds,
+                run=reboot_required_check,
+            ),
+            HealthCheckSpec(
+                name="apt-updates",
+                enabled=health.enabled and health.apt_updates_enabled,
+                ttl_seconds=health.apt_updates_ttl_seconds,
+                run=lambda: apt_updates_check(self.runner, timeout=health.subprocess_timeout),
+            ),
+            HealthCheckSpec(
+                name="docker-containers",
+                enabled=health.enabled and health.docker_enabled,
+                ttl_seconds=health.docker_ttl_seconds,
+                run=lambda: docker_containers_check(self.runner, timeout=health.subprocess_timeout),
+            ),
+            HealthCheckSpec(
+                name="git-dirty",
+                enabled=health.enabled and health.git_dirty_enabled,
+                ttl_seconds=health.git_dirty_ttl_seconds,
+                run=lambda: git_dirty_repos_check(
+                    health.project_scan_roots,
+                    runner=self.runner,
+                    budget=health.git_scan_budget,
+                    timeout=health.subprocess_timeout,
+                ),
+            ),
+        )
+
+    def _health_cache_path(self, name: str) -> Path:
+        return self.paths.health_dir / f"{name}.json"
+
+    def _read_health_cache(self, name: str) -> tuple[HealthCheck, datetime] | None:
+        try:
+            raw = json.loads(self._health_cache_path(name).read_text(encoding="utf-8"))
+            checked_at = datetime.fromisoformat(raw["checked_at"])
+            check = HealthCheck.model_validate(raw["check"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        return check, checked_at
+
+    def _write_health_cache(self, name: str, check: HealthCheck) -> None:
+        self.paths.health_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path = self._health_cache_path(name)
+        payload = json.dumps({"checked_at": utc_now().isoformat(), "check": check.model_dump()})
+        temporary = path.with_suffix(".json.tmp")
+        try:
+            temporary.write_text(payload, encoding="utf-8")
+            os.replace(temporary, path)
+        except OSError:
+            with contextlib.suppress(OSError):
+                temporary.unlink()
+
+    def cached_health_alerts(self) -> list[HealthCheck]:
+        """Read-only, subprocess-free: safe to call synchronously on startup."""
+        checks: list[HealthCheck] = []
+        for spec in self._health_check_specs():
+            if not spec.enabled:
+                continue
+            cached = self._read_health_cache(spec.name)
+            if cached is None:
+                checks.append(
+                    HealthCheck(name=spec.name, status=HealthStatus.INFO, detail="not yet checked")
+                )
+            else:
+                checks.append(cached[0])
+        return checks
+
+    def health_stale_names(self, now: datetime) -> frozenset[str]:
+        """Cheap staleness check (small file reads, no subprocess) for a UI tick."""
+        stale = set()
+        for spec in self._health_check_specs():
+            if not spec.enabled:
+                continue
+            cached = self._read_health_cache(spec.name)
+            if cached is None or (now - cached[1]).total_seconds() >= spec.ttl_seconds:
+                stale.add(spec.name)
+        return frozenset(stale)
+
+    def refresh_health_alerts(
+        self, *, only: frozenset[str] | None = None, force: bool = False
+    ) -> list[HealthCheck]:
+        """The only method that shells out for health checks — never call this
+        synchronously from a startup path; run it from a background worker."""
+        results: list[HealthCheck] = []
+        for spec in self._health_check_specs():
+            if not spec.enabled:
+                continue
+            should_run = force or only is None or spec.name in only
+            if not should_run:
+                cached = self._read_health_cache(spec.name)
+                if cached is not None:
+                    results.append(cached[0])
+                    continue
+            try:
+                check = spec.run()
+            except Exception:
+                check = HealthCheck(
+                    name=spec.name,
+                    status=HealthStatus.INFO,
+                    detail="check failed unexpectedly",
+                )
+            self._write_health_cache(spec.name, check)
+            results.append(check)
+        return results
 
     def onboarding_seen(self) -> bool:
         return self.paths.onboarding_file.is_file() and not self.paths.onboarding_file.is_symlink()

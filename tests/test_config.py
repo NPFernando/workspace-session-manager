@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from workspace_session_manager.config import AppConfig, load_config
+from workspace_session_manager.config import AppConfig, HealthConfig, load_config
 from workspace_session_manager.errors import ConfigurationError
 from workspace_session_manager.paths import AppPaths
 
@@ -47,3 +47,34 @@ def test_attention_scan_budget_is_bounded() -> None:
         AppConfig(attention_scan_budget=0)
     with pytest.raises(ValueError):
         AppConfig(attention_scan_budget=65)
+
+
+def test_health_config_defaults_are_enabled_and_scan_common_roots() -> None:
+    health = AppConfig().health
+    assert health.enabled
+    assert health.disk_space_enabled
+    assert health.apt_updates_enabled
+    assert health.reboot_required_enabled
+    assert health.git_dirty_enabled
+    assert health.docker_enabled
+    assert Path("/srv/projects") in health.project_scan_roots
+    assert (Path.home() / "workspace" / "projects") in health.project_scan_roots
+
+
+def test_health_config_scan_roots_expand_tilde() -> None:
+    health = HealthConfig(project_scan_roots=(Path("~/some-projects"),))
+    assert health.project_scan_roots[0].is_absolute()
+    assert health.project_scan_roots[0] == Path.home() / "some-projects"
+
+
+def test_health_config_rejects_fail_threshold_above_warn_threshold() -> None:
+    HealthConfig(disk_warn_percent=10, disk_fail_percent=2)
+    with pytest.raises(ValueError, match="disk_fail_percent"):
+        HealthConfig(disk_warn_percent=5, disk_fail_percent=10)
+
+
+def test_health_config_ttls_are_bounded() -> None:
+    with pytest.raises(ValueError):
+        HealthConfig(disk_ttl_seconds=1.0)
+    with pytest.raises(ValueError):
+        HealthConfig(git_scan_budget=0)

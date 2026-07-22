@@ -1,9 +1,11 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
 
 from conftest import FakeBackend
+from workspace_session_manager.config import AppConfig, HealthConfig
 from workspace_session_manager.errors import (
     OwnershipError,
     SessionNotFoundError,
@@ -11,6 +13,7 @@ from workspace_session_manager.errors import (
     TmuxError,
     ToolUnavailableError,
 )
+from workspace_session_manager.legacy import LegacyMetadataReader
 from workspace_session_manager.models import (
     CreateRequest,
     DoctorReport,
@@ -23,7 +26,9 @@ from workspace_session_manager.models import (
     TaskState,
     Tool,
 )
+from workspace_session_manager.paths import AppPaths
 from workspace_session_manager.service import SessionService
+from workspace_session_manager.store import MetadataStore
 
 
 def test_foreign_session_is_hidden_but_available_for_diagnostics(
@@ -479,3 +484,150 @@ def test_privacy_safe_diagnostic_export_redacts_sensitive_values(
     assert "not-safe" not in exported
     assert "192.168.1.1" not in exported
     assert destination.stat().st_mode & 0o777 == 0o600
+
+
+def _disk_only_service(tmp_path: Path, fake_backend: FakeBackend) -> SessionService:
+    """A service with every health check but disk-space disabled, so tests
+    exercise the shared cache/TTL machinery without faking subprocesses."""
+    config = AppConfig(
+        legacy_state_dirs=(),
+        health=HealthConfig(
+            apt_updates_enabled=False,
+            reboot_required_enabled=False,
+            git_dirty_enabled=False,
+            docker_enabled=False,
+            disk_ttl_seconds=5.0,
+        ),
+    )
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    return SessionService(
+        backend=fake_backend,
+        store=MetadataStore(paths),
+        config=config,
+        paths=paths,
+        legacy=LegacyMetadataReader(()),
+    )
+
+
+def test_cached_health_alerts_reports_not_yet_checked_when_uncached(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _disk_only_service(tmp_path, fake_backend)
+    checks = service.cached_health_alerts()
+    assert [check.name for check in checks] == ["disk-space"]
+    assert checks[0].status is HealthStatus.INFO
+    assert checks[0].detail == "not yet checked"
+
+
+def test_refresh_health_alerts_writes_cache_that_cached_health_alerts_then_reads(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _disk_only_service(tmp_path, fake_backend)
+    refreshed = service.refresh_health_alerts(force=True)
+    assert refreshed[0].name == "disk-space"
+    assert refreshed[0].detail.endswith("% available")
+
+    cached = service.cached_health_alerts()
+    assert cached[0].detail == refreshed[0].detail
+    assert cached[0].status == refreshed[0].status
+
+
+def test_refresh_health_alerts_skips_disabled_checks(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    config = AppConfig(
+        legacy_state_dirs=(),
+        health=HealthConfig(enabled=True, disk_space_enabled=False, docker_enabled=False),
+    )
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    service = SessionService(
+        backend=fake_backend,
+        store=MetadataStore(paths),
+        config=config,
+        paths=paths,
+        legacy=LegacyMetadataReader(()),
+    )
+    names = {check.name for check in service.refresh_health_alerts(force=True)}
+    assert "disk-space" not in names
+    assert "docker-containers" not in names
+
+
+def test_health_enabled_false_is_a_master_switch_over_every_check(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    config = AppConfig(legacy_state_dirs=(), health=HealthConfig(enabled=False))
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    service = SessionService(
+        backend=fake_backend,
+        store=MetadataStore(paths),
+        config=config,
+        paths=paths,
+        legacy=LegacyMetadataReader(()),
+    )
+    assert service.cached_health_alerts() == []
+    assert service.refresh_health_alerts(force=True) == []
+    assert service.health_stale_names(datetime.now(UTC)) == frozenset()
+
+
+def test_health_stale_names_respects_ttl(tmp_path: Path, fake_backend: FakeBackend) -> None:
+    service = _disk_only_service(tmp_path, fake_backend)
+    now = datetime.now(UTC)
+    assert service.health_stale_names(now) == frozenset({"disk-space"})
+
+    service.refresh_health_alerts(force=True)
+    assert service.health_stale_names(now) == frozenset()
+
+    later = now + timedelta(seconds=6)
+    assert service.health_stale_names(later) == frozenset({"disk-space"})
+
+
+def test_cached_health_alerts_treats_corrupt_cache_file_as_uncached(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _disk_only_service(tmp_path, fake_backend)
+    service.paths.health_dir.mkdir(parents=True)
+    (service.paths.health_dir / "disk-space.json").write_text("not json", encoding="utf-8")
+    checks = service.cached_health_alerts()
+    assert checks[0].detail == "not yet checked"
+
+
+def test_refresh_health_alerts_isolates_check_that_raises_unexpectedly(
+    tmp_path: Path, fake_backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _disk_only_service(tmp_path, fake_backend)
+
+    def explode(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("workspace_session_manager.service.disk_space_check", explode)
+    checks = service.refresh_health_alerts(force=True)
+    assert checks[0].name == "disk-space"
+    assert checks[0].status is HealthStatus.INFO
+    assert checks[0].detail == "check failed unexpectedly"
+
+
+def test_doctor_disk_space_thresholds_are_configurable(
+    tmp_path: Path, fake_backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = AppConfig(
+        legacy_state_dirs=(),
+        health=HealthConfig(disk_warn_percent=60, disk_fail_percent=40),
+    )
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    service = SessionService(
+        backend=fake_backend,
+        store=MetadataStore(paths),
+        config=config,
+        paths=paths,
+        legacy=LegacyMetadataReader(()),
+    )
+
+    class FakeUsage:
+        total = 100
+        free = 50
+        used = 50
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _root: FakeUsage())
+    report = service.doctor()
+    disk_check = next(check for check in report.checks if check.name == "disk-space")
+    assert disk_check.status is HealthStatus.WARN
