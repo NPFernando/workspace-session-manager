@@ -27,7 +27,7 @@ from workspace_session_manager.models import (
     Tool,
 )
 from workspace_session_manager.paths import AppPaths
-from workspace_session_manager.service import SessionService
+from workspace_session_manager.service import SessionService, TailResult
 from workspace_session_manager.store import MetadataStore
 
 
@@ -181,7 +181,9 @@ def test_logs_are_sanitized_and_report_truncation(
     fake_backend: FakeBackend,
     tmp_path: Path,
 ) -> None:
-    created = service.create(CreateRequest(name="logs", tool=Tool.SHELL, cwd=tmp_path))
+    created = service.create(
+        CreateRequest(name="logs", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=False)
+    )
     fake_backend.previews[created.name] = "\n".join(
         ["password=private", *[f"line-{index}" for index in range(600)]]
     )
@@ -248,7 +250,9 @@ def test_logs_reject_unavailable_sources_and_use_saved_output_when_stopped(
     fake_backend: FakeBackend,
     tmp_path: Path,
 ) -> None:
-    created = service.create(CreateRequest(name="stopped-logs", tool=Tool.SHELL, cwd=tmp_path))
+    created = service.create(
+        CreateRequest(name="stopped-logs", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=False)
+    )
     with pytest.raises(StateError, match="saved log unavailable"):
         service.logs(created.name, source=OutputSource.SAVED)
 
@@ -272,7 +276,9 @@ def test_live_logs_ignore_an_unsafe_saved_source(
     fake_backend: FakeBackend,
     tmp_path: Path,
 ) -> None:
-    created = service.create(CreateRequest(name="unsafe-log", tool=Tool.SHELL, cwd=tmp_path))
+    created = service.create(
+        CreateRequest(name="unsafe-log", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=False)
+    )
     record = service.store.load(created.name)
     assert record is not None
     service.paths.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -285,6 +291,96 @@ def test_live_logs_ignore_an_unsafe_saved_source(
     assert live.available_sources == (OutputSource.PANE,)
     with pytest.raises(StateError, match="saved log unavailable"):
         service.logs(created.name, source=OutputSource.SAVED)
+
+
+def test_tail_log_reads_only_newly_appended_bytes(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(
+        CreateRequest(name="tail-basic", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    log_path.write_text("first line\n", encoding="utf-8")
+
+    first = service.tail_log(created.name, 0)
+    assert first.text == "first line\n"
+    assert not first.rotated
+    assert first.offset == log_path.stat().st_size
+
+    unchanged = service.tail_log(created.name, first.offset)
+    assert unchanged.text == ""
+    assert unchanged.offset == first.offset
+    assert not unchanged.rotated
+
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("second line\n")
+
+    second = service.tail_log(created.name, first.offset)
+    assert second.text == "second line\n"
+    assert not second.rotated
+    assert second.offset == log_path.stat().st_size
+
+
+def test_tail_log_redacts_newly_appended_secrets(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(
+        CreateRequest(name="tail-redact", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+
+    result = service.tail_log(created.name, 0)
+    assert result.text == ""
+
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("password=hunter2\n")
+
+    tailed = service.tail_log(created.name, result.offset)
+    assert "hunter2" not in tailed.text
+    assert "[REDACTED]" in tailed.text
+
+
+def test_tail_log_detects_rotation_and_resyncs(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(
+        CreateRequest(name="tail-rotate", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    log_path.write_text("a" * 500, encoding="utf-8")
+    stale_offset = log_path.stat().st_size
+
+    log_path.write_text("rotated content\n", encoding="utf-8")
+
+    result = service.tail_log(created.name, stale_offset)
+    assert result.rotated
+    assert result.text == "rotated content"
+    assert result.offset == log_path.stat().st_size
+
+
+def test_tail_log_missing_session_or_log_returns_empty(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    assert service.tail_log("does-not-exist", 0) == TailResult(text="", offset=0, rotated=False)
+
+    created = service.create(
+        CreateRequest(name="tail-no-log", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=False)
+    )
+    assert service.tail_log(created.name, 0) == TailResult(text="", offset=0, rotated=False)
 
 
 def test_create_validation_detects_duplicate_directory_and_git_project(

@@ -230,7 +230,7 @@ def create(
     logging: Annotated[
         bool,
         typer.Option("--logging/--no-logging", help="Persist sanitized, size-limited output."),
-    ] = False,
+    ] = True,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     attach: Annotated[bool, typer.Option("--attach")] = False,
 ) -> None:
