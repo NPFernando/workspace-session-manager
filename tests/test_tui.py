@@ -28,6 +28,7 @@ from workspace_session_manager.models import (
 )
 from workspace_session_manager.service import SessionService
 from workspace_session_manager.tui import (
+    THEME_MODES,
     ConfirmActionScreen,
     CreateFailureScreen,
     CreateSessionScreen,
@@ -44,7 +45,6 @@ from workspace_session_manager.tui import (
     NoteScreen,
     OnboardingScreen,
     StatusScreen,
-    THEME_MODES,
     WsApp,
     detect_activity,
     display_path,

@@ -4314,9 +4314,7 @@ class WsApp(App[str | None]):
         self._render_action_bar()
 
     def action_cycle_theme(self) -> None:
-        self.ui_theme = THEME_MODES[
-            (THEME_MODES.index(self.ui_theme) + 1) % len(THEME_MODES)
-        ]
+        self.ui_theme = THEME_MODES[(THEME_MODES.index(self.ui_theme) + 1) % len(THEME_MODES)]
         self.monochrome = self.ui_theme == "monochrome"
         self._set_layout_classes(self.size.width, self.size.height)
         self._render_options()
@@ -4418,9 +4416,7 @@ class WsApp(App[str | None]):
     def _highlight_created_session(self, name: str, session_id: str) -> None:
         self._flash_session_row(name, session_id, "on #243d55")
         fade_delay = 0.35 if self.motion == "full" else 0.25
-        self.set_timer(
-            fade_delay, lambda: self._flash_session_row(name, session_id, "on #1a2c3d")
-        )
+        self.set_timer(fade_delay, lambda: self._flash_session_row(name, session_id, "on #1a2c3d"))
         self.set_timer(fade_delay + 0.25, lambda: self._restore_session_row(name, session_id))
 
     def _flash_session_row(self, name: str, session_id: str, style: str) -> None:
