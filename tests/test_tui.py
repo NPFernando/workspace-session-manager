@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event
@@ -28,6 +29,7 @@ from workspace_session_manager.models import (
 )
 from workspace_session_manager.service import SessionService
 from workspace_session_manager.tui import (
+    ACTIVITY_SPARK_MIN_SAMPLES,
     THEME_MODES,
     ConfirmActionScreen,
     CreateFailureScreen,
@@ -51,6 +53,7 @@ from workspace_session_manager.tui import (
     humanize_task,
     relative_activity,
     session_group,
+    sparkline,
 )
 
 
@@ -146,6 +149,28 @@ def enable_health(
             )
         }
     )
+
+
+def test_sparkline_empty_history_renders_nothing() -> None:
+    assert sparkline(None) == ""
+    assert sparkline(deque()) == ""
+
+
+def test_sparkline_all_zero_history_renders_flattest_glyph() -> None:
+    result = sparkline(deque([0, 0, 0]))
+    assert result == "▁▁▁"
+
+
+def test_sparkline_scales_relative_to_peak_sample() -> None:
+    result = sparkline(deque([0, 50, 100]))
+    assert result[0] == "▁"
+    assert result[-1] == "█"
+    assert result[0] != result[1] != result[2]
+
+
+def test_sparkline_ascii_fallback_uses_ascii_glyphs() -> None:
+    result = sparkline(deque([0, 100]), ascii_only=True)
+    assert all(char in "_.-:=+*#" for char in result)
 
 
 @pytest.mark.asyncio
@@ -1468,6 +1493,65 @@ async def test_attention_scan_notifies_once_after_baseline_and_clears_resolution
         await pilot.pause()
         assert app.visible_sessions == []
         assert "No sessions need attention" in str(app.query_one("#identity", Static).content)
+
+
+@pytest.mark.asyncio
+async def test_activity_sparkline_appears_only_after_enough_samples_at_wide_width(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    other = create_managed(service, "a-quiet-session", Tool.CODEX)
+    watched = create_managed(service, "z-watched-session", Tool.CLAUDE)
+    service.organize(watched, pinned=True)
+    fake_backend.previews[other] = "idle"
+    fake_backend.previews[watched] = "starting up"
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        assert app.has_class("wide")
+        await wait_for_detail_refresh(pilot, app)
+        await wait_for_attention_scan(pilot, app)
+
+        watched_view = next(item for item in app.sessions if item.name == watched)
+        identity = (watched_view.name, watched_view.session_id)
+
+        for count in range(ACTIVITY_SPARK_MIN_SAMPLES + 1):
+            fake_backend.previews[other] = f"idle output changing round {count}"
+            app.refresh_sessions()
+            await wait_for_attention_scan(pilot, app)
+
+        other_view = next(item for item in app.sessions if item.name == other)
+        history = app._activity_history.get((other_view.name, other_view.session_id))
+        assert history is not None
+        assert len(history) >= ACTIVITY_SPARK_MIN_SAMPLES
+        prompt = str(
+            app.query_one("#sessions", OptionList)
+            .get_option(f"session:{other_view.session_id}")
+            .prompt
+        )
+        assert any(glyph in prompt for glyph in "▁▂▃▄▅▆▇█")
+
+        # The pinned/selected session's own detail-refresh path also records
+        # samples, but it never changed output, so its history should exist
+        # (from the identical no-op initial fetch) without ever growing past
+        # the flat idle state -- this just exercises that code path too.
+        assert identity in app._activity_history
+
+
+@pytest.mark.asyncio
+async def test_activity_sparkline_hidden_at_narrow_width(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    name = create_managed(service, "narrow-activity", Tool.CODEX)
+    fake_backend.previews[name] = "output"
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        assert not app.has_class("wide")
+        await wait_for_detail_refresh(pilot, app)
+        session_view = next(item for item in app.sessions if item.name == name)
+        assert app._activity_spark_for(session_view) == ""
 
 
 def test_attention_batch_reserves_priority_and_rotates_detached_sessions(
