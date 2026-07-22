@@ -627,7 +627,7 @@ async def test_empty_inventory_has_quick_actions_but_no_session_action(
         await pilot.pause()
         assert app.selected_name is None
         assert app.visible_sessions == []
-        assert app.query_one("#sessions", OptionList).option_count == 10
+        assert app.query_one("#sessions", OptionList).option_count == 11
         app.action_more_actions()
         assert app.screen is app.screen_stack[0]
 
