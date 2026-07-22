@@ -12,7 +12,7 @@ from textual.pilot import Pilot
 from textual.widgets import Button, Input, OptionList, Select, Static, Switch, TextArea
 
 from conftest import FakeBackend
-from workspace_session_manager.config import HealthConfig
+from workspace_session_manager.config import HealthConfig, NotificationConfig
 from workspace_session_manager.errors import TmuxError
 from workspace_session_manager.models import (
     AgentState,
@@ -1536,6 +1536,87 @@ async def test_activity_sparkline_appears_only_after_enough_samples_at_wide_widt
         # (from the identical no-op initial fetch) without ever growing past
         # the flat idle state -- this just exercises that code path too.
         assert identity in app._activity_history
+
+
+@pytest.mark.asyncio
+async def test_new_warning_sends_telegram_alert_when_enabled(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = create_managed(service, "a-candidate", Tool.CODEX)
+    selected = create_managed(service, "z-selected", Tool.CLAUDE)
+    service.organize(selected, pinned=True)
+    fake_backend.previews[candidate] = "Ready"
+    fake_backend.previews[selected] = "Ready"
+    service.config = service.config.model_copy(
+        update={
+            "notifications": NotificationConfig(
+                telegram_enabled=True,
+                telegram_bot_token="test-token",  # noqa: S106
+                telegram_chat_id="12345",
+            )
+        }
+    )
+    sent: list[str] = []
+    monkeypatch.setattr(
+        "workspace_session_manager.tui.send_telegram",
+        lambda config, text: sent.append(text) or True,
+    )
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_detail_refresh(pilot, app)
+        await wait_for_attention_scan(pilot, app)
+        assert sent == []
+
+        fake_backend.previews[candidate] = "You've hit your session limit"
+        app.refresh_sessions()
+        await wait_for_attention_scan(pilot, app)
+        for _ in range(20):
+            if sent:
+                break
+            await pilot.pause(0.05)
+        assert len(sent) == 1
+        assert "a-candidate" in sent[0]
+
+
+@pytest.mark.asyncio
+async def test_new_warning_does_not_send_telegram_alert_when_disabled(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = create_managed(service, "a-candidate", Tool.CODEX)
+    selected = create_managed(service, "z-selected", Tool.CLAUDE)
+    service.organize(selected, pinned=True)
+    fake_backend.previews[candidate] = "Ready"
+    fake_backend.previews[selected] = "Ready"
+    assert not service.config.notifications.telegram_enabled
+    from workspace_session_manager.notifier import send_telegram as real_send_telegram
+
+    results: list[bool] = []
+
+    def spy(config: object, text: str) -> bool:
+        result = real_send_telegram(config, text)  # type: ignore[arg-type]
+        results.append(result)
+        return result
+
+    monkeypatch.setattr("workspace_session_manager.tui.send_telegram", spy)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_detail_refresh(pilot, app)
+        await wait_for_attention_scan(pilot, app)
+
+        fake_backend.previews[candidate] = "You've hit your session limit"
+        app.refresh_sessions()
+        await wait_for_attention_scan(pilot, app)
+        for _ in range(20):
+            if results:
+                break
+            await pilot.pause(0.05)
+        assert results == [False]
 
 
 @pytest.mark.asyncio
