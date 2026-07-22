@@ -44,6 +44,10 @@ class AppPaths:
         return self.cache_dir / "diagnostics"
 
     @property
+    def health_dir(self) -> Path:
+        return self.cache_dir / "health"
+
+    @property
     def migration_lock_file(self) -> Path:
         return self.state_dir / ".migration.lock"
 

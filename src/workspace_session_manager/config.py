@@ -7,7 +7,14 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
 
 from workspace_session_manager.errors import ConfigurationError
 from workspace_session_manager.models import Tool
@@ -45,6 +52,43 @@ class InterfaceConfig(BaseModel):
     reduce_motion: bool = False
 
 
+def default_health_scan_roots() -> tuple[Path, ...]:
+    return (Path("/srv/projects"), Path.home() / "workspace" / "projects")
+
+
+class HealthConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    enabled: bool = True
+    disk_space_enabled: bool = True
+    apt_updates_enabled: bool = True
+    reboot_required_enabled: bool = True
+    git_dirty_enabled: bool = True
+    docker_enabled: bool = True
+    disk_warn_percent: int = Field(default=10, ge=0, le=100)
+    disk_fail_percent: int = Field(default=2, ge=0, le=100)
+    disk_ttl_seconds: float = Field(default=30.0, ge=5.0, le=3600.0)
+    apt_updates_ttl_seconds: float = Field(default=21_600.0, ge=60.0, le=86_400.0)
+    reboot_required_ttl_seconds: float = Field(default=300.0, ge=5.0, le=3600.0)
+    git_dirty_ttl_seconds: float = Field(default=60.0, ge=5.0, le=3600.0)
+    docker_ttl_seconds: float = Field(default=30.0, ge=5.0, le=3600.0)
+    git_scan_budget: int = Field(default=20, ge=1, le=200)
+    subprocess_timeout: float = Field(default=5.0, ge=1.0, le=30.0)
+    project_scan_roots: tuple[Path, ...] = Field(default_factory=default_health_scan_roots)
+
+    @field_validator("project_scan_roots")
+    @classmethod
+    def expand_scan_roots(cls, values: tuple[Path, ...]) -> tuple[Path, ...]:
+        return tuple(value.expanduser() for value in values)
+
+    @field_validator("disk_fail_percent")
+    @classmethod
+    def fail_below_warn(cls, fail: int, info: ValidationInfo) -> int:
+        warn = info.data.get("disk_warn_percent", 10)
+        if fail > warn:
+            raise ValueError("disk_fail_percent must not exceed disk_warn_percent")
+        return fail
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: int = Field(default=1, ge=1, le=1)
@@ -55,6 +99,7 @@ class AppConfig(BaseModel):
     log_lines: int = Field(default=500, ge=50, le=5000)
     log_bytes: int = Field(default=262_144, ge=4096, le=4_194_304)
     interface: InterfaceConfig = Field(default_factory=InterfaceConfig)
+    health: HealthConfig = Field(default_factory=HealthConfig)
     legacy_state_dirs: tuple[Path, ...] = Field(
         default_factory=lambda: (
             Path.home() / ".local" / "state" / "wf" / "sessions",
