@@ -28,6 +28,7 @@ from workspace_session_manager.models import (
 )
 from workspace_session_manager.service import SessionService
 from workspace_session_manager.tui import (
+    THEME_MODES,
     ConfirmActionScreen,
     CreateFailureScreen,
     CreateSessionScreen,
@@ -1804,16 +1805,20 @@ async def test_terminal_resizing_preserves_selection_and_switches_modes(
 
 
 @pytest.mark.asyncio
-async def test_light_and_monochrome_theme_cycle(service: SessionService) -> None:
+async def test_theme_cycle_covers_every_mode(service: SessionService) -> None:
     create_managed(service, "theme", Tool.SHELL)
     app = WsApp(service, monochrome=False, onboarding=False)
     async with app.run_test(size=(120, 35)) as pilot:
+        assert app.ui_theme == "ithaca"
+        for expected in THEME_MODES[1:]:
+            app.action_cycle_theme()
+            await pilot.pause()
+            assert app.ui_theme == expected
+            if expected != "ithaca":
+                assert app.has_class(expected)
         app.action_cycle_theme()
         await pilot.pause()
-        assert app.has_class("light")
-        app.action_cycle_theme()
-        await pilot.pause()
-        assert app.has_class("monochrome")
+        assert app.ui_theme == "ithaca"
 
 
 @pytest.mark.asyncio

@@ -59,6 +59,17 @@ from workspace_session_manager.service import SessionService, normalized_session
 
 BindingSpec = Binding | tuple[str, str] | tuple[str, str, str]
 RECENT_WINDOW = timedelta(hours=24)
+THEME_MODES = (
+    "ithaca",
+    "dark",
+    "light",
+    "monochrome",
+    "midnight",
+    "cyberpunk",
+    "terminal",
+    "paper",
+)
+LIGHT_THEME_MODES = ("light", "paper")
 ATTENTION_PREVIEW_LINES = 20
 ATTENTION_PREVIEW_BYTES = 8_192
 USAGE_LIMIT_PATTERN = re.compile(
@@ -298,6 +309,7 @@ def session_row(
     *,
     ascii_only: bool = False,
     notice: ActivityNotice | None = None,
+    pulse_dim: bool = False,
 ) -> Text:
     """Build a stable two-line row sized to its current pane."""
     alert = notice or detect_activity(session, "")
@@ -307,7 +319,8 @@ def session_row(
     name_width = max(10, width - len(tool) - len(when) - 7)
     name = truncate(session.name, name_width, ascii_only=ascii_only)
     first = Text()
-    first.append(f"{marker} ", style="yellow" if marker != " " else "")
+    marker_style = "" if marker == " " else "#8a7a2a" if (marker == "!" and pulse_dim) else "yellow"
+    first.append(f"{marker} ", style=marker_style)
     first.append(f"{tool:<7}", style=TOOL_STYLES[session.tool])
     first.append(f"{name:<{name_width}} ", style="bold")
     first.append(when, style="dim")
@@ -351,6 +364,28 @@ def animate_modal_open(screen: Screen[Any]) -> None:
     dialog.styles.offset = (0, 1)
     screen.call_after_refresh(dialog.styles.animate, "opacity", 1.0, duration=duration)
     screen.call_after_refresh(dialog.styles.animate, "offset", final_offset, duration=duration)
+
+
+def animate_modal_shake(screen: Screen[Any]) -> None:
+    """Nudge the dialog side to side once, as feedback for a rejected submit.
+
+    Offsets are whole terminal cells, so a sub-cell tween has nothing to
+    interpolate — step the offset directly instead of animating it.
+    """
+    motion = getattr(screen.app, "motion", "off")
+    if motion == "off":
+        return
+    dialog = screen.query_one(".dialog")
+    rest_offset = dialog.styles.offset
+    step = 0.06 if motion == "full" else 0.05
+
+    def set_offset(x: int) -> None:
+        if dialog.is_mounted:
+            dialog.styles.offset = rest_offset if x == 0 else (x, 0)
+
+    for index, x in enumerate((1, -1, 1, 0)):
+        delay = step * index
+        screen.set_timer(delay if delay > 0 else 0.001, lambda x=x: set_offset(x))
 
 
 @dataclass(frozen=True, slots=True)
@@ -895,6 +930,7 @@ class CreateSessionScreen(ModalScreen[CreateFormResult | None]):
     def action_submit(self) -> None:
         button = self.query_one("#create-submit", Button)
         if button.disabled or self._validated_signature != self._signature():
+            animate_modal_shake(self)
             return
         request = self._validated_request
         if request is None:
@@ -1129,6 +1165,7 @@ class IdentityOrganizationScreen(ModalScreen[OrganizationEditResult | None]):
 
     def action_submit(self) -> None:
         if self.query_one("#identity-submit", Button).disabled:
+            animate_modal_shake(self)
             return
         if self._validated_result is not None:
             self.dismiss(self._validated_result)
@@ -1199,8 +1236,10 @@ class NoteScreen(ModalScreen[str | None]):
             self.action_submit()
 
     def action_submit(self) -> None:
-        if not self.query_one("#note-submit", Button).disabled:
-            self.dismiss(self.query_one("#note-value", TextArea).text)
+        if self.query_one("#note-submit", Button).disabled:
+            animate_modal_shake(self)
+            return
+        self.dismiss(self.query_one("#note-value", TextArea).text)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -1456,7 +1495,9 @@ class ManageSessionScreen(ModalScreen[ManageSelection | None]):
         prompt.append(status, "dim" if action.enabled else "#7f8a90")
         if action.destructive:
             danger_color = (
-                "#b33b47" if getattr(self.app, "ui_theme", "dark") == "light" else "#ef8a91"
+                "#b33b47"
+                if getattr(self.app, "ui_theme", "ithaca") in LIGHT_THEME_MODES
+                else "#ef8a91"
             )
             prompt.stylize(danger_color, 0, len(marker) + len(label))
         return prompt
@@ -1473,7 +1514,9 @@ class ManageSessionScreen(ModalScreen[ManageSelection | None]):
             header = Text(category.upper(), style="bold #8fa0a9")
             if category == "Danger":
                 danger_color = (
-                    "#a9323e" if getattr(self.app, "ui_theme", "dark") == "light" else "#d9757d"
+                    "#a9323e"
+                    if getattr(self.app, "ui_theme", "ithaca") in LIGHT_THEME_MODES
+                    else "#d9757d"
                 )
                 header.stylize(f"bold {danger_color}")
             options.add_option(
@@ -2839,6 +2882,10 @@ class WsApp(App[str | None]):
         self._attention_baseline_established = False
         self._attention_scan_error = ""
         self._attention_scan_error_notified = False
+        self._attention_dots = 0
+        self._attention_dots_timer: Timer | None = None
+        self._marker_pulse_phase = False
+        self._marker_pulse_timer: Timer | None = None
         self._health_checks: list[HealthCheck] = []
         self._health_scanning = False
         self._health_scan_generation = 0
@@ -2862,7 +2909,7 @@ class WsApp(App[str | None]):
         self.ascii_only = os.environ.get("WS_ASCII") == "1" or "utf" not in encoding
         no_color = bool(os.environ.get("NO_COLOR"))
         self.monochrome = no_color if monochrome is None else monochrome
-        self.ui_theme = theme_mode or ("monochrome" if self.monochrome else "dark")
+        self.ui_theme = theme_mode or ("monochrome" if self.monochrome else "ithaca")
         self.hostname = hostname or socket.gethostname()
         configured_motion: str = self.service.config.interface.animations
         env_motion = os.environ.get("WS_MOTION", "").strip().lower()
@@ -3098,10 +3145,15 @@ class WsApp(App[str | None]):
         self._health_checks = self.service.cached_health_alerts()
         self._render_health_row()
         self._start_health_scan()
+        self._start_marker_pulse()
         self.call_after_refresh(self._maybe_show_onboarding)
 
     def on_unmount(self) -> None:
         self._attention_scan_generation += 1
+        self._stop_attention_dots()
+        if self._marker_pulse_timer is not None:
+            self._marker_pulse_timer.stop()
+            self._marker_pulse_timer = None
 
     def _suspend_dashboard_refresh(self) -> None:
         self._dashboard_refresh_suspensions += 1
@@ -3132,8 +3184,7 @@ class WsApp(App[str | None]):
             "narrow",
             "short",
             "too-small",
-            "light",
-            "monochrome",
+            *THEME_MODES[1:],
         ):
             self.remove_class(name)
         if width < 80 or height < 24:
@@ -3153,10 +3204,8 @@ class WsApp(App[str | None]):
             self.add_class("narrow")
         if not self.has_class("too-small") and height <= 35:
             self.add_class("short")
-        if self.ui_theme == "light":
-            self.add_class("light")
-        elif self.ui_theme == "monochrome":
-            self.add_class("monochrome")
+        if self.ui_theme in THEME_MODES[1:]:
+            self.add_class(self.ui_theme)
 
     def _maybe_show_onboarding(self) -> None:
         if self._onboarding_checked:
@@ -3272,14 +3321,59 @@ class WsApp(App[str | None]):
         if not requests:
             if self._attention_complete():
                 self._attention_baseline_established = True
+                self._stop_attention_dots()
             self._render_header()
             self._render_attention_action()
             return
         self._attention_scan_generation += 1
         self._attention_scanning = True
+        self._start_attention_dots()
         self._scan_attention(self._attention_scan_generation, requests)
         self._render_header()
         self._render_attention_action()
+
+    def _start_attention_dots(self) -> None:
+        if self.motion == "off" or self._attention_dots_timer is not None:
+            return
+        self._attention_dots = 0
+        self._attention_dots_timer = self.set_interval(0.5, self._tick_attention_dots)
+
+    def _tick_attention_dots(self) -> None:
+        if not self.is_running:
+            return
+        self._attention_dots = (self._attention_dots + 1) % 3
+        self._render_attention_action()
+
+    def _stop_attention_dots(self) -> None:
+        if self._attention_dots_timer is not None:
+            self._attention_dots_timer.stop()
+            self._attention_dots_timer = None
+        self._attention_dots = 0
+
+    def _start_marker_pulse(self) -> None:
+        if self.motion == "off" or self._marker_pulse_timer is not None:
+            return
+        self._marker_pulse_timer = self.set_interval(0.7, self._tick_marker_pulse)
+
+    def _tick_marker_pulse(self) -> None:
+        if not self.is_running:
+            return
+        self._marker_pulse_phase = not self._marker_pulse_phase
+        options = self.query_one("#sessions", OptionList)
+        for session in self.sessions:
+            if session.pinned or not is_warning(session, self._notice_for(session)):
+                continue
+            option_id = f"session:{session.session_id}"
+            if option_id not in self._option_sessions:
+                continue
+            prompt = session_row(
+                session,
+                self._row_width(),
+                ascii_only=self.ascii_only,
+                notice=self._notice_for(session),
+                pulse_dim=self._marker_pulse_phase,
+            )
+            options.replace_option_prompt(option_id, prompt)
 
     @work(thread=True, exclusive=True, group="attention-scan")
     def _scan_attention(
@@ -3368,6 +3462,7 @@ class WsApp(App[str | None]):
             self._attention_scan_error_notified = False
         if self._attention_complete():
             self._attention_baseline_established = True
+            self._stop_attention_dots()
         if new_warnings:
             names = ", ".join(new_warnings[:3])
             if len(new_warnings) > 3:
@@ -3551,6 +3646,8 @@ class WsApp(App[str | None]):
             self.query_one("#sessions", OptionList).replace_option_prompt(option_id, prompt)
 
     def _restore_session_row(self, name: str, session_id: str) -> None:
+        if not self.is_running:
+            return
         session = next(
             (item for item in self.sessions if item.name == name and item.session_id == session_id),
             None,
@@ -3622,7 +3719,9 @@ class WsApp(App[str | None]):
         if warnings:
             return f"Attention ({warnings})"
         if not self._attention_complete():
-            return "Attention (checking)"
+            if self.motion == "off":
+                return "Attention (checking)"
+            return f"Attention (checking{'.' * (self._attention_dots + 1)})"
         return "Attention"
 
     def _unmanaged_option(self) -> Option:
@@ -4215,8 +4314,7 @@ class WsApp(App[str | None]):
         self._render_action_bar()
 
     def action_cycle_theme(self) -> None:
-        modes = ("dark", "light", "monochrome")
-        self.ui_theme = modes[(modes.index(self.ui_theme) + 1) % len(modes)]
+        self.ui_theme = THEME_MODES[(THEME_MODES.index(self.ui_theme) + 1) % len(THEME_MODES)]
         self.monochrome = self.ui_theme == "monochrome"
         self._set_layout_classes(self.size.width, self.size.height)
         self._render_options()
@@ -4316,6 +4414,14 @@ class WsApp(App[str | None]):
         self._render_action_bar()
 
     def _highlight_created_session(self, name: str, session_id: str) -> None:
+        self._flash_session_row(name, session_id, "on #243d55")
+        fade_delay = 0.35 if self.motion == "full" else 0.25
+        self.set_timer(fade_delay, lambda: self._flash_session_row(name, session_id, "on #1a2c3d"))
+        self.set_timer(fade_delay + 0.25, lambda: self._restore_session_row(name, session_id))
+
+    def _flash_session_row(self, name: str, session_id: str, style: str) -> None:
+        if not self.is_running:
+            return
         session = next(
             (item for item in self.sessions if item.name == name and item.session_id == session_id),
             None,
@@ -4329,9 +4435,8 @@ class WsApp(App[str | None]):
             ascii_only=self.ascii_only,
             notice=self._notice_for(session),
         )
-        prompt.stylize("on #243d55")
+        prompt.stylize(style)
         self.query_one("#sessions", OptionList).replace_option_prompt(option_id, prompt)
-        self.set_timer(0.5, lambda: self._restore_session_row(name, session_id))
 
     def _create_session(self, result: CreateFormResult | None) -> None:
         if result is None:

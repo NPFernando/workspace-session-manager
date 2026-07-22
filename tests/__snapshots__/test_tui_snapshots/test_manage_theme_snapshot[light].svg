@@ -33,7 +33,7 @@
     }
 
     .terminal-r1 { fill: #c5c8c6 }
-.terminal-r2 { fill: #596b76 }
+.terminal-r2 { fill: #5f8996 }
 .terminal-r3 { fill: #20272b;font-weight: bold }
 .terminal-r4 { fill: #52616a }
 .terminal-r5 { fill: #58666e }
@@ -44,7 +44,7 @@
 .terminal-r10 { fill: #686e71 }
 .terminal-r11 { fill: #a9323e;font-weight: bold }
 .terminal-r12 { fill: #b33b47 }
-.terminal-r13 { fill: #41515b }
+.terminal-r13 { fill: #4d7986 }
 .terminal-r14 { fill: #e0e0e0;font-weight: bold }
     </style>
 
