@@ -2,18 +2,18 @@
 
 Assessment date: 2026-07-19
 
-This document records the pre-development inspection of the operational WF launcher. It is
+This document records the pre-development inspection of the operational ws launcher. It is
 deliberately privacy-safe: session task text, project names, pane output, credentials, and log
 contents are excluded.
 
 ## Command and source layout
 
-- The active `WF` command is a user-local symbolic link to a Bash script in the home directory.
+- The active `ws` command is a user-local symbolic link to a Bash script in the home directory.
 - A separate release-style directory contains a byte-identical copy of that script.
 - The implementation reports version `0.1.0-dev` and uses tmux as its persistence backend.
-- The SSH login hook invokes the home-directory script directly, not the `WF` symlink.
+- The SSH login hook invokes the home-directory script directly, not the `ws` symlink.
 - The shell also defines a lowercase compatibility alias for the same script.
-- No `wf-dev` command existed before this repository was created.
+- No `ws-dev` command existed before this repository was created.
 
 The source path and symlink are intentionally not changed by this project.
 
@@ -80,15 +80,15 @@ A non-destructive archive was created before project implementation:
 - Mode: owner-readable and owner-writable only
 - SHA-256: `4493ab0f20b9cb5ebc351028eced5b7d5e8840e1143a3f8e640674fd2bb8a6d5`
 
-The archive includes the launcher source, release tree, command symlink, WF configuration/cache/state,
+The archive includes the launcher source, release tree, command symlink, ws configuration/cache/state,
 legacy sidecars/logs, and copies of the relevant user shell profiles. It must not be committed or
 published.
 
 ## Migration constraints
 
-Development uses the `wf-session-manager` XDG namespace and the `wf-dev` command. Existing unmanaged
-sessions are hidden by default and available through `wf-dev list --all` for diagnostics. A tmux
-session is mutable only when a new WF metadata record, the original tmux session ID, and the tmux
+Development uses the `workspace-session-manager` XDG namespace and the `ws-dev` command. Existing unmanaged
+sessions are hidden by default and available through `ws-dev list --all` for diagnostics. A tmux
+session is mutable only when a new ws metadata record, the original tmux session ID, and the tmux
 owner marker prove ownership. Name matching alone never grants ownership.
 
 Cutover requires explicit approval, a fresh backup, a preserved classic executable, and a manual

@@ -1,11 +1,16 @@
 schema_version = 1
 refresh_interval = 3.0
+attention_scan_budget = 8
 preview_lines = 80
 
 legacy_state_dirs = [
   "~/.local/state/wf/sessions",
   "~/.ws-session-notes",
 ]
+
+[interface]
+animations = "subtle" # off, subtle, full
+reduce_motion = false
 
 [tools.claude]
 command = ["claude"]

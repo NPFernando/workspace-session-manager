@@ -38,10 +38,10 @@ if [[ "${1:-}" != "--restore-classic" ]]; then
   exit 2
 fi
 
-install_root="${XDG_DATA_HOME:-$HOME/.local/share}/wf-session-manager"
-target="$HOME/.local/bin/WF"
+install_root="${XDG_DATA_HOME:-$HOME/.local/share}/workspace-session-manager"
+target="$HOME/.local/bin/ws"
 classic="$HOME/.local/libexec/wf-classic"
-expected="$install_root/venv/bin/WF"
+expected="$install_root/venv/bin/ws"
 owner_marker="$install_root/classic-owner"
 
 if ! owner_only_regular_file "$classic" || [[ ! -x "$classic" ]]; then
@@ -77,5 +77,5 @@ if [[ ! -L "$target" || "$(readlink -f -- "$target")" != "$expected" ]]; then
 fi
 
 replace_with_symlink "$classic" "$target"
-printf 'Restored classic WF: %s -> %s\n' "$target" "$classic"
+printf 'Restored classic ws: %s -> %s\n' "$target" "$classic"
 printf '%s\n' 'New metadata and the virtual environment were retained for recovery.'

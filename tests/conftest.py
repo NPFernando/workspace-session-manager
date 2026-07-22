@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from wf_session_manager.config import AppConfig, ToolProfile
-from wf_session_manager.errors import SessionExistsError, SessionNotFoundError, TmuxError
-from wf_session_manager.legacy import LegacyMetadataReader
-from wf_session_manager.models import TmuxSession, Tool
-from wf_session_manager.paths import AppPaths
-from wf_session_manager.service import SessionService
-from wf_session_manager.store import MetadataStore
+from workspace_session_manager.config import AppConfig, ToolProfile
+from workspace_session_manager.errors import SessionExistsError, SessionNotFoundError, TmuxError
+from workspace_session_manager.legacy import LegacyMetadataReader
+from workspace_session_manager.models import TmuxSession, Tool
+from workspace_session_manager.paths import AppPaths
+from workspace_session_manager.service import SessionService
+from workspace_session_manager.store import MetadataStore
 
 
 class FakeBackend:
@@ -21,6 +21,9 @@ class FakeBackend:
         self.options: dict[tuple[str, str], str] = {}
         self.previews: dict[str, str] = {}
         self.attached: list[str] = []
+        self.interrupted: list[str] = []
+        self.restarted: list[str] = []
+        self.logging_paths: dict[str, Path] = {}
         self.created_commands: list[tuple[tuple[str, ...], tuple[str, ...] | None]] = []
         self._counter = 0
 
@@ -32,6 +35,9 @@ class FakeBackend:
         cwd: Path = Path("/tmp"),
         command: str = "bash",
         clients: int = 0,
+        last_activity_at: datetime | None = None,
+        pane_dead: bool = False,
+        pane_dead_status: int | None = None,
     ) -> TmuxSession:
         self._counter += 1
         session = TmuxSession(
@@ -42,6 +48,9 @@ class FakeBackend:
             windows=1,
             cwd=cwd,
             current_command=command,
+            last_activity_at=last_activity_at,
+            pane_dead=pane_dead,
+            pane_dead_status=pane_dead_status,
         )
         self.sessions[name] = session
         return session
@@ -80,7 +89,7 @@ class FakeBackend:
             (tuple(shell_command), tuple(agent_command) if agent_command else None)
         )
         session = self.add(name, cwd=cwd, command=Path((agent_command or shell_command)[0]).name)
-        self.set_option(name, "@wf_owner", "wf-session-manager")
+        self.set_option(name, "@wf_owner", "workspace-session-manager")
         return session
 
     def capture_pane(self, name: str, lines: int, expected_id: str | None = None) -> str:
@@ -98,6 +107,8 @@ class FakeBackend:
         session = self.require_expected(old_name, expected_id)
         del self.sessions[old_name]
         self.sessions[new_name] = session.model_copy(update={"name": new_name})
+        if old_name in self.logging_paths:
+            self.logging_paths[new_name] = self.logging_paths.pop(old_name)
         for (session_name, option), value in list(self.options.items()):
             if session_name == old_name:
                 del self.options[(session_name, option)]
@@ -108,6 +119,40 @@ class FakeBackend:
         del self.sessions[name]
         for key in [key for key in self.options if key[0] == name]:
             del self.options[key]
+
+    def send_interrupt(self, name: str, expected_id: str | None = None) -> None:
+        self.require_expected(name, expected_id)
+        self.interrupted.append(name)
+
+    def restart_session(
+        self,
+        name: str,
+        cwd: Path,
+        shell_command: Sequence[str],
+        agent_command: Sequence[str] | None,
+        expected_id: str | None = None,
+    ) -> None:
+        session = self.require_expected(name, expected_id)
+        self.restarted.append(name)
+        command = Path((agent_command or shell_command)[0]).name
+        self.sessions[name] = session.model_copy(
+            update={"cwd": cwd, "current_command": command, "pane_dead": False}
+        )
+
+    def set_logging(
+        self,
+        name: str,
+        log_path: Path | None,
+        expected_id: str | None = None,
+    ) -> None:
+        session = self.require_expected(name, expected_id)
+        if log_path is None:
+            self.logging_paths.pop(name, None)
+            self.options.pop((name, "@wf_logging"), None)
+        else:
+            self.logging_paths[name] = log_path
+            self.options[(name, "@wf_logging")] = "1"
+        self.sessions[name] = session.model_copy(update={"logging_enabled": log_path is not None})
 
     def set_option(
         self,
@@ -120,6 +165,8 @@ class FakeBackend:
         self.options[(name, option)] = value
         if option == "@wf_owner":
             self.sessions[name] = session.model_copy(update={"wf_owner": value})
+        elif option == "@wf_logging":
+            self.sessions[name] = session.model_copy(update={"logging_enabled": value == "1"})
 
     def get_option(self, name: str, option: str, expected_id: str | None = None) -> str | None:
         self.require_expected(name, expected_id)
@@ -130,6 +177,8 @@ class FakeBackend:
         self.options.pop((name, option), None)
         if option == "@wf_owner":
             self.sessions[name] = session.model_copy(update={"wf_owner": None})
+        elif option == "@wf_logging":
+            self.sessions[name] = session.model_copy(update={"logging_enabled": False})
 
 
 @pytest.fixture

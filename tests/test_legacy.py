@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from wf_session_manager.legacy import LegacyMetadataReader
-from wf_session_manager.models import Tool
+from workspace_session_manager.legacy import LegacyMetadataReader
+from workspace_session_manager.models import Tool
 
 
 def test_legacy_reader_reads_sidecars_without_writing(tmp_path: Path) -> None:

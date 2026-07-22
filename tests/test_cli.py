@@ -5,19 +5,62 @@ import pytest
 from typer.testing import CliRunner
 
 from conftest import FakeBackend
-from wf_session_manager import cli
-from wf_session_manager.cli import Runtime
-from wf_session_manager.legacy import LegacyMetadataReader
-from wf_session_manager.migration import MigrationManager
-from wf_session_manager.paths import AppPaths
-from wf_session_manager.service import SessionService
-from wf_session_manager.store import MetadataStore
+from workspace_session_manager import cli
+from workspace_session_manager.cli import Runtime
+from workspace_session_manager.config import AppConfig
+from workspace_session_manager.legacy import LegacyMetadataReader
+from workspace_session_manager.migration import MigrationManager
+from workspace_session_manager.models import CreateRequest, InputState, TaskState, Tool
+from workspace_session_manager.paths import AppPaths
+from workspace_session_manager.service import SessionService
+from workspace_session_manager.store import MetadataStore
 
 
 def test_version() -> None:
     result = CliRunner().invoke(cli.app, ["--version"])
     assert result.exit_code == 0
-    assert result.stdout.startswith("WF ")
+    assert result.stdout.startswith("ws ")
+
+
+def test_no_animation_option_reaches_tui(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    runtime = Runtime(paths=paths, config=AppConfig())
+    received: list[bool] = []
+    monkeypatch.setattr(cli, "build_runtime", lambda config=None: runtime)
+    monkeypatch.setattr(
+        cli,
+        "run_tui",
+        lambda runtime, *, no_animation=False: received.append(no_animation),
+    )
+    result = CliRunner().invoke(cli.app, ["--no-animation"])
+    assert result.exit_code == 0, result.output
+    assert received == [True]
+
+
+def test_classic_launcher_requires_owner_only_executable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    classic = tmp_path / ".local" / "libexec" / "wf-classic"
+    classic.parent.mkdir(parents=True)
+    classic.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    classic.chmod(0o700)
+    executed: list[tuple[Path, list[str]]] = []
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(
+        cli.os,
+        "execv",
+        lambda path, args: executed.append((Path(path), args)),
+    )
+    cli.run_classic()
+    assert executed == [(classic, [str(classic)])]
+
+    classic.chmod(0o755)
+    with pytest.raises(cli.WsError, match="unsafe classic"):
+        cli.run_classic()
 
 
 def test_json_list(
@@ -69,6 +112,39 @@ def test_default_list_hides_unmanaged_session(
     result = CliRunner().invoke(cli.app, ["list", "--json"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout) == []
+
+
+def test_explicit_edit_command_updates_task_input_and_project(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    session = service.create(CreateRequest(name="edit", tool=Tool.SHELL, cwd=tmp_path))
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "edit",
+            session.name,
+            "--state",
+            "waiting",
+            "--input",
+            "required",
+            "--project",
+            "workflow-core",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    updated = service.get(session.name)
+    assert updated.task_state is TaskState.WAITING
+    assert updated.input_state is InputState.REQUIRED
+    assert updated.project == "workflow-core"
+
+
+def test_legacy_organize_alias_is_hidden_from_help() -> None:
+    commands = {command.name: command for command in cli.app.registered_commands if command.name}
+    assert not commands["edit"].hidden
+    assert commands["organize"].hidden
 
 
 def test_migration_cli_preview_apply_status_and_rollback(

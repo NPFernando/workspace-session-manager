@@ -1,0 +1,1300 @@
+Screen {
+    background: #101316;
+    color: #e8edf0;
+}
+
+#app-header, #log-header {
+    dock: top;
+    height: 3;
+    padding: 1 2 0 2;
+    background: #181d21;
+    border-bottom: solid #303941;
+    overflow: hidden;
+}
+
+.medium #app-header {
+    height: 4;
+}
+
+#search-mode {
+    dock: top;
+    display: none;
+    height: 3;
+    padding: 0 2;
+    background: #181d21;
+    border-bottom: solid #303941;
+}
+
+.searching #search-mode {
+    display: block;
+}
+
+.overlay-active #search-mode,
+.overlay-active #action-bar {
+    display: none;
+}
+
+#search-label {
+    width: 9;
+    height: 3;
+    padding-top: 1;
+    color: #9eabb3;
+}
+
+#search {
+    width: 1fr;
+    height: 3;
+    border: tall #3f6e9d;
+    background: #11161a;
+}
+
+#search-hint {
+    width: 25;
+    height: 3;
+    padding: 1 0 0 2;
+    color: #82919a;
+}
+
+#workspace {
+    height: 1fr;
+}
+
+#session-pane {
+    width: 36%;
+    min-width: 36;
+    border-right: solid #303941;
+    background: #12171a;
+}
+
+.medium #session-pane {
+    width: 42%;
+}
+
+#sessions {
+    height: 1fr;
+    padding: 0 1;
+    background: #12171a;
+    border: none;
+    scrollbar-color: #47545c;
+    scrollbar-background: #171c20;
+}
+
+OptionList > .option-list--option {
+    padding: 0 1;
+}
+
+OptionList > .option-list--option:hover {
+    background: #19242c;
+}
+
+OptionList > .option-list--option-highlighted {
+    background: #24598a;
+    color: #ffffff;
+    text-style: none;
+}
+
+OptionList > .option-list--option-disabled {
+    color: #7e8c95;
+    background: #12171a;
+    padding-top: 1;
+}
+
+#detail-pane {
+    width: 64%;
+    min-width: 40;
+    background: #101316;
+    align-horizontal: center;
+}
+
+.medium #detail-pane {
+    width: 58%;
+}
+
+#identity {
+    width: 100%;
+    max-width: 120;
+    height: auto;
+    min-height: 4;
+    padding: 1 2;
+    background: #161b1f;
+    border-bottom: solid #303941;
+}
+
+#inspector-scroll {
+    width: 100%;
+    max-width: 120;
+    height: 1fr;
+    padding: 1 2 0 2;
+    scrollbar-color: #47545c;
+    scrollbar-background: #101316;
+}
+
+#overview-status-row {
+    layout: vertical;
+    width: 100%;
+    height: auto;
+}
+
+.very-wide #overview-status-row {
+    layout: horizontal;
+}
+
+.very-wide #overview-card {
+    width: 1fr;
+    margin-right: 1;
+}
+
+.very-wide #status-card {
+    width: 1fr;
+}
+
+.inspector-card {
+    width: 100%;
+    height: auto;
+    min-height: 3;
+    margin-bottom: 1;
+    padding: 0 1 1 1;
+    background: #151a1e;
+    border-left: solid #34424b;
+}
+
+.inspector-card.warning {
+    border-left: solid #c5903c;
+    background: #1d1b15;
+}
+
+.inspector-card.error {
+    border-left: solid #c75b64;
+    background: #211719;
+}
+
+.inspector-card.success {
+    border-left: solid #477c59;
+}
+
+.section-title {
+    height: 2;
+    padding-top: 1;
+    color: #91a1aa;
+    text-style: bold;
+}
+
+.section-body {
+    height: auto;
+    min-height: 1;
+    color: #dce3e7;
+}
+
+#activity-card {
+    min-height: 5;
+}
+
+#output-card {
+    height: 1fr;
+    min-height: 10;
+    padding-bottom: 0;
+}
+
+#output-heading {
+    height: 2;
+}
+
+#output-heading .section-title {
+    width: 18;
+}
+
+.output-mode {
+    width: 11;
+    min-width: 11;
+    height: 1;
+    min-height: 1;
+    margin-top: 1;
+    padding: 0 1;
+    border: none;
+    color: #82919a;
+    background: #151a1e;
+}
+
+.output-mode.active {
+    color: #eef3f6;
+    background: #2c4c68;
+    text-style: bold;
+}
+
+#output-meta {
+    width: 1fr;
+    height: 2;
+    padding-top: 1;
+    text-align: right;
+    color: #7f8d96;
+    overflow: hidden;
+}
+
+#recent-output-scroll {
+    height: 1fr;
+    min-height: 6;
+    background: #0b0e10;
+    border-top: solid #273139;
+    scrollbar-color: #47545c;
+    scrollbar-background: #0b0e10;
+}
+
+.output-body {
+    height: auto;
+    min-height: 100%;
+    padding: 1;
+    color: #cbd3d8;
+}
+
+#actions-card {
+    width: 100%;
+    max-width: 120;
+    height: 5;
+    min-height: 5;
+    margin-bottom: 0;
+    padding: 0 2;
+    border-top: solid #303941;
+    border-left: none;
+    background: #151a1e;
+}
+
+#session-actions {
+    height: 2;
+    overflow: hidden;
+}
+
+#action-bar {
+    dock: bottom;
+    height: 2;
+    padding: 0 2;
+    background: #181d21;
+    color: #c4cdd2;
+    border-top: solid #303941;
+    content-align: left middle;
+    overflow: hidden;
+}
+
+#small-terminal {
+    display: none;
+    width: 100%;
+    height: 100%;
+    content-align: center middle;
+    text-align: center;
+    color: #dce3e7;
+}
+
+.short #identity {
+    min-height: 3;
+    padding: 0 2;
+}
+
+.short #inspector-scroll {
+    padding-top: 0;
+}
+
+.short .inspector-card {
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.short .section-title {
+    height: 1;
+    padding-top: 0;
+}
+
+.short #activity-card {
+    min-height: 3;
+}
+
+.short #output-card {
+    min-height: 5;
+}
+
+.short #actions-card {
+    height: 3;
+    min-height: 3;
+}
+
+.short #session-actions {
+    height: 1;
+}
+
+.narrow #session-pane {
+    width: 100%;
+    min-width: 0;
+    border-right: none;
+}
+
+.narrow #detail-pane {
+    display: none;
+}
+
+.narrow.narrow-detail #session-pane {
+    display: none;
+}
+
+.narrow.narrow-detail #detail-pane {
+    display: block;
+    width: 100%;
+    min-width: 0;
+}
+
+.narrow.narrow-detail #inspector-scroll {
+    max-width: 100%;
+    padding: 0 1;
+}
+
+.narrow.narrow-detail #inspector-scroll:focus {
+    border-left: solid #3f6e9d;
+}
+
+.narrow.narrow-detail #output-heading .section-title {
+    width: 1fr;
+}
+
+.narrow.narrow-detail #output-meta,
+.narrow.narrow-detail #actions-card {
+    display: none;
+}
+
+.narrow.narrow-detail #output-card {
+    min-height: 8;
+}
+
+.narrow #app-header {
+    height: 2;
+    padding: 0 1;
+}
+
+.narrow #action-bar {
+    height: 2;
+    padding: 0 1;
+}
+
+.too-small #app-header,
+.too-small #search-mode,
+.too-small #workspace,
+.too-small #action-bar {
+    display: none;
+}
+
+.too-small #small-terminal {
+    display: block;
+}
+
+ModalScreen {
+    align: center middle;
+    background: #080a0c 70%;
+}
+
+.dialog {
+    width: 68;
+    max-width: 94%;
+    height: auto;
+    max-height: 92%;
+    padding: 1 2;
+    border: solid #596b76;
+    background: #181d21;
+    scrollbar-color: #47545c;
+    scrollbar-background: #181d21;
+}
+
+.create-dialog {
+    width: 72;
+    height: auto;
+    max-height: 94%;
+    padding-bottom: 0;
+}
+
+#create-dialog.advanced {
+    height: 94%;
+}
+
+#create-basic {
+    height: auto;
+}
+
+#create-advanced {
+    height: 1fr;
+    min-height: 8;
+    scrollbar-color: #47545c;
+    scrollbar-background: #181d21;
+}
+
+.form-row {
+    height: 1;
+    margin-bottom: 0;
+}
+
+.task-row {
+    height: 3;
+}
+
+.task-row TextArea {
+    width: 1fr;
+    height: 3;
+    border: tall #3a464e;
+    background: #11161a;
+}
+
+.field-status {
+    height: auto;
+    min-height: 1;
+    margin-left: 18;
+    color: #82919a;
+}
+
+.field-status.valid {
+    color: #72c78e;
+}
+
+.field-status.invalid,
+#create-submit-reason.invalid {
+    color: #ef6b73;
+}
+
+.field-status.warning {
+    color: #e9b44c;
+}
+
+.field-status.checking {
+    color: #82919a;
+}
+
+.form-row .field-label,
+.preview-row .field-label,
+.validation-row .field-label {
+    width: 18;
+    height: 1;
+    margin-top: 0;
+    padding-top: 0;
+}
+
+.form-row Input,
+.form-row Select,
+.form-row TextArea {
+    width: 1fr;
+}
+
+.create-dialog Input,
+.create-dialog Select {
+    height: 1;
+    border: none;
+    background: #11161a;
+}
+
+.create-dialog Input:focus,
+.create-dialog Select:focus {
+    border: none;
+    background: #162433;
+    color: #eef3f6;
+}
+
+#create-cwd {
+    width: 2fr;
+}
+
+#create-recent-dir {
+    width: 18;
+    margin-left: 1;
+}
+
+#create-home-project {
+    display: none;
+    width: 20;
+    min-width: 20;
+    height: 1;
+    margin-left: 1;
+}
+
+.preview-row {
+    height: 1;
+    min-height: 1;
+}
+
+.preview-row .field-label {
+    height: 1;
+    padding-top: 0;
+}
+
+.small-dialog {
+    width: 58;
+}
+
+.manage-dialog {
+    width: 72;
+    height: 31;
+    max-height: 94%;
+    padding-bottom: 0;
+}
+
+#manage-actions {
+    height: 1fr;
+    min-height: 10;
+    background: #13181c;
+    border: none;
+    scrollbar-color: #47545c;
+    scrollbar-background: #181d21;
+}
+
+#manage-actions > .option-list--option {
+    height: 1;
+    min-height: 1;
+    padding: 0 1;
+}
+
+#manage-actions > .option-list--option-disabled {
+    height: 1;
+    min-height: 1;
+    padding: 0 1;
+    background: #101417;
+}
+
+#manage-search {
+    display: none;
+    height: 1;
+    border: none;
+    background: #101417;
+}
+
+.finding #manage-search {
+    display: block;
+}
+
+#manage-detail {
+    height: 3;
+    min-height: 3;
+    padding: 0 1;
+    border-left: solid #41515b;
+    background: #151a1e;
+    color: #cbd3d8;
+}
+
+#manage-help {
+    height: 1;
+    min-height: 1;
+    margin-top: 0;
+}
+
+#manage-close-row {
+    height: 1;
+    min-height: 1;
+    align-horizontal: right;
+}
+
+#more-cancel {
+    width: 12;
+    min-width: 12;
+    height: 1;
+    min-height: 1;
+    margin-top: 0;
+    border: none;
+}
+
+.narrow-manage {
+    align: left top;
+}
+
+.narrow-manage .manage-dialog {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: none;
+}
+
+.identity-dialog {
+    width: 68;
+}
+
+.identity-dialog .field-label {
+    margin-top: 0;
+}
+
+.identity-dialog Input {
+    height: 1;
+    border: none;
+    background: #11161a;
+}
+
+.identity-dialog Input:focus {
+    border: none;
+    background: #162433;
+    color: #eef3f6;
+}
+
+.identity-dialog .field-status {
+    margin-left: 0;
+}
+
+.task-dialog {
+    width: 68;
+    height: 18;
+}
+
+#note-value {
+    height: 1fr;
+    min-height: 6;
+    border: tall #3a464e;
+    background: #11161a;
+}
+
+#note-status {
+    margin-left: 0;
+    text-align: right;
+}
+
+.status-dialog {
+    width: 64;
+}
+
+.diagnostics-dialog {
+    width: 78;
+    height: 78%;
+}
+
+#diagnostics-meta {
+    height: 1;
+    color: #82919a;
+}
+
+#diagnostics-loading {
+    height: 1;
+    display: none;
+    color: #66aaff;
+}
+
+.message-dialog {
+    height: auto;
+    max-height: 80%;
+}
+
+.dialog-title {
+    height: 2;
+    color: #eef3f6;
+    text-style: bold;
+}
+
+.dialog-context, .confirm-name {
+    height: auto;
+    margin-bottom: 1;
+    color: #9eabb3;
+}
+
+.mode-help {
+    height: auto;
+    min-height: 1;
+    margin-top: 1;
+    color: #82919a;
+}
+
+.field-label {
+    height: 1;
+    margin-top: 1;
+    color: #aeb9bf;
+}
+
+.secondary-field {
+    color: #839098;
+}
+
+.dialog Input,
+.dialog Select {
+    width: 100%;
+}
+
+Input:focus,
+Select:focus {
+    border: tall #66aaff;
+    background: #111820;
+}
+
+Button {
+    min-width: 12;
+}
+
+Button:hover {
+    background: #2b3943;
+}
+
+Button:focus {
+    border: tall #7db7ee;
+    text-style: bold;
+}
+
+Button:disabled {
+    color: #68747b;
+    background: #20262a;
+    border: tall #30383d;
+    text-style: none;
+}
+
+Button.-error {
+    color: #fff1f2;
+    background: #7f333b;
+}
+
+Button.-error:focus {
+    border: tall #ff8c95;
+}
+
+#logging-row {
+    height: 1;
+    margin-top: 0;
+}
+
+#logging-row .field-label {
+    width: 18;
+    height: 1;
+    margin-top: 0;
+    padding-top: 0;
+}
+
+#create-logging {
+    width: 8;
+    height: 1;
+}
+
+#logging-state,
+#prefix-state {
+    width: 1fr;
+    height: 1;
+    color: #cbd3d8;
+}
+
+#logging-hint {
+    height: 2;
+    margin-left: 18;
+    color: #82919a;
+}
+
+#command-preview,
+#create-submit-reason {
+    width: 1fr;
+    height: auto;
+    min-height: 1;
+    padding: 0 1;
+    background: #0b0e10;
+    color: #cbd3d8;
+}
+
+#create-submit-reason {
+    margin-top: 0;
+    color: #82919a;
+}
+
+#create-summary {
+    display: none;
+    height: auto;
+    max-height: 6;
+    margin-top: 1;
+    padding: 0 1;
+    border-left: solid #3e6d55;
+    background: #121a17;
+}
+
+#create-form-help {
+    height: 1;
+    color: #82919a;
+    text-align: right;
+}
+
+#create-advanced-toggle {
+    width: 26;
+    min-width: 26;
+    height: 1;
+    min-height: 1;
+    margin-left: 18;
+    border: none;
+    background: transparent;
+    color: #9eabb3;
+    text-align: left;
+}
+
+#create-advanced-toggle:focus {
+    border: none;
+    background: #1d2a34;
+    color: #7db7ee;
+}
+
+#create-advanced.collapsed {
+    display: none;
+}
+
+.field-help {
+    height: 1;
+    margin-left: 18;
+    color: #82919a;
+}
+
+#create-advanced-content {
+    height: auto;
+}
+
+.narrow-form {
+    align: left top;
+}
+
+.narrow-form .create-dialog {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: none;
+}
+
+.compact-form .create-dialog {
+    height: 100%;
+    max-height: 100%;
+}
+
+.compact-form #create-basic {
+    height: 1fr;
+    overflow-y: auto;
+    scrollbar-color: #47545c;
+    scrollbar-background: #181d21;
+}
+
+.dialog-actions {
+    height: 3;
+    min-height: 3;
+    align-horizontal: right;
+    margin-top: 1;
+}
+
+.dialog-actions Button {
+    margin-left: 1;
+}
+
+.create-dialog .dialog-actions {
+    margin-top: 0;
+}
+
+.failure-actions {
+    height: auto;
+    min-height: 3;
+}
+
+#create-failure-dialog {
+    width: 72;
+}
+
+#message-close {
+    width: 100%;
+    margin-top: 1;
+}
+
+.danger-dialog {
+    border: solid #b94f59;
+}
+
+.danger-title {
+    color: #ef6b73;
+}
+
+.confirm-copy {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#message-content,
+#onboarding-copy {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#diagnostics-summary {
+    height: 2;
+    padding: 0 1;
+    background: #11161a;
+    color: #cbd3d8;
+}
+
+#diagnostics-list {
+    height: 1fr;
+    min-height: 10;
+    margin-top: 1;
+    padding: 1;
+    background: #11161a;
+}
+
+#diagnostics-content {
+    height: auto;
+}
+
+.diagnostics-actions {
+    height: auto;
+    min-height: 6;
+}
+
+.logs-workspace {
+    background: #101316;
+}
+
+.logs-workspace #log-header {
+    height: 2;
+    padding: 0 2;
+    content-align: left middle;
+}
+
+#log-status {
+    height: 1;
+    padding: 0 2;
+    background: #151a1e;
+    color: #aab5bb;
+    overflow: hidden;
+}
+
+#log-controls {
+    height: 2;
+    min-height: 2;
+    padding: 0 2;
+    background: #151a1e;
+    border-bottom: solid #303941;
+}
+
+#log-controls Button {
+    width: 10;
+    min-width: 10;
+    height: 1;
+    min-height: 1;
+    margin-right: 1;
+    border: none;
+    background: #20272c;
+    color: #aeb9bf;
+}
+
+#log-controls Button.active {
+    background: #24598a;
+    color: #ffffff;
+    text-style: bold;
+}
+
+#log-controls Button:focus {
+    border: none;
+    background: #316b9f;
+}
+
+#log-controls Button:disabled {
+    border: none;
+    background: #171c20;
+    color: #5f6a70;
+}
+
+#log-follow {
+    width: 12;
+    min-width: 12;
+}
+
+#log-output-meta {
+    width: 1fr;
+    height: 1;
+    color: #82919a;
+    text-align: right;
+    overflow: hidden;
+}
+
+#log-alert,
+#log-error {
+    display: none;
+    height: auto;
+    min-height: 2;
+    padding: 0 2;
+}
+
+.has-log-alert #log-alert {
+    display: block;
+    background: #302814;
+    color: #f0c66c;
+    border-bottom: solid #80682f;
+}
+
+.has-log-error #log-error {
+    display: block;
+    background: #31191c;
+    color: #ef8a91;
+    border-bottom: solid #8d3f47;
+}
+
+#log-find {
+    display: none;
+    height: 1;
+    min-height: 1;
+    padding: 0 2;
+    background: #18232c;
+}
+
+.finding #log-find {
+    display: block;
+}
+
+#log-find-label {
+    width: 7;
+    color: #7db7ee;
+    text-style: bold;
+}
+
+#log-find-input {
+    width: 1fr;
+    height: 1;
+    border: none;
+    background: #101820;
+}
+
+#log-find-input:focus {
+    border: none;
+    background: #162433;
+}
+
+#log-find-count {
+    width: 14;
+    padding-left: 1;
+    color: #9eabb3;
+    text-align: right;
+}
+
+#log-output {
+    height: 1fr;
+    min-height: 8;
+    padding: 0 1;
+    border: none;
+    background: #101316;
+    color: #d5dde1;
+    scrollbar-color: #47545c;
+    scrollbar-background: #101316;
+}
+
+#log-output:focus {
+    border-left: solid #3f6e9d;
+    background: #11161a;
+}
+
+#log-action-bar {
+    height: 2;
+    min-height: 2;
+    padding: 0 2;
+    background: #181d21;
+    color: #cbd3d8;
+    border-top: solid #303941;
+    overflow: hidden;
+}
+
+#log-small-terminal {
+    display: none;
+}
+
+.log-narrow #log-status {
+    height: 2;
+}
+
+.log-narrow #log-controls {
+    height: 2;
+}
+
+.log-narrow #log-action-bar {
+    height: 2;
+}
+
+.log-too-small #log-header,
+.log-too-small #log-status,
+.log-too-small #log-controls,
+.log-too-small #log-alert,
+.log-too-small #log-error,
+.log-too-small #log-find,
+.log-too-small #log-output,
+.log-too-small #log-action-bar {
+    display: none;
+}
+
+.log-too-small #log-small-terminal {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 3 4;
+    color: #d5dde1;
+    background: #101316;
+}
+
+.light Screen,
+.light #detail-pane,
+.light #inspector-scroll {
+    background: #f4f6f7;
+    color: #20272b;
+}
+
+.light #app-header,
+.light #session-pane,
+.light #action-bar,
+.light #identity,
+.light #actions-card {
+    background: #e7ecef;
+    color: #20272b;
+}
+
+.light #sessions,
+.light OptionList > .option-list--option-disabled {
+    background: #edf1f3;
+    color: #58666e;
+}
+
+.light OptionList > .option-list--option:hover {
+    background: #dce5ea;
+}
+
+.light OptionList > .option-list--option-highlighted {
+    color: #ffffff;
+    background: #24598a;
+}
+
+.light .inspector-card {
+    background: #ffffff;
+    color: #20272b;
+}
+
+.light .section-body,
+.light .output-body {
+    color: #20272b;
+}
+
+.light .logs-workspace,
+.light #log-output,
+.light #log-output:focus {
+    background: #f8fafb;
+    color: #20272b;
+}
+
+.light #log-header,
+.light #log-status,
+.light #log-controls,
+.light #log-action-bar {
+    background: #e7ecef;
+    color: #3d4a51;
+}
+
+.light #log-find {
+    background: #dce8f0;
+}
+
+.light #log-find-input,
+.light #log-find-input:focus {
+    background: #ffffff;
+    color: #20272b;
+}
+
+.light #log-output-meta,
+.light #log-find-count {
+    color: #52616a;
+}
+
+.light .has-log-alert #log-alert {
+    background: #fff5d7;
+    color: #795700;
+}
+
+.light .has-log-error #log-error {
+    background: #fdebed;
+    color: #9d2633;
+}
+
+.light #recent-output-scroll,
+.light #command-preview,
+.light #create-submit-reason,
+.light #diagnostics-list,
+.light #diagnostics-summary,
+.light #manage-actions,
+.light #manage-detail,
+.light #manage-search {
+    background: #f8fafb;
+    color: #20272b;
+}
+
+.light .manage-dialog,
+.light .identity-dialog,
+.light .task-dialog,
+.light .status-dialog {
+    background: #edf1f3;
+    color: #20272b;
+}
+
+.light .dialog-title {
+    color: #20272b;
+}
+
+.light .dialog-context,
+.light .mode-help,
+.light .field-label {
+    color: #52616a;
+}
+
+.light .identity-dialog Input,
+.light .task-dialog TextArea,
+.light .status-dialog Select {
+    background: #ffffff;
+    color: #20272b;
+}
+
+.light .identity-dialog Input:focus,
+.light .task-dialog TextArea:focus,
+.light .status-dialog Select:focus {
+    background: #e3edf4;
+    color: #20272b;
+}
+
+.light #manage-actions > .option-list--option-disabled {
+    background: #e4e9ec;
+}
+
+.monochrome Screen,
+.monochrome #app-header,
+.monochrome #session-pane,
+.monochrome #detail-pane,
+.monochrome #action-bar,
+.monochrome #identity,
+.monochrome .inspector-card,
+.monochrome OptionList > .option-list--option-disabled {
+    color: #e6e6e6;
+    background: #111111;
+}
+
+.monochrome OptionList > .option-list--option-highlighted {
+    color: #000000;
+    background: #d7d7d7;
+    text-style: bold;
+}
+
+.monochrome #recent-output-scroll,
+.monochrome #command-preview,
+.monochrome #create-submit-reason,
+.monochrome #manage-actions,
+.monochrome #manage-detail,
+.monochrome #manage-search,
+.monochrome #log-output,
+.monochrome #log-output:focus {
+    color: #e6e6e6;
+    background: #080808;
+}
+
+.monochrome #log-header,
+.monochrome #log-status,
+.monochrome #log-controls,
+.monochrome #log-action-bar,
+.monochrome #log-find,
+.monochrome #log-alert,
+.monochrome #log-error {
+    color: #e6e6e6;
+    background: #111111;
+}
+
+.monochrome #log-controls Button.active {
+    color: #000000;
+    background: #d7d7d7;
+}
+
+.monochrome .manage-dialog,
+.monochrome .identity-dialog,
+.monochrome .task-dialog,
+.monochrome .status-dialog,
+.monochrome #manage-actions > .option-list--option-disabled {
+    color: #e6e6e6;
+    background: #111111;
+}

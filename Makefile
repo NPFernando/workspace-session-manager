@@ -15,7 +15,7 @@ test:
 	pytest -m "not integration"
 
 test-integration:
-	WF_RUN_TMUX_INTEGRATION=1 pytest -m integration -q --no-cov
+	WS_RUN_TMUX_INTEGRATION=1 pytest -m integration -q --no-cov
 
 check: lint type test
 

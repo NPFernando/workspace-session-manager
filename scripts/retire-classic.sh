@@ -9,12 +9,12 @@ owner_only_regular_file() {
   (( (8#$mode & 8#077) == 0 ))
 }
 
-install_root="${XDG_DATA_HOME:-$HOME/.local/share}/wf-session-manager"
+install_root="${XDG_DATA_HOME:-$HOME/.local/share}/workspace-session-manager"
 classic="$HOME/.local/libexec/wf-classic"
 owner_marker="$install_root/classic-owner"
 archive_dir="$install_root/classic-archive"
-target="$HOME/.local/bin/WF"
-expected="$install_root/venv/bin/WF"
+target="$HOME/.local/bin/ws"
+expected="$install_root/venv/bin/ws"
 approve=0
 
 if [[ "${1:-}" == "--approve-retirement" && -z "${2:-}" ]]; then
@@ -26,7 +26,7 @@ fi
 
 if [[ ! -L "$target" || "$(readlink -f -- "$target")" != "$expected" \
   || ! -f "$expected" || -L "$expected" || ! -x "$expected" || ! -O "$expected" ]]; then
-  printf '%s\n' 'Refusing retirement because the new WF installation is not active.' >&2
+  printf '%s\n' 'Refusing retirement because the new ws installation is not active.' >&2
   exit 1
 fi
 if ! owner_only_regular_file "$owner_marker"; then

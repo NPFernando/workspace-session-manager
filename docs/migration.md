@@ -6,10 +6,10 @@ relevant step.
 
 ## Current phase
 
-- Use `wf-dev` from the project virtual environment.
-- Keep the current `WF`, home-directory launcher, alias, SSH hook, and tmux sessions unchanged.
-- Use `wf-dev list --all` only for read-only diagnostics before adoption.
-- Test creation and deletion only with sessions created by `wf-dev`.
+- Use `ws-dev` from the project virtual environment.
+- Keep the current `ws`, home-directory launcher, alias, SSH hook, and tmux sessions unchanged.
+- Use `ws-dev list --all` only for read-only diagnostics before adoption.
+- Test creation and deletion only with sessions created by `ws-dev`.
 
 ## Approval checklist
 
@@ -23,7 +23,7 @@ Before cutover:
 - The reviewed plan contains the expected exact tmux IDs and no unexpected sessions.
 - Conflicting duplicate sidecars have been handled by configuring only the authoritative read root;
   operational sidecars themselves remain unchanged.
-- The owner explicitly approves adoption and replacement of the user-local `WF` symlink.
+- The owner explicitly approves adoption and replacement of the user-local `ws` symlink.
 - The owner separately approves any SSH login-hook change.
 
 ## Adoption preview
@@ -31,17 +31,17 @@ Before cutover:
 Preview reads tmux and legacy sidecars but does not write either one:
 
 ```bash
-wf-dev migrate preview --all --output adoption-plan.json
+ws-dev migrate preview --all --output adoption-plan.json
 chmod 600 adoption-plan.json
 ```
 
 The terminal table redacts notes. The private JSON plan includes imported values, exact tmux IDs,
 source locations, and SHA-256 hashes for every sidecar. Review it locally and do not commit it.
 
-Immediately before cutover, validate the reviewed file without changing tmux or WF state:
+Immediately before cutover, validate the reviewed file without changing tmux or ws state:
 
 ```bash
-wf-dev migrate validate adoption-plan.json
+ws-dev migrate validate adoption-plan.json
 ```
 
 Validation rejects non-owner-only permissions, stale tmux IDs or sidecars, unsafe paths, malformed
@@ -51,7 +51,7 @@ but excludes imported notes. Apply repeats these checks under the migration lock
 To select sessions individually, repeat the exact-name option:
 
 ```bash
-wf-dev migrate preview \
+ws-dev migrate preview \
   --session claude-example \
   --session codex-example \
   --output adoption-plan.json
@@ -64,7 +64,7 @@ marker changed after preview.
 
 The installer preserves the resolved pre-cutover command, installs the application in a user-local
 virtual environment, validates and applies the reviewed plan, verifies that no legacy-managed
-sessions remain unadopted, and then updates only `~/.local/bin/WF`:
+sessions remain unadopted, and then updates only `~/.local/bin/ws`:
 
 ```bash
 scripts/install.sh \
@@ -73,7 +73,7 @@ scripts/install.sh \
 ```
 
 An existing preservation copy is reused only when it is a user-owned, owner-only executable whose
-SHA-256 matches the current `WF` command. The installer records that checksum in a private ownership
+SHA-256 matches the current `ws` command. The installer records that checksum in a private ownership
 marker before switching the command symlink.
 
 After adoption, any failure before the command symlink switches triggers rollback of that exact
@@ -85,9 +85,9 @@ cutover attempt exits before preserving a command, replacing the environment, or
 The final command switch is an atomic rename of a private temporary symlink. Existing timestamped
 command backups are never overwritten; a collision aborts cutover and rolls back adoption.
 
-Adoption writes new WF metadata and a tmux user option. It does not attach, rename, restart, kill, or
+Adoption writes new ws metadata and a tmux user option. It does not attach, rename, restart, kill, or
 send input to a session, and it never changes a legacy sidecar. Unrelated unmanaged tmux sessions may
-remain; normal WF views hide them.
+remain; normal ws views hide them.
 
 There is no classic command inside the new application. During the soak period, the installer-created
 preservation copy remains at `~/.local/libexec/wf-classic`, and command rollback remains available
@@ -103,7 +103,7 @@ scripts/migrate-ssh-hook.py
 scripts/migrate-ssh-hook.py --approve-cutover
 ```
 
-The replacement respects both new and legacy disable/shown environment variables, invokes `WF` only
+The replacement respects both new and legacy disable/shown environment variables, invokes `ws` only
 for an interactive SSH login outside tmux, and creates a timestamped profile backup. It does not
 remove the existing lowercase compatibility alias.
 
@@ -117,15 +117,15 @@ scripts/uninstall.sh --restore-classic
 
 Command rollback requires the installer ownership marker and refuses a preservation copy whose
 ownership, permissions, or checksum changed after cutover.
-It atomically replaces the installed command symlink, so `WF` never passes through an intentionally
+It atomically replaces the installed command symlink, so `ws` never passes through an intentionally
 missing intermediate state.
 
 Then use the retained installed command path to inspect journals and roll back adoption if the adopted
 records have not changed:
 
 ```bash
-~/.local/share/wf-session-manager/venv/bin/wf-dev migrate status
-~/.local/share/wf-session-manager/venv/bin/wf-dev \
+~/.local/share/workspace-session-manager/venv/bin/ws-dev migrate status
+~/.local/share/workspace-session-manager/venv/bin/ws-dev \
   migrate rollback MIGRATION_ID --approve
 ```
 
@@ -145,7 +145,7 @@ scripts/retire-classic.sh
 scripts/retire-classic.sh --approve-retirement
 ```
 
-The script requires the new virtual-environment command to still be the active `WF`, requires the
+The script requires the new virtual-environment command to still be the active `ws`, requires the
 installer's private ownership marker, verifies the original executable checksum, enforces the soak
 period, and creates an owner-only compressed archive. Before deletion, it requires the archive to
 contain only `wf-classic`, hashes the extracted payload against the installer marker, and self-checks a
