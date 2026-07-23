@@ -2057,6 +2057,32 @@ async def test_filter_dialog_applies_tool_and_warning_filters(service: SessionSe
 
 
 @pytest.mark.asyncio
+async def test_filter_dialog_applies_tag_and_project_filters(service: SessionService) -> None:
+    backend = create_managed(service, "backend-work", Tool.CLAUDE)
+    frontend = create_managed(service, "frontend-work", Tool.CODEX)
+    service.organize(backend, tags=["backend"], project="api")
+    service.organize(frontend, tags=["frontend"], project="web")
+    app = WsApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("f")
+        assert isinstance(app.screen, FilterScreen)
+        screen = app.screen
+        assert screen.available_tags == ("backend", "frontend")
+        assert screen.available_projects == ("api", "web")
+        screen.query_one("#filter-tag", Select).value = "backend"
+        await pilot.click("#filter-apply")
+        await pilot.pause()
+        assert [session.name for session in app.visible_sessions] == [backend]
+
+        await pilot.press("f")
+        app.screen.query_one("#filter-tag", Select).value = "any"
+        app.screen.query_one("#filter-project", Select).value = "web"
+        await pilot.click("#filter-apply")
+        await pilot.pause()
+        assert [session.name for session in app.visible_sessions] == [frontend]
+
+
+@pytest.mark.asyncio
 async def test_onboarding_is_safe_and_recorded(service: SessionService) -> None:
     app = WsApp(service, monochrome=False)
     async with app.run_test(size=(100, 30)) as pilot:

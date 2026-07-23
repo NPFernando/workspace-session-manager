@@ -553,6 +553,18 @@ ModalScreen {
     width: 58;
 }
 
+#filter-dialog Select {
+    height: 1;
+    border: none;
+    background: $background-darken-1;
+}
+
+#filter-dialog Select:focus {
+    border: none;
+    background: $primary-muted;
+    color: $foreground-lighten-1;
+}
+
 .manage-dialog {
     width: 72;
     height: 31;

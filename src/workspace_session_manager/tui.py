@@ -1943,6 +1943,8 @@ class FilterState:
     tool: Tool | None = None
     runtime: RuntimeState | None = None
     task: TaskState | None = None
+    tag: str | None = None
+    project: str | None = None
     warnings_only: bool = False
     recent_only: bool = False
 
@@ -1953,6 +1955,8 @@ class FilterState:
                 self.tool,
                 self.runtime,
                 self.task,
+                self.tag,
+                self.project,
                 self.warnings_only,
                 self.recent_only,
             )
@@ -1966,6 +1970,10 @@ class FilterState:
             values.append(display_state(self.runtime.value))
         if self.task:
             values.append(display_state(self.task.value))
+        if self.tag:
+            values.append(f"#{self.tag}")
+        if self.project:
+            values.append(self.project)
         if self.warnings_only:
             values.append("Warnings")
         if self.recent_only:
@@ -1976,9 +1984,17 @@ class FilterState:
 class FilterScreen(ModalScreen[FilterState | None]):
     BINDINGS: ClassVar[list[BindingSpec]] = [Binding("escape", "cancel", "Cancel")]
 
-    def __init__(self, current: FilterState) -> None:
+    def __init__(
+        self,
+        current: FilterState,
+        *,
+        available_tags: Sequence[str] = (),
+        available_projects: Sequence[str] = (),
+    ) -> None:
         super().__init__()
         self.current = current
+        self.available_tags = tuple(available_tags)
+        self.available_projects = tuple(available_projects)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="filter-dialog", classes="dialog small-dialog"):
@@ -2010,6 +2026,27 @@ class FilterScreen(ModalScreen[FilterState | None]):
                 allow_blank=False,
                 id="filter-task",
             )
+            yield Label("Tag", classes="field-label")
+            yield Select(
+                [("Any tag", "any"), *[(tag, tag) for tag in self.available_tags]],
+                value=self.current.tag if self.current.tag in self.available_tags else "any",
+                allow_blank=False,
+                id="filter-tag",
+            )
+            yield Label("Project", classes="field-label")
+            yield Select(
+                [
+                    ("Any project", "any"),
+                    *[(project, project) for project in self.available_projects],
+                ],
+                value=(
+                    self.current.project
+                    if self.current.project in self.available_projects
+                    else "any"
+                ),
+                allow_blank=False,
+                id="filter-project",
+            )
             yield Checkbox("Warnings only", self.current.warnings_only, id="filter-warnings")
             yield Checkbox(
                 "Active in the last 24 hours",
@@ -2038,11 +2075,15 @@ class FilterScreen(ModalScreen[FilterState | None]):
             tool = str(self.query_one("#filter-tool", Select).value)
             runtime = str(self.query_one("#filter-runtime", Select).value)
             task = str(self.query_one("#filter-task", Select).value)
+            tag = str(self.query_one("#filter-tag", Select).value)
+            project = str(self.query_one("#filter-project", Select).value)
             self.dismiss(
                 FilterState(
                     tool=None if tool == "any" else Tool(tool),
                     runtime=None if runtime == "any" else RuntimeState(runtime),
                     task=None if task == "any" else TaskState(task),
+                    tag=None if tag == "any" else tag,
+                    project=None if project == "any" else project,
                     warnings_only=self.query_one("#filter-warnings", Checkbox).value,
                     recent_only=self.query_one("#filter-recent", Checkbox).value,
                 )
@@ -4172,6 +4213,10 @@ class WsApp(App[str | None]):
             return False
         if self.filters.task is not None and session.task_state is not self.filters.task:
             return False
+        if self.filters.tag is not None and self.filters.tag not in session.tags:
+            return False
+        if self.filters.project is not None and session.project != self.filters.project:
+            return False
         if self.filters.warnings_only and not is_warning(session, self._notice_for(session)):
             return False
         if self.filters.recent_only:
@@ -4750,7 +4795,18 @@ class WsApp(App[str | None]):
         if self.narrow_detail_open:
             self._close_narrow_detail()
         self._begin_overlay(InteractionMode.FILTER)
-        self.push_screen(FilterScreen(self.filters), self._apply_filter)
+        available_tags = sorted({tag for session in self.sessions for tag in session.tags})
+        available_projects = sorted(
+            {session.project for session in self.sessions if session.project}
+        )
+        self.push_screen(
+            FilterScreen(
+                self.filters,
+                available_tags=available_tags,
+                available_projects=available_projects,
+            ),
+            self._apply_filter,
+        )
 
     def _apply_filter(self, filters: FilterState | None) -> None:
         self._restore_dashboard_mode(filters=filters)
