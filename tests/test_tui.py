@@ -259,6 +259,39 @@ async def test_narrow_enter_opens_in_place_detail_then_attaches(service: Session
 
 
 @pytest.mark.asyncio
+async def test_narrow_detail_actions_card_buttons_are_visible_and_functional(
+    service: SessionService,
+) -> None:
+    name = create_managed(service, "touch-target", Tool.CLAUDE)
+    app = WsApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.narrow_detail_open
+        assert app.query_one("#actions-card").display
+        open_button = app.query_one("#action-open", Button)
+        manage_button = app.query_one("#action-manage", Button)
+        logs_button = app.query_one("#action-logs", Button)
+        pin_button = app.query_one("#action-pin", Button)
+        assert not open_button.disabled
+        assert not manage_button.disabled
+        assert not logs_button.disabled
+        assert not pin_button.disabled
+        assert str(pin_button.label) == "Pin"
+
+        await pilot.click("#action-pin")
+        await wait_for_detail_refresh(pilot, app)
+        await pilot.pause()
+        assert str(pin_button.label) == "Unpin"
+        session = next(item for item in app.sessions if item.name == name)
+        assert session.pinned
+
+        await pilot.click("#action-manage")
+        await pilot.pause()
+        assert isinstance(app.screen, ManageSessionScreen)
+
+
+@pytest.mark.asyncio
 async def test_narrow_detail_restores_viewports_after_forms_logs_and_back(
     service: SessionService,
     fake_backend: FakeBackend,

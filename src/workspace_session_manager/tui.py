@@ -1631,7 +1631,7 @@ class ManageSessionScreen(ModalScreen[ManageSelection | None]):
                 classes="mode-help",
             )
             with Horizontal(id="manage-close-row"):
-                yield Button("Close", id="more-cancel", compact=True)
+                yield Button("Close", id="more-cancel")
 
     def on_mount(self) -> None:
         animate_modal_open(self)
@@ -3039,7 +3039,7 @@ class SearchOutputScreen(ModalScreen[None]):
                 classes="mode-help",
             )
             with Horizontal(id="search-output-close-row"):
-                yield Button("Close", id="search-output-cancel", compact=True)
+                yield Button("Close", id="search-output-cancel")
 
     def on_mount(self) -> None:
         animate_modal_open(self)
@@ -3607,7 +3607,31 @@ class WsApp(App[str | None]):
                             yield Static("", id="recent-output", classes="section-body output-body")
                 with Vertical(id="actions-card", classes="inspector-card"):
                     yield Static("ACTIONS", id="inspector-actions-title", classes="section-title")
-                    yield Static("", id="session-actions", classes="section-body")
+                    with Horizontal(id="session-action-buttons"):
+                        yield Button(
+                            "Open",
+                            id="action-open",
+                            classes="session-action-button",
+                            compact=True,
+                        )
+                        yield Button(
+                            "Manage",
+                            id="action-manage",
+                            classes="session-action-button",
+                            compact=True,
+                        )
+                        yield Button(
+                            "Logs",
+                            id="action-logs",
+                            classes="session-action-button",
+                            compact=True,
+                        )
+                        yield Button(
+                            "Pin",
+                            id="action-pin",
+                            classes="session-action-button",
+                            compact=True,
+                        )
         yield Static("", id="action-bar")
         yield Static("", id="small-terminal")
 
@@ -4557,6 +4581,12 @@ class WsApp(App[str | None]):
             None,
         )
 
+    def _set_action_buttons_enabled(self, enabled: bool, *, pinned: bool = False) -> None:
+        for button in self.query(".session-action-button"):
+            button.disabled = not enabled
+        if enabled:
+            self.query_one("#action-pin", Button).label = "Unpin" if pinned else "Pin"
+
     def _render_empty_state(self) -> None:
         if self.has_class("attention-view"):
             scanned, eligible = self._attention_progress()
@@ -4569,14 +4599,10 @@ class WsApp(App[str | None]):
                 if checking
                 else "The current runtime, task, input, and agent states are clear."
             )
-            for widget_id in (
-                "#runtime-status",
-                "#activity",
-                "#recent-output",
-                "#session-actions",
-            ):
+            for widget_id in ("#runtime-status", "#activity", "#recent-output"):
                 self.query_one(widget_id, Static).update("")
             self.query_one("#output-meta", Static).update("")
+            self._set_action_buttons_enabled(False)
             return
         filtered = bool(self.filter_query) or self.filters.active
         self.query_one("#identity", Static).update("No matches" if filtered else "No sessions")
@@ -4585,9 +4611,10 @@ class WsApp(App[str | None]):
             if filtered
             else "Create a managed session to get started."
         )
-        for widget_id in ("#runtime-status", "#activity", "#recent-output", "#session-actions"):
+        for widget_id in ("#runtime-status", "#activity", "#recent-output"):
             self.query_one(widget_id, Static).update("")
         self.query_one("#output-meta", Static).update("")
+        self._set_action_buttons_enabled(False)
 
     def _render_details(self, name: str) -> None:
         self._detail_generation += 1
@@ -4619,6 +4646,7 @@ class WsApp(App[str | None]):
         old_output_scroll = output_scroller.scroll_offset.y
         if error:
             self.query_one("#overview", Static).update(error)
+            self._set_action_buttons_enabled(False)
             return
         assert details is not None
         session = details.session
@@ -4735,9 +4763,7 @@ class WsApp(App[str | None]):
         self.query_one("#output-meta", Static).update(
             f"{self.output_mode.title()}  {line_count} lines  {truncated}  sanitized  l full logs"
         )
-        self.query_one("#session-actions", Static).update(
-            "Enter Attach   e Edit   n Task   l Logs   r Refresh   * Pin   d Manage"
-        )
+        self._set_action_buttons_enabled(True, pinned=session.pinned)
         self.call_after_refresh(scroller.scroll_to, y=old_scroll, animate=False, force=True)
         self.call_after_refresh(
             output_scroller.scroll_to,
@@ -4755,6 +4781,18 @@ class WsApp(App[str | None]):
             self.query_one(f"#output-{mode}", Button).set_class(self.output_mode == mode, "active")
         if self.selected_name:
             self._render_details(self.selected_name)
+
+    @on(Button.Pressed, ".session-action-button")
+    def session_action_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id
+        if button_id == "action-open":
+            self.action_open()
+        elif button_id == "action-manage":
+            self.action_manage()
+        elif button_id == "action-logs":
+            self.action_logs()
+        elif button_id == "action-pin":
+            self.action_toggle_pin()
 
     @on(Input.Changed, "#search")
     def search_changed(self, event: Input.Changed) -> None:
