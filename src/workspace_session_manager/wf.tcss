@@ -635,6 +635,81 @@ ModalScreen {
     border: none;
 }
 
+.search-output-dialog {
+    width: 96;
+    max-width: 96%;
+    height: 34;
+    max-height: 94%;
+    padding-bottom: 0;
+}
+
+#search-output-input {
+    height: 1;
+    border: none;
+    background: $surface;
+}
+
+#search-output-results {
+    height: 10;
+    min-height: 6;
+    max-height: 12;
+    background: $surface;
+    border: none;
+    scrollbar-color: $scrollbar;
+    scrollbar-background: $scrollbar-background;
+}
+
+#search-output-results > .option-list--option {
+    height: 1;
+    min-height: 1;
+    padding: 0 1;
+}
+
+#search-output-results > .option-list--option-disabled {
+    height: 1;
+    min-height: 1;
+    padding: 0 1;
+    background: $surface;
+}
+
+#search-output-detail-scroll {
+    height: 1fr;
+    min-height: 8;
+    border-left: solid $border;
+    background: $surface;
+    scrollbar-color: $scrollbar;
+    scrollbar-background: $scrollbar-background;
+}
+
+#search-output-detail {
+    padding: 0 1;
+    color: $foreground-darken-1;
+}
+
+#search-output-help {
+    height: 1;
+    min-height: 1;
+    margin-top: 0;
+}
+
+#search-output-close-row {
+    height: 1;
+    min-height: 1;
+    align-horizontal: right;
+}
+
+.narrow-search-output {
+    align: left top;
+}
+
+.narrow-search-output .search-output-dialog {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: none;
+}
+
 .identity-dialog {
     width: 68;
 }

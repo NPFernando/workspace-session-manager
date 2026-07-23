@@ -8,7 +8,7 @@ import re
 import shlex
 import socket
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -58,7 +58,13 @@ from workspace_session_manager.models import (
     normalize_tags,
 )
 from workspace_session_manager.notifier import send_telegram
-from workspace_session_manager.service import SessionService, TailResult, normalized_session_name
+from workspace_session_manager.service import (
+    LogSearchResult,
+    LogSearchSummary,
+    SessionService,
+    TailResult,
+    normalized_session_name,
+)
 
 BindingSpec = Binding | tuple[str, str] | tuple[str, str, str]
 RECENT_WINDOW = timedelta(hours=24)
@@ -2957,6 +2963,165 @@ class DashboardModeContext:
     focused_id: str | None
 
 
+SEARCH_OUTPUT_DEBOUNCE_SECONDS = 0.3
+SEARCH_OUTPUT_MIN_QUERY_LENGTH = 2
+
+
+class SearchOutputScreen(ModalScreen[None]):
+    BINDINGS: ClassVar[list[BindingSpec]] = [
+        Binding("escape", "cancel", "Close"),
+        Binding("down", "cursor_down", "Down", show=False, priority=True),
+        Binding("up", "cursor_up", "Up", show=False, priority=True),
+    ]
+
+    def __init__(self, service: SessionService, sessions: Sequence[SessionView]) -> None:
+        super().__init__()
+        self.service = service
+        self.sessions = tuple(sessions)
+        self._query = ""
+        self._debounce_timer: Timer | None = None
+        self._search_generation = 0
+        self._results: tuple[LogSearchResult, ...] = ()
+        self._results_by_name: dict[str, LogSearchResult] = {}
+        self._skipped_no_log = 0
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="search-output-dialog", classes="dialog search-output-dialog"):
+            yield Label("Search Output", classes="dialog-title")
+            yield Input(placeholder="Search saved output across sessions", id="search-output-input")
+            yield OptionList(id="search-output-results")
+            with VerticalScroll(id="search-output-detail-scroll"):
+                yield Static("", id="search-output-detail")
+            yield Static(
+                "SEARCH OUTPUT  Type to search   Up/Down Navigate   Esc Close",
+                id="search-output-help",
+                classes="mode-help",
+            )
+            with Horizontal(id="search-output-close-row"):
+                yield Button("Close", id="search-output-cancel", compact=True)
+
+    def on_mount(self) -> None:
+        animate_modal_open(self)
+        self.set_class(self.size.width < 100, "narrow-search-output")
+        self._render_empty("Type at least two characters to search.")
+        self.query_one("#search-output-input", Input).focus()
+
+    def on_resize(self, event: events.Resize) -> None:
+        self.set_class(event.size.width < 100, "narrow-search-output")
+
+    def _render_empty(self, message: str) -> None:
+        options = self.query_one("#search-output-results", OptionList)
+        options.clear_options()
+        options.add_option(Option(message, id="search-output-empty", disabled=True))
+        self.query_one("#search-output-detail", Static).update("")
+
+    @on(Input.Changed, "#search-output-input")
+    def search_changed(self, event: Input.Changed) -> None:
+        self._query = event.value
+        if self._debounce_timer is not None:
+            self._debounce_timer.stop()
+            self._debounce_timer = None
+        query = self._query.strip()
+        if len(query) < SEARCH_OUTPUT_MIN_QUERY_LENGTH:
+            self._search_generation += 1
+            self._render_empty("Type at least two characters to search.")
+            return
+        self._debounce_timer = self.set_timer(SEARCH_OUTPUT_DEBOUNCE_SECONDS, self._start_search)
+
+    def _start_search(self) -> None:
+        self._debounce_timer = None
+        query = self._query.strip()
+        if len(query) < SEARCH_OUTPUT_MIN_QUERY_LENGTH:
+            return
+        self._search_generation += 1
+        generation = self._search_generation
+        options = self.query_one("#search-output-results", OptionList)
+        options.clear_options()
+        options.add_option(Option("Searching…", id="search-output-loading", disabled=True))
+        self.query_one("#search-output-detail", Static).update("")
+        self._run_search(generation, query, self.sessions)
+
+    @work(thread=True, exclusive=True, group="output-search")
+    def _run_search(self, generation: int, query: str, sessions: tuple[SessionView, ...]) -> None:
+        summary = self.service.search_logs(query, sessions)
+        self.app.call_from_thread(self._finish_search, generation, query, summary)
+
+    def _finish_search(self, generation: int, query: str, summary: LogSearchSummary) -> None:
+        if generation != self._search_generation:
+            return
+        self._results = summary.results
+        self._results_by_name = {result.name: result for result in summary.results}
+        self._skipped_no_log = summary.skipped_no_log
+        self._render_results(query)
+
+    def _render_results(self, query: str) -> None:
+        options = self.query_one("#search-output-results", OptionList)
+        options.clear_options()
+        if not self._results:
+            message = f'No matches for "{query}".'
+            if self._skipped_no_log:
+                noun = "session" if self._skipped_no_log == 1 else "sessions"
+                message += f" ({self._skipped_no_log} {noun} had no captured output)"
+            options.add_option(Option(message, id="search-output-empty", disabled=True))
+            self.query_one("#search-output-detail", Static).update("")
+            return
+        for result in self._results:
+            count = len(result.matches)
+            noun = "match" if count == 1 else "matches"
+            options.add_option(
+                Option(
+                    f"{result.display_name}  ({count} {noun})",
+                    id=f"search-output-result:{result.name}",
+                )
+            )
+        if self._skipped_no_log:
+            noun = "session" if self._skipped_no_log == 1 else "sessions"
+            options.add_option(
+                Option(
+                    f"{self._skipped_no_log} {noun} had no captured output",
+                    id="search-output-skipped",
+                    disabled=True,
+                )
+            )
+        options.highlighted = 0
+        self._render_detail(self._results[0])
+
+    def _render_detail(self, result: LogSearchResult) -> None:
+        text = Text()
+        for index, match in enumerate(result.matches):
+            if index:
+                text.append("\n\n")
+            for line in match.context_before:
+                text.append(f"    {line}\n", "dim")
+            text.append(f"{match.line_number:>6}  ")
+            text.append(f"{match.line}\n", "bold")
+            for line in match.context_after:
+                text.append(f"    {line}\n", "dim")
+        self.query_one("#search-output-detail", Static).update(text)
+
+    @on(OptionList.OptionHighlighted, "#search-output-results")
+    def option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        option_id = event.option.id or ""
+        if not option_id.startswith("search-output-result:"):
+            return
+        result = self._results_by_name.get(option_id.removeprefix("search-output-result:"))
+        if result is not None:
+            self._render_detail(result)
+
+    @on(Button.Pressed, "#search-output-cancel")
+    def close_button(self) -> None:
+        self.dismiss(None)
+
+    def action_cursor_down(self) -> None:
+        self.query_one("#search-output-results", OptionList).action_cursor_down()
+
+    def action_cursor_up(self) -> None:
+        self.query_one("#search-output-results", OptionList).action_cursor_up()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class WsCommandProvider(Provider):
     """Session-aware commands for Textual's built-in fuzzy palette."""
 
@@ -3033,6 +3198,11 @@ class WsCommandProvider(Provider):
                 app.action_filter,
             ),
             (
+                "Dashboard · Search output                        s",
+                "Search saved output across every session",
+                app.action_search_output,
+            ),
+            (
                 "Dashboard · Attention",
                 "Temporarily show sessions with known warnings",
                 app.action_attention,
@@ -3101,6 +3271,7 @@ class WsApp(App[str | None]):
         Binding("r", "refresh", "Refresh"),
         Binding("/", "search", "Search"),
         Binding("f", "filter", "Filter"),
+        Binding("s", "search_output", "Search output"),
         Binding("u", "toggle_unmanaged", "All sessions", show=False),
         Binding("p", "command_palette", "Palette"),
         Binding("a", "advanced_details", "Advanced", show=False),
@@ -4585,6 +4756,21 @@ class WsApp(App[str | None]):
         self._restore_dashboard_mode(filters=filters)
         if filters is not None:
             self._render_options()
+
+    def action_search_output(self) -> None:
+        if self.interaction_mode not in {InteractionMode.NORMAL, InteractionMode.SEARCH}:
+            return
+        if self._attention_context is not None:
+            self._restore_attention_view(restore_focus=False)
+        if self.narrow_detail_open:
+            self._close_narrow_detail()
+        self._begin_overlay(InteractionMode.FORM)
+        self.push_screen(
+            SearchOutputScreen(self.service, self.sessions), self._search_output_result
+        )
+
+    def _search_output_result(self, _result: None) -> None:
+        self._restore_dashboard_mode()
 
     def action_command_palette(self) -> None:
         if self.interaction_mode not in {InteractionMode.NORMAL, InteractionMode.SEARCH}:
