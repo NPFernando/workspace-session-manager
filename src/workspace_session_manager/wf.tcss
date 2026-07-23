@@ -288,9 +288,14 @@ OptionList > .option-list--option-disabled {
     background: $surface;
 }
 
-#session-actions {
-    height: 2;
+#session-action-buttons {
+    height: 1;
     overflow: hidden;
+}
+
+.session-action-button {
+    min-width: 8;
+    margin-right: 1;
 }
 
 #action-bar {
@@ -345,7 +350,7 @@ OptionList > .option-list--option-disabled {
     min-height: 3;
 }
 
-.short #session-actions {
+.short #session-action-buttons {
     height: 1;
 }
 
@@ -382,9 +387,13 @@ OptionList > .option-list--option-disabled {
     width: 1fr;
 }
 
-.narrow.narrow-detail #output-meta,
-.narrow.narrow-detail #actions-card {
+.narrow.narrow-detail #output-meta {
     display: none;
+}
+
+.narrow.narrow-detail #actions-card {
+    height: 3;
+    min-height: 3;
 }
 
 .narrow.narrow-detail #output-card {
@@ -637,18 +646,17 @@ ModalScreen {
 }
 
 #manage-close-row {
-    height: 1;
-    min-height: 1;
+    height: 3;
+    min-height: 3;
     align-horizontal: right;
 }
 
 #more-cancel {
     width: 12;
     min-width: 12;
-    height: 1;
-    min-height: 1;
+    height: 3;
+    min-height: 3;
     margin-top: 0;
-    border: none;
 }
 
 .narrow-manage {
@@ -721,9 +729,16 @@ ModalScreen {
 }
 
 #search-output-close-row {
-    height: 1;
-    min-height: 1;
+    height: 3;
+    min-height: 3;
     align-horizontal: right;
+}
+
+#search-output-cancel {
+    width: 12;
+    min-width: 12;
+    height: 3;
+    min-height: 3;
 }
 
 .narrow-search-output {
