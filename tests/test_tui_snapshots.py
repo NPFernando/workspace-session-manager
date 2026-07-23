@@ -209,6 +209,14 @@ def test_narrow_snapshot(
     assert snap_compare(populated_app(service, fake_backend), terminal_size=(80, 24))
 
 
+def test_very_narrow_snapshot(
+    snap_compare: SnapCompare,
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    assert snap_compare(populated_app(service, fake_backend), terminal_size=(50, 20))
+
+
 def test_empty_snapshot(snap_compare: SnapCompare, service: SessionService) -> None:
     assert snap_compare(
         WsApp(service, monochrome=False, hostname="wf-test-host", onboarding=False),
