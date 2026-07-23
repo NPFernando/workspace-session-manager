@@ -627,11 +627,13 @@ class CreateSessionScreen(ModalScreen[CreateFormResult | None]):
         default_cwd: Path,
         service: SessionService | None = None,
         default_tool: Tool = Tool.CLAUDE,
+        template: SessionView | None = None,
     ) -> None:
         super().__init__()
         self.default_cwd = default_cwd
         self.service = service
         self.default_tool = default_tool
+        self.template = template
         self._detected_project = ""
         self._touched: set[str] = set()
         self._advanced = False
@@ -845,6 +847,14 @@ class CreateSessionScreen(ModalScreen[CreateFormResult | None]):
         self.query_one("#logging-hint", Static).update(
             f"Output is sanitized, owner-only, and size-limited.\nStorage: {log_root}/"
         )
+        if self.template is not None:
+            self._apply_template(
+                tool=self.template.tool,
+                cwd=self.template.cwd,
+                project=self.template.project,
+                tags=self.template.tags,
+                logging_enabled=self.template.logging_enabled,
+            )
         self._schedule_validation()
         self.query_one("#create-name", Input).focus()
 
@@ -1082,17 +1092,34 @@ class CreateSessionScreen(ModalScreen[CreateFormResult | None]):
         self.query_one("#create-preset", Select).value = Select.NULL
         if preset is None:
             return
-        self.query_one("#create-tool", Select).value = preset.tool.value
+        self._apply_template(
+            tool=preset.tool,
+            cwd=preset.cwd,
+            project=preset.project,
+            tags=preset.tags,
+            logging_enabled=preset.logging_enabled,
+        )
+
+    def _apply_template(
+        self,
+        *,
+        tool: Tool,
+        cwd: Path,
+        project: str,
+        tags: Sequence[str],
+        logging_enabled: bool,
+    ) -> None:
+        self.query_one("#create-tool", Select).value = tool.value
         self._touched.add("tool")
-        self.query_one("#create-cwd", Input).value = display_path(preset.cwd)
+        self.query_one("#create-cwd", Input).value = display_path(cwd)
         self._touched.add("cwd")
-        self.query_one("#create-project", Input).value = preset.project
+        self.query_one("#create-project", Input).value = project
         self._project_user_edited = True
-        self.query_one("#create-tags", Input).value = ", ".join(preset.tags)
+        self.query_one("#create-tags", Input).value = ", ".join(tags)
         self._touched.add("tags")
-        self.query_one("#create-logging", Switch).value = preset.logging_enabled
+        self.query_one("#create-logging", Switch).value = logging_enabled
         self.query_one("#logging-state", Static).update(
-            "Enabled" if preset.logging_enabled else "Disabled"
+            "Enabled" if logging_enabled else "Disabled"
         )
         self._schedule_validation()
 
@@ -1569,6 +1596,13 @@ def session_manage_actions(session: SessionView) -> tuple[ManageAction, ...]:
             "a",
         ),
         ManageAction(
+            "clone",
+            "General",
+            "Clone session",
+            "Create a new session from this one's tool, directory, project, tags, and logging.",
+            "c",
+        ),
+        ManageAction(
             "restart",
             "Runtime",
             "Restart tool",
@@ -1634,6 +1668,7 @@ class ManageSessionScreen(ModalScreen[ManageSelection | None]):
         Binding("asterisk", "choose('pin')", "Pin", show=False),
         Binding("g", "choose('logging')", "Logging", show=False),
         Binding("a", "choose('advanced')", "Advanced", show=False),
+        Binding("c", "choose('clone')", "Clone", show=False),
         Binding("r", "choose('restart')", "Restart", show=False),
         Binding("x", "choose('stop-command')", "Stop command", show=False),
         Binding("t", "choose('stop-session')", "Stop tmux", show=False),
@@ -5450,6 +5485,9 @@ class WsApp(App[str | None]):
         elif action == "advanced":
             self._set_interaction_mode(InteractionMode.FORM)
             self.call_after_refresh(self._open_advanced_screen, session, state)
+        elif action == "clone":
+            self._set_interaction_mode(InteractionMode.FORM)
+            self.call_after_refresh(self._open_clone_screen, session, state)
         elif action == "logging":
             try:
                 updated = self.service.set_logging(session.name, not session.logging_enabled)
@@ -5510,6 +5548,17 @@ class WsApp(App[str | None]):
             lambda result, target=current, context=state: self._save_status(
                 result, target, context
             ),
+        )
+
+    def _open_clone_screen(self, session: SessionView, state: ManageListState) -> None:
+        del state
+        current = self._current_session(session)
+        if current is None:
+            self._restore_dashboard_mode()
+            return
+        self.push_screen(
+            CreateSessionScreen(self.default_cwd, self.service, current.tool, template=current),
+            self._create_session,
         )
 
     def _open_advanced_screen(

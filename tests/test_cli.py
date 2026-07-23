@@ -221,6 +221,102 @@ def test_create_from_missing_preset_errors_clearly(
     assert "preset not found" in result.output
 
 
+def test_create_from_session_applies_source_session_values(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    source = service.create(
+        CreateRequest(
+            name="original",
+            tool=Tool.SHELL,
+            cwd=tmp_path,
+            project="api",
+            tags=["backend"],
+            logging_enabled=False,
+        )
+    )
+    result = CliRunner().invoke(
+        cli.app,
+        ["create", "--name", "cloned", "--from-session", source.name],
+    )
+    assert result.exit_code == 0, result.output
+    cloned = service.get("cloned")
+    assert cloned.tool is Tool.SHELL
+    assert cloned.cwd == tmp_path
+    assert cloned.project == "api"
+    assert cloned.tags == ["backend"]
+    assert cloned.logging_enabled is False
+
+
+def test_create_from_session_explicit_flags_override_source(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    source = service.create(
+        CreateRequest(name="original", tool=Tool.SHELL, cwd=tmp_path, tags=["backend"])
+    )
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "create",
+            "--name",
+            "override-test",
+            "--from-session",
+            source.name,
+            "--tool",
+            "codex",
+            "--tag",
+            "frontend",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    cloned = service.get("codex-override-test")
+    assert cloned.tool is Tool.CODEX
+    assert cloned.tags == ["frontend"]
+
+
+def test_create_from_missing_session_errors_clearly(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    result = CliRunner().invoke(
+        cli.app, ["create", "--name", "x", "--from-session", "does-not-exist"]
+    )
+    assert result.exit_code == 1
+    assert "session not found" in result.output
+
+
+def test_create_combining_from_preset_and_from_session_errors_clearly(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    service.save_preset("backend-dev", tool=Tool.SHELL, cwd=tmp_path)
+    source = service.create(CreateRequest(name="original", tool=Tool.SHELL, cwd=tmp_path))
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "create",
+            "--name",
+            "x",
+            "--from-preset",
+            "backend-dev",
+            "--from-session",
+            source.name,
+        ],
+    )
+    assert result.exit_code == 1
+    assert "cannot be combined" in result.output
+
+
 def test_default_list_hides_unmanaged_session(
     service: SessionService,
     fake_backend: FakeBackend,
