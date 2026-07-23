@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 
 from workspace_session_manager.errors import StateError
-from workspace_session_manager.models import Preset, SessionMetadata, Tool
+from workspace_session_manager.models import InterfacePreferences, Preset, SessionMetadata, Tool
 from workspace_session_manager.paths import AppPaths
-from workspace_session_manager.store import MetadataStore, PresetStore
+from workspace_session_manager.store import InterfacePreferencesStore, MetadataStore, PresetStore
 
 
 def make_record(name: str = "claude-test") -> SessionMetadata:
@@ -101,3 +101,35 @@ def test_preset_store_rejects_symlinked_presets_file(tmp_path: Path) -> None:
     paths.presets_file.symlink_to(target)
     with pytest.raises(StateError, match="symlinked"):
         PresetStore(paths).load_all()
+
+
+def test_interface_preferences_store_returns_defaults_without_creating_state(
+    tmp_path: Path,
+) -> None:
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    preferences = InterfacePreferencesStore(paths).load()
+    assert preferences == InterfacePreferences()
+    assert not paths.interface_preferences_file.exists()
+
+
+def test_interface_preferences_store_writes_owner_only_atomic_json(tmp_path: Path) -> None:
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    store = InterfacePreferencesStore(paths)
+    preferences = InterfacePreferences(grouping="project", density="compact")
+    store.save(preferences)
+    assert store.load() == preferences
+    assert stat.S_IMODE(paths.interface_preferences_file.stat().st_mode) == 0o600
+    assert not list(paths.state_dir.glob(".interface.json.*"))
+
+
+def test_interface_preferences_store_rejects_symlinked_file(tmp_path: Path) -> None:
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    paths.state_dir.mkdir(parents=True)
+    target = tmp_path / "outside.json"
+    target.write_text("{}", encoding="utf-8")
+    paths.interface_preferences_file.symlink_to(target)
+    store = InterfacePreferencesStore(paths)
+    with pytest.raises(StateError, match="symlinked"):
+        store.load()
+    with pytest.raises(StateError, match="symlinked"):
+        store.save(InterfacePreferences())

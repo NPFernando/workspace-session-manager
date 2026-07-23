@@ -11,6 +11,10 @@ legacy_state_dirs = [
 [interface]
 animations = "subtle" # off, subtle, full
 reduce_motion = false
+environment_display = "hidden" # hidden, label, hostname
+environment_label = ""
+default_grouping = "attention" # attention, runtime, agent, project, warning, recent
+default_density = "comfortable" # compact, comfortable
 
 [health]
 enabled = true

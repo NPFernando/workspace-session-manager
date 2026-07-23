@@ -1,26 +1,29 @@
-.PHONY: format lint type test test-integration check build secret-scan
+.PHONY: setup format lint type test test-integration check build secret-scan
+
+setup:
+	uv sync --locked --extra dev
 
 format:
-	ruff format .
-	ruff check --fix .
+	uv run ruff format .
+	uv run ruff check --fix .
 
 lint:
-	ruff format --check .
-	ruff check .
+	uv run ruff format --check .
+	uv run ruff check .
 
 type:
-	mypy
+	uv run mypy
 
 test:
-	pytest -m "not integration"
+	uv run pytest -m "not integration"
 
 test-integration:
-	WS_RUN_TMUX_INTEGRATION=1 pytest -m integration -q --no-cov
+	WS_RUN_TMUX_INTEGRATION=1 uv run pytest -m integration -q --no-cov
 
 check: lint type test
 
 build:
-	python -m build
+	uv build
 
 secret-scan:
 	scripts/secret-scan.sh

@@ -1,7 +1,6 @@
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import pytest
 
@@ -571,13 +570,26 @@ def test_rename_validation_and_display_name_update(
 
 def test_project_detection_uses_metadata_and_never_names_home_ubuntu(
     service: SessionService,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with TemporaryDirectory(prefix="wf-project-", dir="/var/tmp") as directory:
-        project = Path(directory)
-        (project / "pyproject.toml").write_text(
-            '[project]\nname = "metadata-project"\n', encoding="utf-8"
-        )
-        assert service.detect_project(project) == "metadata-project"
+    project = tmp_path / "metadata-project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "metadata-project"\n', encoding="utf-8"
+    )
+    inherited_git_marker = next(
+        (candidate / ".git" for candidate in project.parents if (candidate / ".git").exists()),
+        None,
+    )
+    if inherited_git_marker is not None:
+        original_is_dir = Path.is_dir
+
+        def is_dir_without_inherited_marker(path: Path) -> bool:
+            return path != inherited_git_marker and original_is_dir(path)
+
+        monkeypatch.setattr(Path, "is_dir", is_dir_without_inherited_marker)
+    assert service.detect_project(project) == "metadata-project"
     assert service.detect_project(Path.home()) == ""
 
 

@@ -6,6 +6,14 @@ All notable changes follow Keep a Changelog. This project uses Semantic Versioni
 
 ### Added
 
+- Configurable dashboard grouping, row density, and optional environment display; the default keeps
+  environment information hidden
+- Keyboard access to grouping, density, system health, and saved-output search, alongside expanded
+  terminal/theme/motion compatibility guidance
+- `uv`-locked development and CI commands, plus a compatibility matrix whose unverified entries are
+  explicitly marked as untested
+- Reusable session presets and managed-session cloning for faster, repeatable session creation
+
 - Centered diagnostics, create-session, filtering, onboarding, help, and protected management flows
 - Inline create validation, duplicate detection, Git project discovery, recent directories, logging
   controls, and exact command previews

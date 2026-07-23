@@ -9,7 +9,8 @@ tmux sessions. Release installation and cutover remain separate approval-gated o
 
 ## Highlights
 
-- Grouped Textual dashboard with exclusive interaction modes, structured filters, and responsive layouts
+- Grouped Textual dashboard with exclusive interaction modes, structured filters, configurable grouping
+  and density, and responsive layouts
 - Distinct Overview, Status, Activity, Recent Output, and protected Manage workflows
 - Persistent detached sessions through tmux
 - Claude, Codex, Hermes, and shell profiles with strict TOML validation
@@ -19,7 +20,7 @@ tmux sessions. Release installation and cutover remain separate approval-gated o
 - Source-aware Logs workspace with Live/Saved switching, follow/pause, find navigation, and copy
 - Optional owner-only sanitized logging, usage-limit warnings, diagnostics export, and onboarding
 - Session-aware command palette with categorized commands, shortcuts, and availability details
-- Dark, light, monochrome, `NO_COLOR`, and ASCII-compatible presentation modes
+- Eight built-in themes, plus monochrome (`NO_COLOR`) and ASCII-compatible (`WS_ASCII=1`) rendering
 - Subtle SSH-friendly motion with config, `--no-animation`, and `WS_MOTION=off` overrides
 - Read-only discovery and preview of legacy ws sidecar metadata
 - Exact-ID, snapshot-validated, reversible session adoption
@@ -56,6 +57,16 @@ uv run ws-dev doctor
 uv run ws-dev
 ```
 
+Run the development checks with the locked environment:
+
+```bash
+uv sync --locked --extra dev
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy
+uv run pytest -m "not integration"
+```
+
 Development data lives under the `workspace-session-manager` XDG namespace. Operational legacy ws paths are
 read only unless a reviewed adoption plan is explicitly applied; adoption does not change those
 paths or restart a tmux session.
@@ -72,6 +83,10 @@ ws-dev inspect claude-api
 ws-dev create --tool claude --name api --cwd ~/projects/api
 ws-dev create --tool codex --name review --cwd ~/projects/api --logging
 ws-dev create --tool shell --name diagnostics --cwd ~
+ws-dev create --from-session claude-api --name api-follow-up
+ws-dev preset save backend --tool codex --cwd ~/projects/api --tag backend
+ws-dev preset list
+ws-dev create --from-preset backend --name api-review
 ws-dev edit claude-api --tag backend --state in_progress --input none --pin
 ws-dev note claude-api "Refactor authentication flow"
 ws-dev rename claude-api api-refactor
@@ -102,6 +117,10 @@ hidden unless `list --all` is requested.
 | `d` | Open protected session actions |
 | `/` | Enter on-demand search mode |
 | `f` | Filter by tool, runtime, task state, warning, or recent activity |
+| `g` | Cycle the dashboard grouping |
+| `z` | Toggle compact and comfortable row density |
+| `h` | Open system health details |
+| `s` | Search saved session output |
 | `p` | Open the command palette |
 | `?` | Open contextual help |
 | `r` | Refresh |
@@ -144,8 +163,32 @@ ${XDG_CONFIG_HOME:-~/.config}/workspace-session-manager/config.toml
 Configuration is parsed as TOML and validated by Pydantic. It is never evaluated as shell code.
 Agent commands are argument arrays, which avoids shell interpolation in configuration parsing.
 The `[interface]` table accepts `animations = "off" | "subtle" | "full"` and
-`reduce_motion = true | false`. `WS_MOTION=off` takes precedence for an individual launch;
-monochrome mode also disables optional motion.
+`reduce_motion = true | false`. It also supports `environment_display = "hidden" | "label" |
+"hostname"` (default: `hidden`), `environment_label` (shown only with `label`),
+`default_grouping = "attention" | "runtime" | "agent" | "project" | "warning" | "recent"`
+(default: `attention`), and `default_density = "compact" | "comfortable"` (default:
+`comfortable`). Configuration is strict: unknown keys and invalid values prevent startup rather than
+being silently ignored.
+
+`WS_MOTION=off` takes precedence for an individual launch; `--no-animation`, reduced motion, and
+monochrome mode also disable optional motion. `NO_COLOR=1` starts in monochrome. `WS_ASCII=1` avoids
+Unicode decorations, which is useful for terminals with incomplete Unicode support.
+
+### Terminal, theme, and accessibility guidance
+
+The dashboard is keyboard-first. Focused dialogs keep their own controls active, `Esc` cancels or
+returns to the previous safe context, and destructive confirmations focus Cancel by default. Use
+`?` at any time for contextual shortcuts and `p` for the command palette.
+
+Press `t` to cycle the built-in themes: Ithaca, Dark, Light, Monochrome, Midnight, Cyberpunk,
+Terminal, and Paper. If your terminal or SSH client has limited colour, set `NO_COLOR=1`; if it has
+limited Unicode support, set `WS_ASCII=1`. For slow links, remote terminals, or motion-sensitive
+users, prefer `ws-dev --no-animation` or `WS_MOTION=off`.
+
+The layout adapts from wide views down to narrow detail views. At very small dimensions it shows an
+instructional fallback instead of exposing clipped controls; the Logs workspace requires at least
+40x15. See [terminal compatibility and test status](docs/testing.md#terminal-compatibility-matrix)
+before relying on a terminal/client combination in production.
 
 `attention_scan_budget` controls how many eligible agent sessions a refresh may inspect. Its default
 is `8`, with a validated range of `1` to `64`. Each background check reads at most 20 sanitized lines
@@ -171,8 +214,11 @@ See [architecture](docs/architecture.md), [security](docs/security.md), and
 ## Quality checks
 
 ```bash
-make check
-make test-integration
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy
+uv run pytest -m "not integration"
+WS_RUN_TMUX_INTEGRATION=1 uv run pytest -m integration -q --no-cov
 make secret-scan
 ```
 

@@ -12,7 +12,7 @@ from textual.pilot import Pilot
 from textual.widgets import Button, Input, OptionList, Select, Static, Switch, TextArea
 
 from conftest import FakeBackend
-from workspace_session_manager.config import HealthConfig, NotificationConfig
+from workspace_session_manager.config import HealthConfig, InterfaceConfig, NotificationConfig
 from workspace_session_manager.errors import TmuxError
 from workspace_session_manager.models import (
     AgentState,
@@ -49,6 +49,7 @@ from workspace_session_manager.tui import (
     SearchOutputScreen,
     StatusScreen,
     WsApp,
+    build_session_groups,
     detect_activity,
     display_path,
     humanize_task,
@@ -132,8 +133,14 @@ async def wait_for_detail_refresh(pilot: Pilot[object], app: WsApp) -> None:
 
 
 async def wait_for_attention_scan(pilot: Pilot[object], app: WsApp) -> None:
+    saw_work = False
     for _ in range(120):
-        if not app._attention_scanning:
+        saw_work = saw_work or app._session_refreshing or app._attention_scanning
+        if (
+            not app._session_refreshing
+            and not app._attention_scanning
+            and (saw_work or app._attention_baseline_established)
+        ):
             return
         await pilot.pause(0.05)
     raise AssertionError("attention scan did not complete")
@@ -853,7 +860,7 @@ async def test_zero_search_results_clear_actionable_selection(service: SessionSe
 
 
 @pytest.mark.asyncio
-async def test_empty_inventory_has_quick_actions_but_no_session_action(
+async def test_empty_inventory_keeps_toolbar_actions_but_no_session_action(
     service: SessionService,
 ) -> None:
     app = WsApp(service, monochrome=False, onboarding=False)
@@ -861,7 +868,9 @@ async def test_empty_inventory_has_quick_actions_but_no_session_action(
         await pilot.pause()
         assert app.selected_name is None
         assert app.visible_sessions == []
-        assert app.query_one("#sessions", OptionList).option_count == 11
+        assert app.query_one("#sessions", OptionList).option_count == 0
+        assert app.query_one("#toolbar-create", Button).display
+        assert app.query_one("#toolbar-filter", Button).display
         app.action_more_actions()
         assert app.screen is app.screen_stack[0]
 
@@ -926,6 +935,7 @@ async def test_refresh_preserves_selection_filter_and_list_scroll(
         create_managed(service, f"session-{index:02d}", Tool.SHELL)
     app = WsApp(service, monochrome=False)
     async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
         options = app.query_one("#sessions", OptionList)
         target = app.visible_sessions[20]
         options.highlighted = options.get_option_index(f"session:{target.session_id}")
@@ -1013,6 +1023,67 @@ def test_grouping_is_exclusive_and_prioritized(service: SessionService) -> None:
     assert session_group(session, now=now) == "Detached"
 
 
+def test_counted_grouping_modes_keep_pins_as_ordering_not_a_group(service: SessionService) -> None:
+    attached_name = create_managed(service, "attached", Tool.CLAUDE)
+    input_name = create_managed(service, "input", Tool.CODEX)
+    stopped_name = create_managed(service, "stopped", Tool.HERMES)
+    attached = service.get(attached_name).model_copy(update={"runtime": RuntimeState.ATTACHED})
+    needs_input = service.organize(input_name, input_state=InputState.REQUIRED)
+    stopped = service.get(stopped_name).model_copy(update={"runtime": RuntimeState.STOPPED})
+
+    groups = build_session_groups(
+        [attached, needs_input, stopped],
+        grouping="attention",
+        notices=lambda session: detect_activity(session, ""),
+    )
+    assert [(label, len(items)) for label, items in groups] == [
+        ("ATTACHED", 1),
+        ("WAITING FOR INPUT", 1),
+        ("WARNINGS", 1),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_grouping_and_density_persist_between_dashboard_launches(
+    service: SessionService,
+) -> None:
+    create_managed(service, "persisted-view", Tool.SHELL)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.pause()
+        await pilot.press("g", "z")
+        assert app.grouping == "runtime"
+        assert app.density == "compact"
+        assert app.has_class("compact-density")
+
+    restored = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    assert restored.grouping == "runtime"
+    assert restored.density == "compact"
+
+
+@pytest.mark.asyncio
+async def test_header_hides_hostname_unless_explicitly_configured(
+    service: SessionService,
+) -> None:
+    create_managed(service, "header", Tool.SHELL)
+    app = WsApp(service, hostname="private-host-name", onboarding=False, no_animation=True)
+    async with app.run_test(size=(160, 45)) as pilot:
+        await pilot.pause()
+        assert "private-host-name" not in str(app.query_one("#app-header", Static).content)
+
+    service.config = service.config.model_copy(
+        update={
+            "interface": InterfaceConfig(environment_display="label", environment_label="Home Lab")
+        }
+    )
+    labelled = WsApp(service, hostname="private-host-name", onboarding=False, no_animation=True)
+    async with labelled.run_test(size=(160, 45)) as pilot:
+        await pilot.pause()
+        header = str(labelled.query_one("#app-header", Static).content)
+        assert "Home Lab" in header
+        assert "private-host-name" not in header
+
+
 def test_path_and_activity_display_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/home/test")))
     assert display_path(Path("/home/test")) == "~"
@@ -1025,8 +1096,8 @@ def test_path_and_activity_display_helpers(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_raw_legacy_task_is_humanized() -> None:
     assert (
-        humanize_task("codex task: https-astrology-fernandofamily-com-en-pancha-pakshi (ubuntu)")
-        == "Work on astrology fernandofamily com en pancha pakshi"
+        humanize_task("codex task: https-example-internal-sample-release (ubuntu)")
+        == "Work on example internal sample release"
     )
 
 
@@ -1381,7 +1452,7 @@ async def test_recent_directory_selection_updates_working_directory(
 
 
 @pytest.mark.asyncio
-async def test_ctrl_enter_requires_current_validation_and_creates_incrementally(
+async def test_ctrl_enter_requires_current_validation_and_updates_grouped_list(
     service: SessionService,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1409,7 +1480,7 @@ async def test_ctrl_enter_requires_current_validation_and_creates_incrementally(
         await pilot.pause()
 
         assert app.screen is base_screen
-        assert render_calls == 0
+        assert render_calls == 1
         assert app.selected_name == "claude-api-refactor"
         assert service.get("claude-api-refactor").display_name == "api_refactor"
         created = service.get("claude-api-refactor")
@@ -2306,6 +2377,24 @@ def test_motion_can_be_disabled_by_cli_env_and_monochrome(
     assert WsApp(service, monochrome=True, onboarding=False).motion == "off"
 
 
+def test_motion_precedence_preserves_full_mode_until_an_accessibility_override(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service.config = service.config.model_copy(
+        update={"interface": InterfaceConfig(animations="full")}
+    )
+    assert WsApp(service, monochrome=False, onboarding=False).motion == "full"
+    monkeypatch.setenv("WS_MOTION", "off")
+    assert WsApp(service, monochrome=False, onboarding=False).motion == "off"
+    monkeypatch.setenv("WS_MOTION", "full")
+    assert WsApp(service, monochrome=False, onboarding=False, no_animation=True).motion == "off"
+    service.config = service.config.model_copy(
+        update={"interface": InterfaceConfig(animations="full", reduce_motion=True)}
+    )
+    assert WsApp(service, monochrome=False, onboarding=False).motion == "off"
+
+
 @pytest.mark.asyncio
 async def test_modal_cancel_restores_dashboard_focus(service: SessionService) -> None:
     create_managed(service, "focus", Tool.SHELL)
@@ -2349,7 +2438,7 @@ async def test_health_disabled_by_default_never_scans(service: SessionService) -
         await pilot.pause()
         assert app._health_checks == []
         assert not app._health_scanning
-        assert not app.has_class("has-alerts")
+        assert not app.has_class("has-critical-alerts")
 
 
 @pytest.mark.asyncio
@@ -2367,12 +2456,12 @@ async def test_cached_health_alert_shown_instantly_without_a_live_probe(
         # rendered synchronously from on_mount, before any background worker
         # could possibly have completed a fresh probe.
         assert app._health_checks == [cached_check]
-        assert app.has_class("has-alerts")
-        assert "fabricated cached value" in str(app.query_one("#health-row", Static).content)
+        assert not app.has_class("has-critical-alerts")
+        assert app._health_warning_count() == 1
 
 
 @pytest.mark.asyncio
-async def test_health_row_toggles_has_alerts_with_scan_results(
+async def test_health_row_stays_collapsed_for_noncritical_scan_results(
     service: SessionService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     enable_health(service, disk_warn_percent=60, disk_fail_percent=40)
@@ -2385,9 +2474,9 @@ async def test_health_row_toggles_has_alerts_with_scan_results(
     app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         await wait_for_health_scan(pilot, app)
-        assert app.has_class("has-alerts")
+        assert not app.has_class("has-critical-alerts")
         assert any(check.status is HealthStatus.WARN for check in app._health_checks)
-        assert "Disk space" in str(app.query_one("#health-row", Static).content)
+        assert app._health_warning_count() == 1
 
 
 @pytest.mark.asyncio
@@ -2404,7 +2493,7 @@ async def test_health_row_hidden_when_all_checks_pass(
     app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         await wait_for_health_scan(pilot, app)
-        assert not app.has_class("has-alerts")
+        assert not app.has_class("has-critical-alerts")
 
 
 @pytest.mark.asyncio
@@ -2418,7 +2507,7 @@ async def test_finish_health_scan_discards_stale_generation(service: SessionServ
         ]
         app._finish_health_scan(app._health_scan_generation - 1, stale_result, "")
         assert app._health_checks == []
-        assert not app.has_class("has-alerts")
+        assert not app.has_class("has-critical-alerts")
 
 
 @pytest.mark.asyncio

@@ -87,25 +87,25 @@ def populated_app(
     add_session(
         service,
         backend,
-        "astrology-pancha-pakshi",
+        "sample-release-workflow",
         Tool.CLAUDE,
-        note="Build a bilingual astrology platform",
-        project="fernandofamily-astrology",
+        note="Build a fictional workflow prototype",
+        project="example-team-release-hub",
         input_state=InputState.REQUIRED,
         attached=True,
     )
     add_session(
         service,
         backend,
-        "astrology-website",
+        "sample-web-portal",
         Tool.CODEX,
-        note="Refine responsive birth-chart pages",
-        project="astrology-web",
+        note="Refine responsive demo portal pages",
+        project="sample-web-ui",
     )
     add_session(
         service,
         backend,
-        "graphify",
+        "task-001",
         Tool.CLAUDE,
         task_state=TaskState.WAITING,
         pinned=True,
@@ -523,7 +523,7 @@ def test_manage_disabled_snapshot(
     stopped = next(
         session.name
         for session in service.list_sessions()
-        if "astrology-pancha-pakshi" in session.name
+        if "sample-release-workflow" in session.name
     )
     service.stop_session(stopped)
 
@@ -1019,7 +1019,7 @@ def test_create_validation_error_snapshot(
 
     async def enter_invalid_values(pilot: Pilot) -> None:
         await pilot.press("c")
-        app.screen.query_one("#create-name", Input).value = "astrology-website"
+        app.screen.query_one("#create-name", Input).value = "sample-web-portal"
         app.screen.query_one("#create-cwd", Input).value = "/missing/wf-directory"
         await pilot.pause(0.25)
 

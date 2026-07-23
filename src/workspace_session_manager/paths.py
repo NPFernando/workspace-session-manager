@@ -32,6 +32,10 @@ class AppPaths:
         return self.state_dir / "presets.json"
 
     @property
+    def interface_preferences_file(self) -> Path:
+        return self.state_dir / "interface.json"
+
+    @property
     def migrations_dir(self) -> Path:
         return self.state_dir / "migrations"
 
