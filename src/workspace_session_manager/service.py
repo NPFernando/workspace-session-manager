@@ -1371,6 +1371,32 @@ class SessionService:
             results.append(check)
         return results
 
+    def apply_health_fix(self, name: str) -> HealthCheck:
+        """Apply the corrective fix for one fixable health check, then re-run it.
+
+        Only ws-owned resources are touched: zombie-sessions deletes stale
+        metadata for tmux sessions long gone, orphaned-logs deletes log
+        files with no matching session record. Other checks (including
+        idle-sessions, which are still live/attached) have no automatic fix.
+        """
+        spec = next((s for s in self._health_check_specs() if s.name == name), None)
+        if spec is None or not spec.enabled:
+            raise WsError(f"unknown or disabled health check: {name}")
+        check = spec.run()
+        if not check.fixable:
+            raise WsError(f"{name} has no automatic fix")
+        if name == "zombie-sessions":
+            for session_name in check.affected:
+                with contextlib.suppress(WsError):
+                    self.delete(session_name)
+        else:
+            for raw_path in check.affected:
+                with contextlib.suppress(OSError, StateError):
+                    self._delete_log_path(Path(raw_path))
+        refreshed = spec.run()
+        self._write_health_cache(name, refreshed)
+        return refreshed
+
     def onboarding_seen(self) -> bool:
         return self.paths.onboarding_file.is_file() and not self.paths.onboarding_file.is_symlink()
 

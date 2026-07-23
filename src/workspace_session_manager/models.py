@@ -88,6 +88,15 @@ class OutputSource(StrEnum):
     SAVED = "saved"
 
 
+class InterfacePreferences(BaseModel):
+    """User-selectable interface state kept separate from session metadata."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    schema_version: Literal[1] = 1
+    grouping: Literal["attention", "runtime", "agent", "project", "warning", "recent"] = "attention"
+    density: Literal["compact", "comfortable"] = "comfortable"
+
+
 LEGACY_TASK_STATES = {
     "active": TaskState.IN_PROGRESS,
     "done": TaskState.COMPLETED,
@@ -309,6 +318,8 @@ class HealthCheck(BaseModel):
     status: HealthStatus
     detail: str
     corrective_action: str = ""
+    fixable: bool = False
+    affected: list[str] = []
 
 
 class DoctorReport(BaseModel):

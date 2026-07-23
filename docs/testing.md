@@ -3,7 +3,8 @@
 ## Fast suite
 
 ```bash
-pytest -m "not integration"
+uv sync --locked --extra dev
+uv run pytest -m "not integration"
 ```
 
 Unit and Textual pilot tests use temporary state, temporary legacy sidecars, and fake tmux backends.
@@ -12,7 +13,7 @@ They do not access the live tmux server or operational metadata.
 ## Real tmux
 
 ```bash
-WS_RUN_TMUX_INTEGRATION=1 pytest -m integration -q --no-cov
+WS_RUN_TMUX_INTEGRATION=1 uv run pytest -m integration -q --no-cov
 ```
 
 The integration tests use `tmux -S` with a socket inside pytest's temporary directory. Cleanup
@@ -34,14 +35,42 @@ Reviewed before/after frames at
 Fake-backend terminal recordings and replay instructions are stored under `docs/recordings/`; they
 never connect to the live tmux server or production metadata.
 
+## Terminal compatibility matrix
+
+This is a compatibility and evidence matrix, not a promise that every terminal behaves identically.
+Rows marked **Untested** have not been verified by this project yet; please run the manual checks
+below and report the terminal, version, locale, SSH client, and tmux version with the outcome.
+
+| Environment | Expected behavior | Evidence/status |
+| --- | --- | --- |
+| Linux + Python 3.11/3.12/3.13 + tmux | Unit/TUI suite and isolated tmux lifecycle coverage | CI |
+| 160x45, 120x35, 100x30, 80x24 terminal | Responsive dashboard snapshots | Automated snapshot coverage |
+| 72x20 terminal | Very-narrow dashboard fallback | Automated TUI coverage |
+| Below the dashboard minimum | Clear small-terminal guidance rather than clipped controls | Automated TUI coverage |
+| Logs at 40x15 or larger | Logs workspace is available | Automated TUI coverage |
+| Logs below 40x15 | Clear Logs size guidance | Automated TUI coverage |
+| `NO_COLOR=1` | Monochrome theme and no optional motion | Automated TUI coverage |
+| `WS_ASCII=1` or non-UTF terminal locale | ASCII-safe decorations | Automated TUI coverage |
+| OpenSSH reconnect / local tmux client | Persistent sessions and attach/switch behavior | Manual: untested as a compatibility matrix entry |
+| iTerm2, Windows Terminal, GNOME Terminal, Kitty, Alacritty, WezTerm | Keyboard, colour, Unicode, resize, and theme behavior | **Untested** |
+| screen, mosh, serial consoles, browser terminals | Fallback rendering, input, and resize behavior | **Untested** |
+
+For a constrained client, begin with `NO_COLOR=1 WS_ASCII=1 WS_MOTION=off uv run ws-dev` and use
+`?` to review the available keyboard controls. Theme cycling (`t`) and the normal theme need a
+colour-capable terminal; `--no-animation` is suitable for slow remote connections or motion-sensitive
+use.
+
 ## Manual TUI matrix
 
 Run `uv run textual run --dev workspace_session_manager.tui:WsApp` only with a suitable service fixture, or
-run `uv run ws-dev` against the managed inventory. Use `ws-dev list --all` for read-only diagnostics.
+run `uv run ws-dev` against the managed inventory. Use `uv run ws-dev list --all` for read-only diagnostics.
 
 Check at least:
 
 - `80x24`, `100x30`, `120x35`, and `160x45`
+- resize through `72x20` and below the dashboard minimum; verify the fallback is legible and no
+  action is reachable behind it
+- Logs at `40x15` and below; verify its dedicated size guidance
 - SSH disconnect and reconnect after creating a disposable `ws-dev` session
 - inside-tmux switching and outside-tmux attachment
 - missing Claude, Codex, and Hermes commands
@@ -74,7 +103,9 @@ Check at least:
   narrow detail state, and inspector/output positions
 - slow diagnostics progress plus PASS/WARN/FAIL/INFO completion totals
 - Cancel-focused confirmation for every protected Manage operation
-- dark, light, monochrome, `NO_COLOR`, and `WS_ASCII=1` rendering
+- all built-in themes, monochrome, `NO_COLOR`, and `WS_ASCII=1` rendering
+- `g` grouping and `z` density changes, including the configured defaults; environment display as
+  hidden, label, and hostname
 - output and session-list scroll position preservation across background refresh
 - Live/Saved log switching, source-local selection restoration, follow/pause, manual retry, and find
 - log-read failure recovery, stale worker rejection, exact-ID attach blocking, and timer cleanup

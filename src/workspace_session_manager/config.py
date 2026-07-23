@@ -50,6 +50,19 @@ class InterfaceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     animations: Literal["off", "subtle", "full"] = "subtle"
     reduce_motion: bool = False
+    environment_display: Literal["hidden", "label", "hostname"] = "hidden"
+    environment_label: str = Field(default="", max_length=80)
+    default_grouping: Literal["attention", "runtime", "agent", "project", "warning", "recent"] = (
+        "attention"
+    )
+    default_density: Literal["compact", "comfortable"] = "comfortable"
+
+    @field_validator("environment_label")
+    @classmethod
+    def safe_environment_label(cls, label: str) -> str:
+        if any(character in label for character in "\x00\r\n"):
+            raise ValueError("environment label contains control characters")
+        return label
 
 
 def default_health_scan_roots() -> tuple[Path, ...]:

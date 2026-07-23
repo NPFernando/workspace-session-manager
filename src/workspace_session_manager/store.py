@@ -13,7 +13,12 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from workspace_session_manager.errors import StateError
-from workspace_session_manager.models import SESSION_NAME_PATTERN, Preset, SessionMetadata
+from workspace_session_manager.models import (
+    SESSION_NAME_PATTERN,
+    InterfacePreferences,
+    Preset,
+    SessionMetadata,
+)
 from workspace_session_manager.paths import AppPaths
 
 
@@ -217,3 +222,70 @@ class PresetStore:
             if temporary_name:
                 Path(temporary_name).unlink(missing_ok=True)
             raise StateError(f"unable to write presets: {error}") from error
+
+
+class InterfacePreferencesStore:
+    """Owner-only atomic store for interface choices, isolated from session state."""
+
+    def __init__(self, paths: AppPaths) -> None:
+        self.paths = paths
+
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        self.paths.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.paths.state_dir, 0o700)
+        descriptor = os.open(self.paths.lock_file, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            with os.fdopen(descriptor, "r+") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                yield
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        except OSError as error:
+            raise StateError(f"unable to lock state: {error}") from error
+
+    def _read_unlocked(self) -> InterfacePreferences:
+        path = self.paths.interface_preferences_file
+        if path.is_symlink():
+            raise StateError(f"refusing symlinked interface preferences file: {path.name}")
+        if not path.exists():
+            return InterfacePreferences()
+        try:
+            return InterfacePreferences.model_validate_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValidationError) as error:
+            raise StateError(f"invalid interface preferences file: {error}") from error
+
+    def load(self) -> InterfacePreferences:
+        """Return persisted preferences, or in-memory defaults when absent."""
+        with self._locked():
+            return self._read_unlocked()
+
+    def save(self, preferences: InterfacePreferences) -> None:
+        with self._locked():
+            self._write_unlocked(preferences)
+
+    def _write_unlocked(self, preferences: InterfacePreferences) -> None:
+        self.paths.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.paths.state_dir, 0o700)
+        path = self.paths.interface_preferences_file
+        if path.is_symlink():
+            raise StateError(f"refusing symlinked interface preferences file: {path.name}")
+        temporary_name: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.paths.state_dir,
+                prefix=f".{path.name}.",
+                delete=False,
+            ) as temporary:
+                temporary_name = temporary.name
+                temporary.write(preferences.model_dump_json(indent=2))
+                temporary.write("\n")
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.chmod(temporary_name, 0o600)
+            os.replace(temporary_name, path)
+        except OSError as error:
+            if temporary_name:
+                Path(temporary_name).unlink(missing_ok=True)
+            raise StateError(f"unable to write interface preferences: {error}") from error

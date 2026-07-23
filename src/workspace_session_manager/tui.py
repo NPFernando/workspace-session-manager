@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from time import perf_counter
-from typing import Any, ClassVar, NamedTuple
+from typing import Any, ClassVar, Literal, NamedTuple
 
 from rich.text import Text
 from textual import events, on, work
@@ -49,6 +49,7 @@ from workspace_session_manager.models import (
     HealthCheck,
     HealthStatus,
     InputState,
+    InterfacePreferences,
     OutputSource,
     RuntimeState,
     SessionDetails,
@@ -65,9 +66,28 @@ from workspace_session_manager.service import (
     TailResult,
     normalized_session_name,
 )
+from workspace_session_manager.store import InterfacePreferencesStore
 
 BindingSpec = Binding | tuple[str, str] | tuple[str, str, str]
 RECENT_WINDOW = timedelta(hours=24)
+GroupingMode = Literal["attention", "runtime", "agent", "project", "warning", "recent"]
+DensityMode = Literal["compact", "comfortable"]
+GROUPING_MODES: tuple[GroupingMode, ...] = (
+    "attention",
+    "runtime",
+    "agent",
+    "project",
+    "warning",
+    "recent",
+)
+GROUPING_LABELS = {
+    "attention": "Attention",
+    "runtime": "Runtime",
+    "agent": "Agent",
+    "project": "Project",
+    "warning": "Warnings",
+    "recent": "Recent activity",
+}
 THEME_MODES = (
     "ithaca",
     "dark",
@@ -449,6 +469,85 @@ def session_group(session: SessionView, *, now: datetime | None = None) -> str:
     return "Detached"
 
 
+def build_session_groups(
+    sessions: Sequence[SessionView],
+    *,
+    grouping: GroupingMode,
+    notices: Callable[[SessionView], ActivityNotice],
+    now: datetime | None = None,
+) -> list[tuple[str, list[SessionView]]]:
+    """Build stable, exclusive dashboard groups with visible counts.
+
+    Pinned sessions are intentionally sorted within their selected grouping instead
+    of forming a competing group. This keeps grouping mode predictable while
+    retaining pinning as a useful personal priority signal.
+    """
+    current = now or datetime.now(UTC)
+    buckets: dict[str, list[SessionView]] = {}
+    order: list[str] = []
+
+    def add(label: str, session: SessionView) -> None:
+        if label not in buckets:
+            buckets[label] = []
+            order.append(label)
+        buckets[label].append(session)
+
+    for session in sessions:
+        notice = notices(session)
+        if grouping == "attention":
+            if not session.owned:
+                label = "UNMANAGED"
+            elif (
+                session.input_state is InputState.REQUIRED
+                or session.task_state is TaskState.NEEDS_INPUT
+            ):
+                label = "WAITING FOR INPUT"
+            elif notice.warning:
+                label = "WARNINGS"
+            elif session.runtime is RuntimeState.ATTACHED:
+                label = "ATTACHED"
+            elif session.runtime in {RuntimeState.STOPPED, RuntimeState.FAILED}:
+                label = "STOPPED"
+            else:
+                label = "DETACHED"
+        elif grouping == "runtime":
+            label = (
+                "UNMANAGED"
+                if not session.owned
+                else "ATTACHED"
+                if session.runtime is RuntimeState.ATTACHED
+                else "STOPPED"
+                if session.runtime in {RuntimeState.STOPPED, RuntimeState.FAILED}
+                else "DETACHED"
+            )
+        elif grouping == "agent":
+            label = "UNMANAGED" if not session.owned else TOOL_LABELS[session.tool].upper()
+        elif grouping == "project":
+            label = "NO PROJECT" if not session.project else session.project.upper()
+        elif grouping == "warning":
+            label = "WARNINGS" if notice.warning else "CLEAR"
+        else:
+            activity = session.last_active_at
+            if activity is None:
+                label = "NO RECORDED ACTIVITY"
+            else:
+                if activity.tzinfo is None:
+                    activity = activity.replace(tzinfo=UTC)
+                elapsed = current - activity
+                label = (
+                    "ACTIVE NOW"
+                    if elapsed <= timedelta(hours=1)
+                    else "ACTIVE TODAY"
+                    if elapsed <= RECENT_WINDOW
+                    else "EARLIER"
+                )
+        add(label, session)
+
+    for items in buckets.values():
+        items.sort(key=lambda item: (not item.pinned, item.display_name or item.name))
+    return [(label, buckets[label]) for label in order]
+
+
 ACTIVITY_HISTORY_LENGTH = 8
 # A single completed scan cycle isn't a meaningful trend yet, and showing a
 # spark the instant one sample lands would make its appearance depend on
@@ -471,6 +570,88 @@ def sparkline(history: deque[int] | None, *, ascii_only: bool = False) -> str:
         level = min(len(glyphs) - 1, int((value / peak) * (len(glyphs) - 1)))
         chars.append(glyphs[level])
     return "".join(chars)
+
+
+def status_badge(
+    label: str,
+    *,
+    kind: str,
+    ascii_only: bool,
+    monochrome: bool,
+) -> Text:
+    """Return a text-plus-symbol status badge that remains meaningful without colour."""
+    symbols = {
+        "active": ("●", "[A]"),
+        "info": ("▸", "[>]"),
+        "waiting": ("?", "[?]"),
+        "warning": ("!", "[!]"),
+        "error": ("✕", "[X]"),
+        "inactive": ("○", "[-]"),
+        "agent": ("◆", "[+]"),
+    }
+    styles = {
+        "active": "green",
+        "info": "cyan",
+        "waiting": "yellow",
+        "warning": "yellow",
+        "error": "red",
+        "inactive": "dim",
+        "agent": "#c792ea",
+    }
+    marker = symbols[kind][1 if ascii_only else 0]
+    style = "bold" if monochrome else f"bold {styles[kind]}"
+    return Text.assemble((f"{marker} {label}", style))
+
+
+def session_status_badges(
+    session: SessionView,
+    notice: ActivityNotice,
+    *,
+    ascii_only: bool,
+    monochrome: bool,
+) -> Text:
+    """Compose concise state badges for session rows and inspector summaries."""
+    result = Text()
+    runtime_kind = (
+        "active"
+        if session.runtime is RuntimeState.ATTACHED
+        else "error"
+        if session.runtime is RuntimeState.FAILED
+        else "inactive"
+    )
+    result.append_text(
+        status_badge(
+            display_state(session.runtime.value),
+            kind=runtime_kind,
+            ascii_only=ascii_only,
+            monochrome=monochrome,
+        )
+    )
+    if session.input_state is InputState.REQUIRED:
+        result.append("  ")
+        result.append_text(
+            status_badge(
+                "Input required", kind="waiting", ascii_only=ascii_only, monochrome=monochrome
+            )
+        )
+    elif notice.warning:
+        result.append("  ")
+        result.append_text(
+            status_badge(
+                notice.title, kind=notice.level, ascii_only=ascii_only, monochrome=monochrome
+            )
+        )
+    elif session.task_state is TaskState.COMPLETED:
+        result.append("  ")
+        result.append_text(
+            status_badge("Completed", kind="active", ascii_only=ascii_only, monochrome=monochrome)
+        )
+    elif session.task_state is TaskState.IN_PROGRESS:
+        result.append("  ")
+        result.append_text(
+            status_badge("In progress", kind="info", ascii_only=ascii_only, monochrome=monochrome)
+        )
+    return result
 
 
 def session_row(
@@ -505,14 +686,16 @@ def session_row(
     first.append(f"{name:<{name_width}} ", style="bold")
     first.append(when, style="dim")
     separator = " / " if ascii_only else " · "
-    statuses = [display_state(session.runtime.value), display_state(session.task_state.value)]
-    if session.input_state is InputState.REQUIRED:
-        statuses.append("Input required")
+    statuses = [display_state(session.task_state.value)]
     if not session.owned:
         statuses.append("Unmanaged")
     second_value = truncate(separator.join(statuses), max(12, width - 3), ascii_only=ascii_only)
     first.append("\n  ")
-    first.append(second_value, style=runtime_style(session.runtime, monochrome=monochrome))
+    first.append_text(
+        session_status_badges(session, alert, ascii_only=ascii_only, monochrome=monochrome)
+    )
+    if second_value:
+        first.append(f"  {second_value}", style="dim")
     if activity_spark:
         first.append("  ")
         first.append(activity_spark, style="dim")
@@ -550,25 +733,8 @@ def animate_modal_open(screen: Screen[Any]) -> None:
 
 
 def animate_modal_shake(screen: Screen[Any]) -> None:
-    """Nudge the dialog side to side once, as feedback for a rejected submit.
-
-    Offsets are whole terminal cells, so a sub-cell tween has nothing to
-    interpolate — step the offset directly instead of animating it.
-    """
-    motion = getattr(screen.app, "motion", "off")
-    if motion == "off":
-        return
-    dialog = screen.query_one(".dialog")
-    rest_offset = dialog.styles.offset
-    step = 0.06 if motion == "full" else 0.05
-
-    def set_offset(x: int) -> None:
-        if dialog.is_mounted:
-            dialog.styles.offset = rest_offset if x == 0 else (x, 0)
-
-    for index, x in enumerate((1, -1, 1, 0)):
-        delay = step * index
-        screen.set_timer(delay if delay > 0 else 0.001, lambda x=x: set_offset(x))
+    """Keep validation feedback stable; forms already render focused error text."""
+    del screen
 
 
 @dataclass(frozen=True, slots=True)
@@ -2341,11 +2507,15 @@ class DiagnosticsScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
-class HealthAlertsScreen(ModalScreen[None]):
+class HealthAlertsScreen(ModalScreen[str | None]):
     BINDINGS: ClassVar[list[BindingSpec]] = [
         Binding("escape", "close", "Close"),
         Binding("q", "close", "Close"),
         Binding("r", "run", "Refresh now"),
+        Binding("c", "copy", "Copy details"),
+        Binding("d", "dismiss_until_refresh", "Dismiss"),
+        Binding("v", "view_sessions", "Affected sessions"),
+        Binding("f", "fix", "Fix issues"),
     ]
 
     def __init__(self, service: SessionService) -> None:
@@ -2362,11 +2532,16 @@ class HealthAlertsScreen(ModalScreen[None]):
             with VerticalScroll(id="health-alerts-list"):
                 yield Static("", id="health-alerts-content")
             yield Static(
-                "HEALTH ALERTS  r Refresh now   Tab Navigate   Esc Close",
+                "HEALTH  r Refresh   f Fix issues   v Session warnings   "
+                "c Copy details   Esc Close",
                 classes="mode-help",
             )
             with Horizontal(classes="dialog-actions diagnostics-actions"):
                 yield Button("Refresh Now", id="health-alerts-run")
+                yield Button("Fix Issues", id="health-alerts-fix")
+                yield Button("View Sessions", id="health-alerts-sessions")
+                yield Button("Copy Details", id="health-alerts-copy")
+                yield Button("Dismiss", id="health-alerts-dismiss")
                 yield Button("Close", variant="primary", id="health-alerts-close")
 
     def on_mount(self) -> None:
@@ -2396,15 +2571,24 @@ class HealthAlertsScreen(ModalScreen[None]):
             content.append(f"{diagnostic_name(check):<22}", "bold")
             content.append(f"{diagnostic_detail(check, expanded=True)}\n")
             if check.status in {HealthStatus.WARN, HealthStatus.FAIL} and check.corrective_action:
-                content.append(f"     Action: {check.corrective_action}\n", "dim")
+                hint = " (press f to clean up)" if check.fixable else ""
+                content.append(f"     Action: {check.corrective_action}{hint}\n", "dim")
         self.query_one("#health-alerts-content", Static).update(content)
+        self.query_one("#health-alerts-fix", Button).disabled = not self._fixable_names()
+
+    def _fixable_names(self) -> list[str]:
+        return [
+            check.name
+            for check in self.checks
+            if check.fixable and check.status in {HealthStatus.WARN, HealthStatus.FAIL}
+        ]
 
     def action_run(self) -> None:
         if self.running:
             return
         self.running = True
         self.query_one("#health-alerts-loading", LoadingIndicator).display = True
-        for selector in ("#health-alerts-run",):
+        for selector in ("#health-alerts-run", "#health-alerts-fix"):
             self.query_one(selector, Button).disabled = True
         self._run_refresh()
 
@@ -2417,9 +2601,43 @@ class HealthAlertsScreen(ModalScreen[None]):
         self.checks = checks
         self.running = False
         self.query_one("#health-alerts-loading", LoadingIndicator).display = False
-        for selector in ("#health-alerts-run",):
-            self.query_one(selector, Button).disabled = False
+        self.query_one("#health-alerts-run", Button).disabled = False
         self._render_report()
+
+    def action_fix(self) -> None:
+        if self.running:
+            return
+        names = self._fixable_names()
+        if not names:
+            return
+        self.running = True
+        self.query_one("#health-alerts-loading", LoadingIndicator).display = True
+        for selector in ("#health-alerts-run", "#health-alerts-fix"):
+            self.query_one(selector, Button).disabled = True
+        self._run_fix(names)
+
+    @work(thread=True, exclusive=True, group="health-alerts-detail")
+    def _run_fix(self, names: list[str]) -> None:
+        fixed: list[str] = []
+        for name in names:
+            check = self.service.apply_health_fix(name)
+            if check.status is HealthStatus.PASS:
+                fixed.append(name)
+        checks = self.service.refresh_health_alerts(force=True)
+        self.app.call_from_thread(self._finish_fix, checks, fixed)
+
+    def _finish_fix(self, checks: list[HealthCheck], fixed: list[str]) -> None:
+        self.checks = checks
+        self.running = False
+        self.query_one("#health-alerts-loading", LoadingIndicator).display = False
+        self.query_one("#health-alerts-run", Button).disabled = False
+        self._render_report()
+        if fixed:
+            by_name = {check.name: check for check in checks}
+            labels = [diagnostic_name(by_name[name]) if name in by_name else name for name in fixed]
+            self.notify(f"Cleaned up: {', '.join(labels)}")
+        else:
+            self.notify("Nothing to fix")
 
     @on(Button.Pressed)
     def button_pressed(self, event: Button.Pressed) -> None:
@@ -2427,9 +2645,31 @@ class HealthAlertsScreen(ModalScreen[None]):
             self.dismiss(None)
         elif event.button.id == "health-alerts-run":
             self.action_run()
+        elif event.button.id == "health-alerts-fix":
+            self.action_fix()
+        elif event.button.id == "health-alerts-sessions":
+            self.action_view_sessions()
+        elif event.button.id == "health-alerts-copy":
+            self.action_copy()
+        elif event.button.id == "health-alerts-dismiss":
+            self.action_dismiss_until_refresh()
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+    def action_copy(self) -> None:
+        details = "\n".join(
+            f"{check.status.value.upper()} {diagnostic_name(check)}: {check.detail}"
+            for check in self.checks
+        )
+        self.app.copy_to_clipboard(details)
+        self.notify("Health details copied")
+
+    def action_view_sessions(self) -> None:
+        self.dismiss("view-sessions")
+
+    def action_dismiss_until_refresh(self) -> None:
+        self.dismiss("dismiss")
 
 
 class OnboardingScreen(ModalScreen[str | None]):
@@ -3385,6 +3625,9 @@ class WsApp(App[str | None]):
         Binding("r", "refresh", "Refresh"),
         Binding("/", "search", "Search"),
         Binding("f", "filter", "Filter"),
+        Binding("g", "cycle_grouping", "Group"),
+        Binding("z", "toggle_density", "Density"),
+        Binding("h", "health_alerts", "Health"),
         Binding("s", "search_output", "Search output"),
         Binding("u", "toggle_unmanaged", "All sessions", show=False),
         Binding("p", "command_palette", "Palette"),
@@ -3439,6 +3682,7 @@ class WsApp(App[str | None]):
         self._health_scanning = False
         self._health_scan_generation = 0
         self._health_scan_error = ""
+        self._health_dismissed_until_refresh = False
         self._attention_context: DashboardModeContext | None = None
         self.interaction_mode = InteractionMode.NORMAL
         self._mode_context: DashboardModeContext | None = None
@@ -3451,12 +3695,31 @@ class WsApp(App[str | None]):
         self.last_refreshed_at: datetime | None = None
         self._dashboard_refresh_timer: Timer | None = None
         self._dashboard_refresh_suspensions = 0
+        self._session_refresh_generation = 0
+        self._session_refreshing = False
+        self._pending_session_refresh = False
         self._onboarding_enabled = onboarding
         self._onboarding_checked = False
         self.default_cwd = default_cwd or Path.cwd()
+        self._interface_preferences_store = InterfacePreferencesStore(self.service.paths)
+        defaults = InterfacePreferences(
+            grouping=self.service.config.interface.default_grouping,
+            density=self.service.config.interface.default_density,
+        )
+        try:
+            preferences = (
+                self._interface_preferences_store.load()
+                if self.service.paths.interface_preferences_file.exists()
+                else defaults
+            )
+        except (OSError, WsError):
+            preferences = defaults
+        self.grouping: GroupingMode = preferences.grouping
+        self.density: DensityMode = preferences.density
         encoding = locale.getpreferredencoding(False).lower()
         self.ascii_only = os.environ.get("WS_ASCII") == "1" or "utf" not in encoding
         no_color = bool(os.environ.get("NO_COLOR"))
+        self._no_color_forced = no_color and monochrome is None
         self.monochrome = no_color if monochrome is None else monochrome
         self.ui_theme = theme_mode or ("monochrome" if self.monochrome else "ithaca")
         self._theme_colors: dict[str, str] = {}
@@ -3476,6 +3739,14 @@ class WsApp(App[str | None]):
             or self.monochrome
             else configured_motion
         )
+
+    def _persist_interface_preferences(self) -> None:
+        try:
+            self._interface_preferences_store.save(
+                InterfacePreferences(grouping=self.grouping, density=self.density)
+            )
+        except (OSError, WsError) as error:
+            self.notify(str(error), title="Unable to save interface preference", severity="warning")
 
     def _capture_dashboard_context(self) -> DashboardModeContext:
         options = self.query_one("#sessions", OptionList)
@@ -3654,6 +3925,13 @@ class WsApp(App[str | None]):
             yield Static("Enter apply  Esc cancel", id="search-hint")
         with Horizontal(id="workspace"):
             with Vertical(id="session-pane"):
+                with Horizontal(id="session-toolbar"):
+                    yield Button("+ Create", id="toolbar-create", compact=True)
+                    yield Button("Resume", id="toolbar-resume", compact=True)
+                    yield Button("Filter", id="toolbar-filter", compact=True)
+                    yield Button("Group", id="toolbar-group", compact=True)
+                    yield Button("Health", id="toolbar-health", compact=True)
+                yield Static("", id="session-toolbar-meta")
                 yield OptionList(id="sessions")
             with Vertical(id="detail-pane"):
                 yield Static("Select a session", id="identity")
@@ -3682,14 +3960,14 @@ class WsApp(App[str | None]):
                     yield Static("ACTIONS", id="inspector-actions-title", classes="section-title")
                     with Horizontal(id="session-action-buttons"):
                         yield Button(
-                            "Open",
+                            "↗ Attach",
                             id="action-open",
                             classes="session-action-button",
                             compact=True,
                         )
                         yield Button(
-                            "Manage",
-                            id="action-manage",
+                            "▶ Resume",
+                            id="action-resume",
                             classes="session-action-button",
                             compact=True,
                         )
@@ -3705,11 +3983,20 @@ class WsApp(App[str | None]):
                             classes="session-action-button",
                             compact=True,
                         )
+                        yield Button(
+                            "Manage",
+                            id="action-manage",
+                            classes="session-action-button",
+                            compact=True,
+                        )
         yield Static("", id="action-bar")
         yield Static("", id="small-terminal")
 
     def on_mount(self) -> None:
         self.set_class(self.motion == "off", "motion-off")
+        if self.ascii_only:
+            self.query_one("#action-open", Button).label = "> Attach"
+            self.query_one("#action-resume", Button).label = "> Resume"
         self._set_interaction_mode(InteractionMode.NORMAL)
         self._set_layout_classes(self.size.width, self.size.height)
         self._refresh_theme_colors()
@@ -3723,7 +4010,7 @@ class WsApp(App[str | None]):
         self._health_checks = self.service.cached_health_alerts()
         self._render_health_row()
         self._start_health_scan()
-        self._start_marker_pulse()
+        self.set_class(self.density == "compact", "compact-density")
         self.call_after_refresh(self._maybe_show_onboarding)
 
     def on_unmount(self) -> None:
@@ -3928,10 +4215,8 @@ class WsApp(App[str | None]):
         self._render_attention_action()
 
     def _start_attention_dots(self) -> None:
-        if self.motion == "off" or self._attention_dots_timer is not None:
-            return
+        """Keep a stable checking label; repeated animation is hostile to SSH and focus."""
         self._attention_dots = 0
-        self._attention_dots_timer = self.set_interval(0.5, self._tick_attention_dots)
 
     def _tick_attention_dots(self) -> None:
         if not self.is_running:
@@ -3946,9 +4231,8 @@ class WsApp(App[str | None]):
         self._attention_dots = 0
 
     def _start_marker_pulse(self) -> None:
-        if self.motion == "off" or self._marker_pulse_timer is not None:
-            return
-        self._marker_pulse_timer = self.set_interval(0.7, self._tick_marker_pulse)
+        """Retained as a compatibility no-op; warnings now use stable badges."""
+        return
 
     def _tick_marker_pulse(self) -> None:
         if not self.is_running:
@@ -4115,36 +4399,54 @@ class WsApp(App[str | None]):
         self._health_scanning = False
         self._health_scan_error = error
         self._health_checks = checks
+        self._health_dismissed_until_refresh = False
         self._render_health_row()
 
     def _render_health_row(self) -> None:
-        alerts = [
-            check
-            for check in self._health_checks
-            if check.status in {HealthStatus.WARN, HealthStatus.FAIL}
-        ]
-        if not alerts:
-            self.set_class(False, "has-alerts")
+        critical = [check for check in self._health_checks if check.status is HealthStatus.FAIL]
+        if not critical or self._health_dismissed_until_refresh:
+            self.set_class(False, "has-critical-alerts")
             return
         text = Text()
-        text.append("  !", f"bold {self._theme_colors.get('warning', 'yellow')}")
-        summary = ", ".join(f"{diagnostic_name(check)}: {check.detail}" for check in alerts[:3])
-        if len(alerts) > 3:
-            summary += f", and {len(alerts) - 3} more"
-        text.append(f"  {summary}", self._theme_colors.get("warning", "yellow"))
+        text.append("  ! CRITICAL SYSTEM HEALTH", f"bold {self._theme_colors.get('error', 'red')}")
+        summary = ", ".join(diagnostic_name(check) for check in critical[:3])
+        text.append(f"  {summary}  Press h to review", self._theme_colors.get("error", "red"))
         self.query_one("#health-row", Static).update(text)
-        self.set_class(True, "has-alerts")
+        self.set_class(True, "has-critical-alerts")
 
     def refresh_sessions(self) -> None:
         if not self.query("#app-header"):
             return
+        if self._session_refreshing:
+            self._pending_session_refresh = True
+            return
+        self._health_dismissed_until_refresh = False
+        self._render_health_row()
+        self._session_refreshing = True
+        self._session_refresh_generation += 1
         self.add_class("refreshing")
         self._render_header()
+        self._load_session_inventory(self._session_refresh_generation, self.show_unmanaged)
+
+    @work(thread=True, exclusive=True, group="session-refresh")
+    def _load_session_inventory(self, generation: int, include_unmanaged: bool) -> None:
         try:
-            sessions = self.service.list_sessions(include_unmanaged=self.show_unmanaged)
-        except WsError as error:
+            sessions = self.service.list_sessions(include_unmanaged=include_unmanaged)
+            error = ""
+        except WsError as exc:
+            sessions = []
+            error = str(exc)
+        self.call_from_thread(self._finish_session_refresh, generation, sessions, error)
+
+    def _finish_session_refresh(
+        self, generation: int, sessions: list[SessionView], error: str
+    ) -> None:
+        if generation != self._session_refresh_generation or not self.is_running:
+            return
+        self._session_refreshing = False
+        if error:
             self.tmux_connected = False
-            self.refresh_error = str(error)
+            self.refresh_error = error
             self.remove_class("refreshing")
             self._render_header()
             self.notify(
@@ -4152,9 +4454,22 @@ class WsApp(App[str | None]):
                 title="Refresh failed",
                 severity="error",
             )
+            if self._pending_session_refresh:
+                self._pending_session_refresh = False
+                self.call_after_refresh(self.refresh_sessions)
             return
         self.tmux_connected = True
         self.refresh_error = ""
+        if sessions == self.sessions:
+            self.remove_class("refreshing")
+            self.last_refreshed_at = datetime.now(UTC)
+            self._render_header()
+            self._start_attention_scan()
+            self._start_health_scan()
+            if self._pending_session_refresh:
+                self._pending_session_refresh = False
+                self.call_after_refresh(self.refresh_sessions)
+            return
         detail_lost = False
         if self.selected_name is not None:
             current = next((item for item in sessions if item.name == self.selected_name), None)
@@ -4217,6 +4532,9 @@ class WsApp(App[str | None]):
             )
         self._start_attention_scan()
         self._start_health_scan()
+        if self._pending_session_refresh:
+            self._pending_session_refresh = False
+            self.call_after_refresh(self.refresh_sessions)
 
     def _notice_for(self, session: SessionView) -> ActivityNotice:
         derived = detect_activity(session, "")
@@ -4358,8 +4676,13 @@ class WsApp(App[str | None]):
     def _warning_count(self) -> int:
         return sum(is_warning(session, self._notice_for(session)) for session in self.sessions)
 
+    def _health_warning_count(self) -> int:
+        return sum(
+            check.status in {HealthStatus.WARN, HealthStatus.FAIL} for check in self._health_checks
+        )
+
     def _attention_label(self) -> str:
-        warnings = self._warning_count()
+        warnings = self._warning_count() + self._health_warning_count()
         if self._attention_scan_error:
             return f"Attention ({warnings} known, delayed)"
         if warnings:
@@ -4407,35 +4730,18 @@ class WsApp(App[str | None]):
         options.clear_options()
         self._option_sessions.clear()
         self._option_actions.clear()
-        options.add_option(self._heading_option("Quick Actions"))
-        options.add_option(self._quick_option("Create session", "create", "+"))
-        options.add_option(self._quick_option("Resume recent", "resume", ">"))
-        options.add_option(self._quick_option("Open shell", "shell", "$"))
-        options.add_option(self._quick_option("Search", "search", "/"))
-        options.add_option(self._quick_option("Filter sessions", "filter", "="))
-        options.add_option(self._quick_option("Recent activity", "recent", "@"))
-        options.add_option(self._unmanaged_option())
-        options.add_option(self._attention_option())
 
         self.visible_sessions = [item for item in self.sessions if self._matches_query(item)]
-        groups: dict[str, list[SessionView]] = {
-            "Needs Input": [],
-            "Pinned": [],
-            "Attached": [],
-            "Failed": [],
-            "Stopped": [],
-            "Detached": [],
-            "Unmanaged": [],
-        }
-        now = datetime.now(UTC)
-        for session in self.visible_sessions:
-            groups[session_group(session, now=now)].append(session)
         selected_index: int | None = None
         first_session_index: int | None = None
-        for group_name, group_sessions in groups.items():
+        for group_name, group_sessions in build_session_groups(
+            self.visible_sessions,
+            grouping=self.grouping,
+            notices=self._notice_for,
+        ):
             if not group_sessions:
                 continue
-            options.add_option(self._heading_option(group_name))
+            options.add_option(self._heading_option(f"{group_name} ({len(group_sessions)})"))
             for session in group_sessions:
                 option_id = f"session:{session.session_id}"
                 self._option_sessions[option_id] = session
@@ -4459,8 +4765,6 @@ class WsApp(App[str | None]):
                 if (session.name, session.session_id) == old_identity:
                     selected_index = options.option_count - 1
 
-        options.add_option(self._heading_option("Maintenance"))
-        options.add_option(self._quick_option("Diagnostics", "diagnostics", ">"))
         if selected_index is None:
             selected_index = first_session_index
         if selected_index is not None:
@@ -4474,12 +4778,27 @@ class WsApp(App[str | None]):
             self._render_empty_state()
         self._rendering_options = False
         self.call_after_refresh(options.scroll_to, y=old_scroll, animate=False, force=True)
+        self._render_session_toolbar()
         self._render_header()
         self._render_action_bar()
+
+    def _render_session_toolbar(self) -> None:
+        if not self.query("#session-toolbar-meta"):
+            return
+        separator = " / " if self.ascii_only else " · "
+        toolbar = self.query_one("#session-toolbar-meta", Static)
+        toolbar.update(
+            f"Sessions{separator}Group: {GROUPING_LABELS[self.grouping]} (g)"
+            f"{separator}Density: {self.density.title()} (z)"
+        )
 
     def _render_header(self) -> None:
         attached = sum(session.runtime is RuntimeState.ATTACHED for session in self.sessions)
         detached = sum(session.runtime is RuntimeState.DETACHED for session in self.sessions)
+        stopped = sum(
+            session.runtime in {RuntimeState.STOPPED, RuntimeState.FAILED}
+            for session in self.sessions
+        )
         warnings = self._warning_count()
         if not self.tmux_connected:
             warnings += 1
@@ -4508,6 +4827,7 @@ class WsApp(App[str | None]):
                 f"{len(self.sessions)} {session_label}",
                 f"{attached} attached",
                 f"{detached} detached",
+                f"{stopped} stopped",
                 warning_text,
             )
         )
@@ -4526,6 +4846,14 @@ class WsApp(App[str | None]):
             connection = f"{connection}{separator}{updated}"
         text = Text()
         text.append("ws", "bold #72c78e")
+        environment_display = self.service.config.interface.environment_display
+        environment = (
+            self.service.config.interface.environment_label
+            if environment_display == "label"
+            else self.hostname
+            if environment_display == "hostname"
+            else ""
+        )
         selected = self._selected()
         if self.narrow_detail_open and selected is not None:
             text.append("  Session  ", "dim")
@@ -4543,7 +4871,8 @@ class WsApp(App[str | None]):
             product = truncate("Workspace Session Manager", 60, ascii_only=self.ascii_only)
             text.append(f"  {product}  v{__version__}")
             text.append(f"    {counts}{filter_text}", "dim")
-            text.append(f"    {truncate(self.hostname, 22, ascii_only=self.ascii_only)}")
+            if environment:
+                text.append(f"    {truncate(environment, 22, ascii_only=self.ascii_only)}")
             text.append(
                 f"{separator}{connection}",
                 self._theme_colors.get("success", "green")
@@ -4554,6 +4883,8 @@ class WsApp(App[str | None]):
             product = truncate("Workspace Session Manager", 60, ascii_only=self.ascii_only)
             text.append(f"  {product}")
             text.append(f"    {counts}{filter_text}", "dim")
+            if environment:
+                text.append(f"    {truncate(environment, 18, ascii_only=self.ascii_only)}")
             text.append(
                 f"{separator}{connection}",
                 self._theme_colors.get("success", "green")
@@ -4588,17 +4919,17 @@ class WsApp(App[str | None]):
             value = f"Esc Back  {primary}  e Edit  n Task  l Logs  r Reload  * Pin  d Manage"
         elif self.has_class("narrow"):
             value = (
-                f"{navigation} Nav   Enter Open   c Create   / Search   f Filter   ? Help   q Quit"
+                f"{navigation} Nav   Enter Open   c Create   f Filter   g Group   h Health   ? Help"
             )
         elif self.has_class("medium"):
             value = (
                 f"{navigation} Nav   Enter Attach   c Create   / Search   f Filter   "
-                "d Manage   ? Help   q Quit"
+                "g Group   h Health   d Manage   ? Help"
             )
         else:
             value = (
                 f"{navigation} Navigate   Enter Attach   c Create   / Search   "
-                "f Filter   p Palette   d Manage   ? Help   q Quit"
+                "f Filter   g Group   z Density   h Health   p Palette   d Manage   ? Help"
             )
         self.query_one("#action-bar", Static).update(value)
 
@@ -4654,11 +4985,15 @@ class WsApp(App[str | None]):
             None,
         )
 
-    def _set_action_buttons_enabled(self, enabled: bool, *, pinned: bool = False) -> None:
+    def _set_action_buttons_enabled(
+        self, enabled: bool, *, pinned: bool = False, resumable: bool = False
+    ) -> None:
         for button in self.query(".session-action-button"):
             button.disabled = not enabled
         if enabled:
             self.query_one("#action-pin", Button).label = "Unpin" if pinned else "Pin"
+            self.query_one("#action-resume", Button).disabled = not resumable
+            self.query_one("#action-open", Button).disabled = resumable
 
     def _render_empty_state(self) -> None:
         if self.has_class("attention-view"):
@@ -4836,7 +5171,11 @@ class WsApp(App[str | None]):
         self.query_one("#output-meta", Static).update(
             f"{self.output_mode.title()}  {line_count} lines  {truncated}  sanitized  l full logs"
         )
-        self._set_action_buttons_enabled(True, pinned=session.pinned)
+        self._set_action_buttons_enabled(
+            True,
+            pinned=session.pinned,
+            resumable=session.runtime in {RuntimeState.STOPPED, RuntimeState.FAILED},
+        )
         self.call_after_refresh(scroller.scroll_to, y=old_scroll, animate=False, force=True)
         self.call_after_refresh(
             output_scroller.scroll_to,
@@ -4860,12 +5199,34 @@ class WsApp(App[str | None]):
         button_id = event.button.id
         if button_id == "action-open":
             self.action_open()
+        elif button_id == "action-resume":
+            self.action_resume_selected()
         elif button_id == "action-manage":
             self.action_manage()
         elif button_id == "action-logs":
             self.action_logs()
         elif button_id == "action-pin":
             self.action_toggle_pin()
+
+    @on(Button.Pressed, "#toolbar-create")
+    def toolbar_create_pressed(self) -> None:
+        self.action_create()
+
+    @on(Button.Pressed, "#toolbar-resume")
+    def toolbar_resume_pressed(self) -> None:
+        self.action_resume()
+
+    @on(Button.Pressed, "#toolbar-filter")
+    def toolbar_filter_pressed(self) -> None:
+        self.action_filter()
+
+    @on(Button.Pressed, "#toolbar-group")
+    def toolbar_group_pressed(self) -> None:
+        self.action_cycle_grouping()
+
+    @on(Button.Pressed, "#toolbar-health")
+    def toolbar_health_pressed(self) -> None:
+        self.action_health_alerts()
 
     @on(Input.Changed, "#search")
     def search_changed(self, event: Input.Changed) -> None:
@@ -5060,6 +5421,9 @@ class WsApp(App[str | None]):
         self._render_action_bar()
 
     def action_cycle_theme(self) -> None:
+        if self._no_color_forced:
+            self.notify("NO_COLOR keeps the interface in monochrome mode.")
+            return
         self.ui_theme = THEME_MODES[(THEME_MODES.index(self.ui_theme) + 1) % len(THEME_MODES)]
         self.monochrome = self.ui_theme == "monochrome"
         self.theme = self.ui_theme
@@ -5087,8 +5451,9 @@ class WsApp(App[str | None]):
         if self.has_class("narrow") and not self.narrow_detail_open:
             self._open_narrow_detail()
             return
-        if session.runtime is RuntimeState.STOPPED:
-            self.notify("Restart the stopped session from d Manage.", severity="warning")
+        if session.runtime in {RuntimeState.STOPPED, RuntimeState.FAILED}:
+            # Keep Enter's established protected-management behavior. Resume is
+            # deliberately available as its own visible action in the inspector.
             self.action_manage()
             return
         self.exit(session.name)
@@ -5118,46 +5483,45 @@ class WsApp(App[str | None]):
             return
         self.exit(target.name)
 
+    def action_resume_selected(self) -> None:
+        """Expose the existing protected restart flow as a primary inspector action."""
+        session = self._selected()
+        if session is None:
+            return
+        if session.runtime not in {RuntimeState.STOPPED, RuntimeState.FAILED}:
+            self.notify("This session is already available to attach.", severity="information")
+            return
+        self._begin_overlay(InteractionMode.MANAGE)
+        self._open_manage_confirmation(session, "restart", ManageListState())
+
+    def action_cycle_grouping(self) -> None:
+        current = GROUPING_MODES.index(self.grouping)
+        self.grouping = GROUPING_MODES[(current + 1) % len(GROUPING_MODES)]
+        self._persist_interface_preferences()
+        self._render_options()
+        self.notify(f"Grouping: {GROUPING_LABELS[self.grouping]}")
+
+    def action_toggle_density(self) -> None:
+        self.density = "compact" if self.density == "comfortable" else "comfortable"
+        self.set_class(self.density == "compact", "compact-density")
+        self._persist_interface_preferences()
+        self._render_options()
+        self.notify(f"Density: {self.density}")
+
     def _restore_create_mode(self) -> None:
         self._restore_dashboard_mode()
 
     def _insert_created_session(self, session: SessionView) -> None:
         self.sessions.insert(0, session)
-        self.visible_sessions.append(session)
-        options = self.query_one("#sessions", OptionList)
-        option_ids = {
-            options.get_option_at_index(index).id for index in range(options.option_count)
-        }
-        self._rendering_options = True
-        for option_id in ("quick:diagnostics", "heading:maintenance"):
-            if option_id in option_ids:
-                options.remove_option(option_id)
-        self._option_actions.pop("quick:diagnostics", None)
-        if "heading:detached" not in option_ids:
-            options.add_option(self._heading_option("Detached"))
-        option_id = f"session:{session.session_id}"
-        prompt = session_row(
-            session,
-            self._row_width(),
-            ascii_only=self.ascii_only,
-            monochrome=self.monochrome,
-            activity_spark=self._activity_spark_for(session),
-            warning_color=self._theme_colors.get("warning", "yellow"),
-            warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
-            notice=self._notice_for(session),
-        )
-        self._option_sessions[option_id] = session
-        options.add_option(Option(prompt, id=option_id))
-        created_index = options.option_count - 1
-        options.add_option(self._heading_option("Maintenance"))
-        options.add_option(self._quick_option("Diagnostics", "diagnostics", ">"))
-        self._rendering_options = False
         self.selected_name = session.name
         self.selected_session_id = session.session_id
-        self._expected_option_id = option_id
-        options.highlighted = created_index
-        self._select_option(option_id)
-        self.call_after_refresh(options.scroll_to_highlight)
+        self._render_options()
+        option_id = f"session:{session.session_id}"
+        options = self.query_one("#sessions", OptionList)
+        if option_id in self._option_sessions:
+            options.highlighted = options.get_option_index(option_id)
+            self._select_option(option_id)
+            self.call_after_refresh(options.scroll_to_highlight)
         if self.motion != "off":
             self.call_after_refresh(
                 self._highlight_created_session, session.name, session.session_id
@@ -5703,8 +6067,16 @@ class WsApp(App[str | None]):
         self._begin_overlay(InteractionMode.FORM)
         self.push_screen(
             HealthAlertsScreen(self.service),
-            lambda _result: self._restore_dashboard_mode(),
+            self._finish_health_alerts,
         )
+
+    def _finish_health_alerts(self, action: str | None) -> None:
+        self._restore_dashboard_mode()
+        if action == "view-sessions":
+            self.call_after_refresh(self.action_attention)
+        elif action == "dismiss":
+            self._health_dismissed_until_refresh = True
+            self._render_health_row()
 
     def action_help(self) -> None:
         content = (
@@ -5725,6 +6097,9 @@ class WsApp(App[str | None]):
             "*        Toggle pin\n"
             "d        Manage session\n"
             "r        Refresh\n"
+            "g        Cycle grouping\n"
+            "z        Toggle compact/comfortable density\n"
+            "h        Open System Health\n"
             "t        Cycle color theme\n"
             "q        Quit"
             if self.narrow_detail_open
@@ -5740,6 +6115,9 @@ class WsApp(App[str | None]):
             "d        Manage session\n"
             "u        Show all tmux sessions (unmanaged too)\n"
             "r        Refresh\n"
+            "g        Cycle grouping\n"
+            "z        Toggle compact/comfortable density\n"
+            "h        Open System Health\n"
             "p        Command palette\n"
             "t        Cycle color theme\n"
             "q        Quit"

@@ -39,6 +39,29 @@ def test_motion_configuration_is_strict() -> None:
         AppConfig.model_validate({"interface": {"animations": "constant"}})
 
 
+def test_interface_configuration_has_strict_display_and_view_defaults() -> None:
+    interface = AppConfig().interface
+    assert interface.environment_display == "hidden"
+    assert interface.environment_label == ""
+    assert interface.default_grouping == "attention"
+    assert interface.default_density == "comfortable"
+    configured = AppConfig.model_validate(
+        {
+            "interface": {
+                "environment_display": "label",
+                "environment_label": "Staging",
+                "default_grouping": "project",
+                "default_density": "compact",
+            }
+        }
+    ).interface
+    assert configured.environment_label == "Staging"
+    with pytest.raises(ValueError):
+        AppConfig.model_validate({"interface": {"environment_display": "always"}})
+    with pytest.raises(ValueError):
+        AppConfig.model_validate({"interface": {"environment_label": "line\nbreak"}})
+
+
 def test_attention_scan_budget_is_bounded() -> None:
     assert AppConfig().attention_scan_budget == 8
     assert AppConfig(attention_scan_budget=1).attention_scan_budget == 1

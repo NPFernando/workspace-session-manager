@@ -1,7 +1,6 @@
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import pytest
 
@@ -571,13 +570,26 @@ def test_rename_validation_and_display_name_update(
 
 def test_project_detection_uses_metadata_and_never_names_home_ubuntu(
     service: SessionService,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with TemporaryDirectory(prefix="wf-project-", dir="/var/tmp") as directory:
-        project = Path(directory)
-        (project / "pyproject.toml").write_text(
-            '[project]\nname = "metadata-project"\n', encoding="utf-8"
-        )
-        assert service.detect_project(project) == "metadata-project"
+    project = tmp_path / "metadata-project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "metadata-project"\n', encoding="utf-8"
+    )
+    inherited_git_marker = next(
+        (candidate / ".git" for candidate in project.parents if (candidate / ".git").exists()),
+        None,
+    )
+    if inherited_git_marker is not None:
+        original_is_dir = Path.is_dir
+
+        def is_dir_without_inherited_marker(path: Path) -> bool:
+            return path != inherited_git_marker and original_is_dir(path)
+
+        monkeypatch.setattr(Path, "is_dir", is_dir_without_inherited_marker)
+    assert service.detect_project(project) == "metadata-project"
     assert service.detect_project(Path.home()) == ""
 
 
@@ -984,6 +996,86 @@ def test_orphaned_logs_check_warns_on_unknown_log_file(
     checks = service.refresh_health_alerts(force=True)
     assert checks[0].name == "orphaned-logs"
     assert checks[0].status is HealthStatus.WARN
+
+
+def test_apply_health_fix_deletes_stale_zombie_sessions(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _hygiene_only_service(
+        tmp_path,
+        fake_backend,
+        idle_sessions_enabled=False,
+        orphaned_logs_enabled=False,
+        zombie_stale_after_days=1,
+    )
+    created = service.create(CreateRequest(name="stale", tool=Tool.SHELL, cwd=tmp_path))
+    record = service.store.load(created.name)
+    assert record is not None
+    stale_record = record.model_copy(
+        update={
+            "last_attached_at": datetime.now(UTC) - timedelta(days=2),
+            "updated_at": datetime.now(UTC) - timedelta(days=2),
+        }
+    )
+    service.store.save(stale_record)
+    fake_backend.sessions.pop(created.name, None)
+
+    refreshed = service.apply_health_fix("zombie-sessions")
+    assert refreshed.status is HealthStatus.PASS
+    assert service.store.load(created.name) is None
+
+
+def test_apply_health_fix_deletes_orphaned_log_files(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _hygiene_only_service(
+        tmp_path,
+        fake_backend,
+        zombie_sessions_enabled=False,
+        idle_sessions_enabled=False,
+        orphaned_logs_min_age_hours=1,
+    )
+    service.paths.logs_dir.mkdir(parents=True, exist_ok=True)
+    orphan = service.paths.logs_dir / "00000000-0000-0000-0000-000000000000.log"
+    orphan.write_text("leftover output", encoding="utf-8")
+    old_time = (datetime.now(UTC) - timedelta(days=2)).timestamp()
+    os.utime(orphan, (old_time, old_time))
+
+    refreshed = service.apply_health_fix("orphaned-logs")
+    assert refreshed.status is HealthStatus.PASS
+    assert not orphan.exists()
+
+
+def test_apply_health_fix_on_already_clean_check_raises(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _hygiene_only_service(
+        tmp_path, fake_backend, idle_sessions_enabled=False, orphaned_logs_enabled=False
+    )
+    with pytest.raises(WsError, match="no automatic fix"):
+        service.apply_health_fix("zombie-sessions")
+
+
+def test_apply_health_fix_rejects_unknown_check(tmp_path: Path, fake_backend: FakeBackend) -> None:
+    service = _hygiene_only_service(tmp_path, fake_backend)
+    with pytest.raises(WsError, match="unknown or disabled"):
+        service.apply_health_fix("does-not-exist")
+
+
+def test_apply_health_fix_rejects_disabled_check(tmp_path: Path, fake_backend: FakeBackend) -> None:
+    service = _hygiene_only_service(tmp_path, fake_backend, zombie_sessions_enabled=False)
+    with pytest.raises(WsError, match="unknown or disabled"):
+        service.apply_health_fix("zombie-sessions")
+
+
+def test_apply_health_fix_rejects_non_fixable_check(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _hygiene_only_service(
+        tmp_path, fake_backend, zombie_sessions_enabled=False, orphaned_logs_enabled=False
+    )
+    with pytest.raises(WsError, match="no automatic fix"):
+        service.apply_health_fix("idle-sessions")
 
 
 def test_session_hygiene_checks_isolate_unexpected_failures(
