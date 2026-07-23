@@ -793,7 +793,11 @@ async def test_logs_resize_and_stopped_session_disable_attach(
         await pilot.resize_terminal(80, 24)
         await pilot.pause()
         assert screen.has_class("log-narrow")
-        await pilot.resize_terminal(72, 20)
+        await pilot.resize_terminal(50, 18)
+        await pilot.pause()
+        assert screen.has_class("log-narrow")
+        assert not screen.has_class("log-too-small")
+        await pilot.resize_terminal(35, 12)
         await pilot.pause()
         assert screen.has_class("log-too-small")
         assert screen.query_one("#log-small-terminal", Static).display
@@ -909,8 +913,10 @@ async def test_refresh_preserves_selection_filter_and_list_scroll(
         ((120, 35), "wide"),
         ((100, 30), "medium"),
         ((80, 24), "narrow"),
-        ((79, 24), "too-small"),
-        ((80, 23), "too-small"),
+        ((79, 24), "very-narrow"),
+        ((40, 15), "very-narrow"),
+        ((39, 15), "too-small"),
+        ((40, 14), "too-small"),
     ],
 )
 async def test_responsive_layout_modes(
@@ -922,9 +928,11 @@ async def test_responsive_layout_modes(
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         assert app.has_class(layout)
+        if layout == "very-narrow":
+            assert app.has_class("narrow")
         if layout == "too-small":
             fallback = str(app.query_one("#small-terminal", Static).content)
-            assert "Minimum: 80x24" in fallback
+            assert "Minimum: 40x15" in fallback
             assert "ws list" in fallback
             assert "ws --classic" in fallback
 
@@ -2127,6 +2135,10 @@ async def test_terminal_resizing_preserves_selection_and_switches_modes(
         assert app.has_class("narrow")
         assert app.selected_name == selected
         await pilot.resize_terminal(72, 20)
+        await pilot.pause()
+        assert app.has_class("very-narrow")
+        assert app.selected_name == selected
+        await pilot.resize_terminal(35, 12)
         await pilot.pause()
         assert app.has_class("too-small")
 

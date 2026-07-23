@@ -2533,10 +2533,10 @@ class LogScreen(Screen[str | None]):
     def _set_layout_classes(self, width: int, height: int) -> None:
         self.set_class(width < 100, "log-narrow")
         self.set_class(100 <= width < 120, "log-medium")
-        self.set_class(width < 80 or height < 24, "log-too-small")
-        if width < 80 or height < 24:
+        self.set_class(width < 40 or height < 15, "log-too-small")
+        if width < 40 or height < 15:
             self.query_one("#log-small-terminal", Static).update(
-                "ws Logs requires a terminal of at least 80x24.\n\n"
+                "ws Logs requires a terminal of at least 40x15.\n\n"
                 f"Current: {width}x{height}\n\nEsc  Back"
             )
 
@@ -3663,15 +3663,16 @@ class WsApp(App[str | None]):
             "wide",
             "medium",
             "narrow",
+            "very-narrow",
             "short",
             "too-small",
         ):
             self.remove_class(name)
-        if width < 80 or height < 24:
+        if width < 40 or height < 15:
             self.add_class("too-small")
             self.query_one("#small-terminal", Static).update(
                 "The terminal is too small for the ws interface.\n\n"
-                f"Minimum: 80x24\nCurrent: {width}x{height}\n\n"
+                f"Minimum: 40x15\nCurrent: {width}x{height}\n\n"
                 "Use:\nws list\nws --classic"
             )
         elif width >= 140:
@@ -3680,8 +3681,10 @@ class WsApp(App[str | None]):
             self.add_class("wide")
         elif width >= 100:
             self.add_class("medium")
-        else:
+        elif width >= 80:
             self.add_class("narrow")
+        else:
+            self.add_class("narrow", "very-narrow")
         if not self.has_class("too-small") and height <= 35:
             self.add_class("short")
 

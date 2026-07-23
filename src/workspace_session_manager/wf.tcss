@@ -401,6 +401,22 @@ OptionList > .option-list--option-disabled {
     padding: 0 1;
 }
 
+.very-narrow #health-row {
+    display: none;
+}
+
+.very-narrow #app-header {
+    height: 1;
+    padding: 0 1;
+    border-bottom: none;
+}
+
+.very-narrow #action-bar {
+    height: 1;
+    padding: 0 1;
+    border-top: none;
+}
+
 .too-small #header-band,
 .too-small #app-header,
 .too-small #search-mode,
