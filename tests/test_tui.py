@@ -2556,6 +2556,84 @@ async def test_health_alerts_screen_opens_shows_checks_and_refreshes(
         assert not isinstance(app.screen, HealthAlertsScreen)
 
 
+@pytest.mark.asyncio
+async def test_health_alerts_screen_fix_button_disabled_when_nothing_fixable(
+    service: SessionService,
+) -> None:
+    enable_health(service)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_health_scan(pilot, app)
+        app.action_health_alerts()
+        await pilot.pause()
+        assert isinstance(app.screen, HealthAlertsScreen)
+        screen = app.screen
+        for _ in range(40):
+            if not screen.running:
+                break
+            await pilot.pause(0.05)
+        assert screen.query_one("#health-alerts-fix", Button).disabled
+
+
+@pytest.mark.asyncio
+async def test_health_alerts_screen_fix_cleans_up_zombie_session(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    service.config = service.config.model_copy(
+        update={
+            "health": HealthConfig(
+                enabled=True,
+                apt_updates_enabled=False,
+                reboot_required_enabled=False,
+                git_dirty_enabled=False,
+                docker_enabled=False,
+                disk_space_enabled=False,
+                idle_sessions_enabled=False,
+                orphaned_logs_enabled=False,
+                zombie_stale_after_days=1,
+            )
+        }
+    )
+    created = service.create(CreateRequest(name="stale", tool=Tool.SHELL, cwd=Path("/tmp")))
+    record = service.store.load(created.name)
+    assert record is not None
+    stale_record = record.model_copy(
+        update={
+            "last_attached_at": datetime.now(UTC) - timedelta(days=2),
+            "updated_at": datetime.now(UTC) - timedelta(days=2),
+        }
+    )
+    service.store.save(stale_record)
+    fake_backend.sessions.pop(created.name, None)
+
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await wait_for_health_scan(pilot, app)
+        app.action_health_alerts()
+        await pilot.pause()
+        assert isinstance(app.screen, HealthAlertsScreen)
+        screen = app.screen
+        for _ in range(40):
+            if not screen.running:
+                break
+            await pilot.pause(0.05)
+        assert any(check.name == "zombie-sessions" for check in screen.checks)
+        assert not screen.query_one("#health-alerts-fix", Button).disabled
+
+        await pilot.press("f")
+        for _ in range(40):
+            if not screen.running:
+                break
+            await pilot.pause(0.05)
+        assert service.store.load(created.name) is None
+        assert all(
+            check.status is not HealthStatus.WARN
+            for check in screen.checks
+            if check.name == "zombie-sessions"
+        )
+
+
 def _write_log(service: SessionService, name: str, content: str) -> None:
     record = service.store.load(name)
     assert record is not None

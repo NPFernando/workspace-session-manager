@@ -2515,6 +2515,7 @@ class HealthAlertsScreen(ModalScreen[str | None]):
         Binding("c", "copy", "Copy details"),
         Binding("d", "dismiss_until_refresh", "Dismiss"),
         Binding("v", "view_sessions", "Affected sessions"),
+        Binding("f", "fix", "Fix issues"),
     ]
 
     def __init__(self, service: SessionService) -> None:
@@ -2531,11 +2532,13 @@ class HealthAlertsScreen(ModalScreen[str | None]):
             with VerticalScroll(id="health-alerts-list"):
                 yield Static("", id="health-alerts-content")
             yield Static(
-                "HEALTH  r Refresh   v Session warnings   c Copy details   Esc Close",
+                "HEALTH  r Refresh   f Fix issues   v Session warnings   "
+                "c Copy details   Esc Close",
                 classes="mode-help",
             )
             with Horizontal(classes="dialog-actions diagnostics-actions"):
                 yield Button("Refresh Now", id="health-alerts-run")
+                yield Button("Fix Issues", id="health-alerts-fix")
                 yield Button("View Sessions", id="health-alerts-sessions")
                 yield Button("Copy Details", id="health-alerts-copy")
                 yield Button("Dismiss", id="health-alerts-dismiss")
@@ -2568,15 +2571,24 @@ class HealthAlertsScreen(ModalScreen[str | None]):
             content.append(f"{diagnostic_name(check):<22}", "bold")
             content.append(f"{diagnostic_detail(check, expanded=True)}\n")
             if check.status in {HealthStatus.WARN, HealthStatus.FAIL} and check.corrective_action:
-                content.append(f"     Action: {check.corrective_action}\n", "dim")
+                hint = " (press f to clean up)" if check.fixable else ""
+                content.append(f"     Action: {check.corrective_action}{hint}\n", "dim")
         self.query_one("#health-alerts-content", Static).update(content)
+        self.query_one("#health-alerts-fix", Button).disabled = not self._fixable_names()
+
+    def _fixable_names(self) -> list[str]:
+        return [
+            check.name
+            for check in self.checks
+            if check.fixable and check.status in {HealthStatus.WARN, HealthStatus.FAIL}
+        ]
 
     def action_run(self) -> None:
         if self.running:
             return
         self.running = True
         self.query_one("#health-alerts-loading", LoadingIndicator).display = True
-        for selector in ("#health-alerts-run",):
+        for selector in ("#health-alerts-run", "#health-alerts-fix"):
             self.query_one(selector, Button).disabled = True
         self._run_refresh()
 
@@ -2589,9 +2601,43 @@ class HealthAlertsScreen(ModalScreen[str | None]):
         self.checks = checks
         self.running = False
         self.query_one("#health-alerts-loading", LoadingIndicator).display = False
-        for selector in ("#health-alerts-run",):
-            self.query_one(selector, Button).disabled = False
+        self.query_one("#health-alerts-run", Button).disabled = False
         self._render_report()
+
+    def action_fix(self) -> None:
+        if self.running:
+            return
+        names = self._fixable_names()
+        if not names:
+            return
+        self.running = True
+        self.query_one("#health-alerts-loading", LoadingIndicator).display = True
+        for selector in ("#health-alerts-run", "#health-alerts-fix"):
+            self.query_one(selector, Button).disabled = True
+        self._run_fix(names)
+
+    @work(thread=True, exclusive=True, group="health-alerts-detail")
+    def _run_fix(self, names: list[str]) -> None:
+        fixed: list[str] = []
+        for name in names:
+            check = self.service.apply_health_fix(name)
+            if check.status is HealthStatus.PASS:
+                fixed.append(name)
+        checks = self.service.refresh_health_alerts(force=True)
+        self.app.call_from_thread(self._finish_fix, checks, fixed)
+
+    def _finish_fix(self, checks: list[HealthCheck], fixed: list[str]) -> None:
+        self.checks = checks
+        self.running = False
+        self.query_one("#health-alerts-loading", LoadingIndicator).display = False
+        self.query_one("#health-alerts-run", Button).disabled = False
+        self._render_report()
+        if fixed:
+            by_name = {check.name: check for check in checks}
+            labels = [diagnostic_name(by_name[name]) if name in by_name else name for name in fixed]
+            self.notify(f"Cleaned up: {', '.join(labels)}")
+        else:
+            self.notify("Nothing to fix")
 
     @on(Button.Pressed)
     def button_pressed(self, event: Button.Pressed) -> None:
@@ -2599,6 +2645,8 @@ class HealthAlertsScreen(ModalScreen[str | None]):
             self.dismiss(None)
         elif event.button.id == "health-alerts-run":
             self.action_run()
+        elif event.button.id == "health-alerts-fix":
+            self.action_fix()
         elif event.button.id == "health-alerts-sessions":
             self.action_view_sessions()
         elif event.button.id == "health-alerts-copy":

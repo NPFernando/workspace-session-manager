@@ -318,6 +318,8 @@ class HealthCheck(BaseModel):
     status: HealthStatus
     detail: str
     corrective_action: str = ""
+    fixable: bool = False
+    affected: list[str] = []
 
 
 class DoctorReport(BaseModel):

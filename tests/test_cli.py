@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -483,6 +484,79 @@ def test_health_command_reports_configured_checks(
     assert result.exit_code == 0, result.output
     assert "disk-space" in result.stdout
     assert "warn" in result.stdout
+
+
+def test_health_command_fix_cleans_up_zombie_sessions(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service.config = service.config.model_copy(
+        update={
+            "health": HealthConfig(
+                enabled=True,
+                apt_updates_enabled=False,
+                reboot_required_enabled=False,
+                git_dirty_enabled=False,
+                docker_enabled=False,
+                disk_space_enabled=False,
+                idle_sessions_enabled=False,
+                orphaned_logs_enabled=False,
+                zombie_stale_after_days=1,
+            )
+        }
+    )
+    created = service.create(CreateRequest(name="stale", tool=Tool.SHELL, cwd=tmp_path))
+    record = service.store.load(created.name)
+    assert record is not None
+    stale_record = record.model_copy(
+        update={
+            "last_attached_at": datetime.now(UTC) - timedelta(days=2),
+            "updated_at": datetime.now(UTC) - timedelta(days=2),
+        }
+    )
+    service.store.save(stale_record)
+    fake_backend.sessions.pop(created.name, None)
+
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    result = CliRunner().invoke(cli.app, ["health", "--fix", "zombie-sessions"])
+    assert result.exit_code == 0, result.output
+    assert service.store.load(created.name) is None
+
+
+def test_health_command_fix_unknown_check_errors_clearly(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    result = CliRunner().invoke(cli.app, ["health", "--fix", "does-not-exist"])
+    assert result.exit_code == 1
+    assert "unknown or disabled" in result.output
+
+
+def test_health_command_fix_non_fixable_check_errors_clearly(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service.config = service.config.model_copy(
+        update={
+            "health": HealthConfig(
+                enabled=True,
+                apt_updates_enabled=False,
+                reboot_required_enabled=False,
+                git_dirty_enabled=False,
+                docker_enabled=False,
+                disk_space_enabled=False,
+                zombie_sessions_enabled=False,
+                orphaned_logs_enabled=False,
+            )
+        }
+    )
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    result = CliRunner().invoke(cli.app, ["health", "--fix", "idle-sessions"])
+    assert result.exit_code == 1
+    assert "no automatic fix" in result.output
 
 
 def test_health_command_json(

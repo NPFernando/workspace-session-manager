@@ -216,6 +216,8 @@ def zombie_sessions_check(
         corrective_action=(
             "Review with `ws list --all` and `ws delete <name>` for ones no longer needed."
         ),
+        fixable=True,
+        affected=[record.name for record in stale],
     )
 
 
@@ -281,4 +283,6 @@ def orphaned_logs_check(
             "with no matching session"
         ),
         corrective_action=f"Safe to delete manually from {logs_dir}.",
+        fixable=True,
+        affected=[str(path) for path in orphans],
     )
