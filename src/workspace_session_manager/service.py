@@ -19,6 +19,7 @@ from typing import Protocol
 from workspace_session_manager.config import AppConfig
 from workspace_session_manager.errors import (
     OwnershipError,
+    PresetNotFoundError,
     SessionExistsError,
     SessionNotFoundError,
     StateError,
@@ -42,6 +43,7 @@ from workspace_session_manager.models import (
     HealthStatus,
     InputState,
     OutputSource,
+    Preset,
     RuntimeState,
     SessionDetails,
     SessionMetadata,
@@ -54,7 +56,7 @@ from workspace_session_manager.models import (
 )
 from workspace_session_manager.paths import AppPaths
 from workspace_session_manager.security import BoundedOutput, bounded_output, redact_text
-from workspace_session_manager.store import MetadataStore
+from workspace_session_manager.store import MetadataStore, PresetStore
 from workspace_session_manager.tmux import Runner, subprocess_runner
 
 SEARCH_CONTEXT_LINES = 2
@@ -264,6 +266,7 @@ class SessionService:
         paths: AppPaths,
         legacy: LegacyMetadataReader | None = None,
         runner: Runner = subprocess_runner,
+        preset_store: PresetStore | None = None,
     ) -> None:
         self.backend = backend
         self.store = store
@@ -271,6 +274,7 @@ class SessionService:
         self.paths = paths
         self.legacy = legacy or LegacyMetadataReader(config.legacy_state_dirs)
         self.runner = runner
+        self.preset_store = preset_store or PresetStore(paths)
 
     def list_sessions(self, *, include_unmanaged: bool = False) -> list[SessionView]:
         owned_records = self.store.load_all()
@@ -581,6 +585,44 @@ class SessionService:
         ):
             name_error = f"session already exists: {normalized}"
         return RenameValidation(normalized_name=normalized, name_error=name_error)
+
+    def list_presets(self) -> list[Preset]:
+        return sorted(self.preset_store.load_all().values(), key=lambda preset: preset.name)
+
+    def get_preset(self, name: str) -> Preset:
+        preset = self.preset_store.load(name)
+        if preset is None:
+            raise PresetNotFoundError(f"preset not found: {name}")
+        return preset
+
+    def save_preset(
+        self,
+        name: str,
+        *,
+        tool: Tool,
+        cwd: Path,
+        project: str = "",
+        tags: Sequence[str] = (),
+        logging_enabled: bool = True,
+    ) -> Preset:
+        normalized_name = slugify_name(name)
+        if not normalized_name:
+            raise WsError(f"invalid preset name: {name!r}")
+        preset = Preset(
+            name=normalized_name,
+            tool=tool,
+            cwd=cwd,
+            project=project,
+            tags=list(tags),
+            logging_enabled=logging_enabled,
+        )
+        self.preset_store.save(preset)
+        return preset
+
+    def delete_preset(self, name: str) -> None:
+        if self.preset_store.load(name) is None:
+            raise PresetNotFoundError(f"preset not found: {name}")
+        self.preset_store.delete(name)
 
     def create(self, request: CreateRequest, *, dry_run: bool = False) -> SessionView:
         validation = self.validate_create(

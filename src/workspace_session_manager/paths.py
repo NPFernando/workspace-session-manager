@@ -28,6 +28,10 @@ class AppPaths:
         return self.state_dir / ".state.lock"
 
     @property
+    def presets_file(self) -> Path:
+        return self.state_dir / "presets.json"
+
+    @property
     def migrations_dir(self) -> Path:
         return self.state_dir / "migrations"
 

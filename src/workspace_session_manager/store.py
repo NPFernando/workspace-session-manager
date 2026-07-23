@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import tempfile
 from collections.abc import Iterator
@@ -12,7 +13,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from workspace_session_manager.errors import StateError
-from workspace_session_manager.models import SESSION_NAME_PATTERN, SessionMetadata
+from workspace_session_manager.models import SESSION_NAME_PATTERN, Preset, SessionMetadata
 from workspace_session_manager.paths import AppPaths
 
 
@@ -132,3 +133,87 @@ class MetadataStore:
             if temporary_name:
                 Path(temporary_name).unlink(missing_ok=True)
             raise StateError(f"unable to write metadata for {record.name}: {error}") from error
+
+
+class PresetStore:
+    """Single-file store for named create-session presets (small in number,
+    unlike sessions, so all presets live in one JSON object rather than
+    one file per record)."""
+
+    def __init__(self, paths: AppPaths) -> None:
+        self.paths = paths
+
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        self.paths.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.paths.state_dir, 0o700)
+        descriptor = os.open(self.paths.lock_file, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            with os.fdopen(descriptor, "r+") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                yield
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        except OSError as error:
+            raise StateError(f"unable to lock state: {error}") from error
+
+    def _read_all_unlocked(self) -> dict[str, Preset]:
+        path = self.paths.presets_file
+        if not path.exists():
+            return {}
+        try:
+            if path.is_symlink():
+                raise StateError(f"refusing symlinked presets file: {path.name}")
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return {name: Preset.model_validate(value) for name, value in raw.items()}
+        except (OSError, ValidationError, ValueError) as error:
+            raise StateError(f"invalid presets file: {error}") from error
+
+    def load_all(self) -> dict[str, Preset]:
+        with self._locked():
+            return self._read_all_unlocked()
+
+    def load(self, name: str) -> Preset | None:
+        return self.load_all().get(name)
+
+    def save(self, preset: Preset) -> None:
+        with self._locked():
+            presets = self._read_all_unlocked()
+            presets[preset.name] = preset
+            self._write_unlocked(presets)
+
+    def delete(self, name: str) -> None:
+        with self._locked():
+            presets = self._read_all_unlocked()
+            if name not in presets:
+                return
+            del presets[name]
+            self._write_unlocked(presets)
+
+    def _write_unlocked(self, presets: dict[str, Preset]) -> None:
+        self.paths.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.paths.state_dir, 0o700)
+        path = self.paths.presets_file
+        payload = json.dumps(
+            {name: json.loads(preset.model_dump_json()) for name, preset in presets.items()},
+            indent=2,
+        )
+        temporary_name: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.paths.state_dir,
+                prefix=f".{path.name}.",
+                delete=False,
+            ) as temporary:
+                temporary_name = temporary.name
+                temporary.write(payload)
+                temporary.write("\n")
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.chmod(temporary_name, 0o600)
+            os.replace(temporary_name, path)
+        except OSError as error:
+            if temporary_name:
+                Path(temporary_name).unlink(missing_ok=True)
+            raise StateError(f"unable to write presets: {error}") from error

@@ -9,10 +9,12 @@ from conftest import FakeBackend
 from workspace_session_manager.config import AppConfig, HealthConfig
 from workspace_session_manager.errors import (
     OwnershipError,
+    PresetNotFoundError,
     SessionNotFoundError,
     StateError,
     TmuxError,
     ToolUnavailableError,
+    WsError,
 )
 from workspace_session_manager.legacy import LegacyMetadataReader
 from workspace_session_manager.models import (
@@ -1026,3 +1028,60 @@ def test_doctor_disk_space_thresholds_are_configurable(
     report = service.doctor()
     disk_check = next(check for check in report.checks if check.name == "disk-space")
     assert disk_check.status is HealthStatus.WARN
+
+
+def test_save_preset_then_get_preset_round_trips(service: SessionService, tmp_path: Path) -> None:
+    saved = service.save_preset(
+        "Backend Dev",
+        tool=Tool.SHELL,
+        cwd=tmp_path,
+        project="api",
+        tags=["backend", "urgent"],
+        logging_enabled=False,
+    )
+    assert saved.name == "backend-dev"
+    fetched = service.get_preset("backend-dev")
+    assert fetched == saved
+    assert fetched.project == "api"
+    assert fetched.tags == ["backend", "urgent"]
+    assert fetched.logging_enabled is False
+
+
+def test_save_preset_rejects_names_that_normalize_empty(
+    service: SessionService, tmp_path: Path
+) -> None:
+    with pytest.raises(WsError, match="invalid preset name"):
+        service.save_preset("!!!", tool=Tool.SHELL, cwd=tmp_path)
+
+
+def test_save_preset_overwrites_existing_preset_by_name(
+    service: SessionService, tmp_path: Path
+) -> None:
+    service.save_preset("backend-dev", tool=Tool.SHELL, cwd=tmp_path)
+    updated = service.save_preset("backend-dev", tool=Tool.CODEX, cwd=tmp_path)
+    assert service.get_preset("backend-dev").tool is Tool.CODEX
+    assert updated.tool is Tool.CODEX
+    assert len(service.list_presets()) == 1
+
+
+def test_get_preset_raises_when_missing(service: SessionService) -> None:
+    with pytest.raises(PresetNotFoundError, match="not-here"):
+        service.get_preset("not-here")
+
+
+def test_list_presets_returns_sorted_by_name(service: SessionService, tmp_path: Path) -> None:
+    service.save_preset("zeta", tool=Tool.SHELL, cwd=tmp_path)
+    service.save_preset("alpha", tool=Tool.SHELL, cwd=tmp_path)
+    names = [preset.name for preset in service.list_presets()]
+    assert names == ["alpha", "zeta"]
+
+
+def test_delete_preset_removes_it(service: SessionService, tmp_path: Path) -> None:
+    service.save_preset("backend-dev", tool=Tool.SHELL, cwd=tmp_path)
+    service.delete_preset("backend-dev")
+    assert service.list_presets() == []
+
+
+def test_delete_preset_raises_when_missing(service: SessionService) -> None:
+    with pytest.raises(PresetNotFoundError, match="not-here"):
+        service.delete_preset("not-here")

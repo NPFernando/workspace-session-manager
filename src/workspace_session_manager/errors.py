@@ -35,3 +35,7 @@ class StateError(WsError):
 
 class MigrationError(WsError):
     """A session adoption plan is invalid, stale, or unsafe to apply."""
+
+
+class PresetNotFoundError(WsError):
+    """The requested create-session preset does not exist."""
