@@ -114,6 +114,36 @@ def test_default_list_hides_unmanaged_session(
     assert json.loads(result.stdout) == []
 
 
+def test_list_filters_by_tag_and_project(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backend_session = service.create(
+        CreateRequest(name="backend-work", tool=Tool.SHELL, cwd=tmp_path)
+    )
+    frontend_session = service.create(
+        CreateRequest(name="frontend-work", tool=Tool.SHELL, cwd=tmp_path)
+    )
+    service.organize(backend_session.name, tags=["backend"], project="api")
+    service.organize(frontend_session.name, tags=["frontend"], project="web")
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+
+    tag_result = CliRunner().invoke(cli.app, ["list", "--json", "--tag", "backend"])
+    assert tag_result.exit_code == 0, tag_result.output
+    tag_payload = json.loads(tag_result.stdout)
+    assert [item["name"] for item in tag_payload] == [backend_session.name]
+
+    project_result = CliRunner().invoke(cli.app, ["list", "--json", "--project", "web"])
+    assert project_result.exit_code == 0, project_result.output
+    project_payload = json.loads(project_result.stdout)
+    assert [item["name"] for item in project_payload] == [frontend_session.name]
+
+    empty_result = CliRunner().invoke(cli.app, ["list", "--json", "--tag", "no-such-tag"])
+    assert empty_result.exit_code == 0, empty_result.output
+    assert json.loads(empty_result.stdout) == []
+
+
 def test_explicit_edit_command_updates_task_input_and_project(
     service: SessionService,
     monkeypatch: pytest.MonkeyPatch,

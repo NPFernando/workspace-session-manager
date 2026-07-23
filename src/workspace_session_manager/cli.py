@@ -157,6 +157,12 @@ def list_command(
         bool,
         typer.Option("--all", help="Include unmanaged tmux sessions for diagnostics."),
     ] = False,
+    tag: Annotated[
+        str | None, typer.Option("--tag", help="Only show sessions with this exact tag.")
+    ] = None,
+    project: Annotated[
+        str | None, typer.Option("--project", help="Only show sessions in this exact project.")
+    ] = None,
 ) -> None:
     """List managed sessions without changing them."""
     try:
@@ -167,6 +173,10 @@ def list_command(
         )
     except WsError as error:
         abort(error)
+    if tag is not None:
+        sessions = [session for session in sessions if tag in session.tags]
+    if project is not None:
+        sessions = [session for session in sessions if session.project == project]
     if as_json:
         typer.echo(json.dumps([item.model_dump(mode="json") for item in sessions], indent=2))
         return
