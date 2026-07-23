@@ -12,7 +12,7 @@ import tomllib
 import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -29,7 +29,10 @@ from workspace_session_manager.health import (
     apt_updates_check,
     docker_containers_check,
     git_dirty_repos_check,
+    idle_live_sessions_check,
+    orphaned_logs_check,
     reboot_required_check,
+    zombie_sessions_check,
 )
 from workspace_session_manager.legacy import LegacyMetadataReader
 from workspace_session_manager.models import (
@@ -1212,6 +1215,39 @@ class SessionService:
                     runner=self.runner,
                     budget=health.git_scan_budget,
                     timeout=health.subprocess_timeout,
+                ),
+            ),
+            HealthCheckSpec(
+                name="zombie-sessions",
+                enabled=health.enabled and health.zombie_sessions_enabled,
+                ttl_seconds=health.zombie_sessions_ttl_seconds,
+                run=lambda: zombie_sessions_check(
+                    self.store.load_all(),
+                    {session.name for session in self.backend.list_sessions()},
+                    now=utc_now(),
+                    stale_after=timedelta(days=health.zombie_stale_after_days),
+                ),
+            ),
+            HealthCheckSpec(
+                name="idle-sessions",
+                enabled=health.enabled and health.idle_sessions_enabled,
+                ttl_seconds=health.idle_sessions_ttl_seconds,
+                run=lambda: idle_live_sessions_check(
+                    self.store.load_all(),
+                    {session.name for session in self.backend.list_sessions()},
+                    now=utc_now(),
+                    idle_after=timedelta(days=health.idle_after_days),
+                ),
+            ),
+            HealthCheckSpec(
+                name="orphaned-logs",
+                enabled=health.enabled and health.orphaned_logs_enabled,
+                ttl_seconds=health.orphaned_logs_ttl_seconds,
+                run=lambda: orphaned_logs_check(
+                    self.paths.logs_dir,
+                    {str(record.record_id) for record in self.store.load_all().values()},
+                    now=utc_now(),
+                    min_age=timedelta(hours=health.orphaned_logs_min_age_hours),
                 ),
             ),
         )
