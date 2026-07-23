@@ -31,6 +31,8 @@ from workspace_session_manager.service import SessionService
 from workspace_session_manager.tui import (
     ACTIVITY_SPARK_MIN_SAMPLES,
     THEME_MODES,
+    BulkActionsScreen,
+    BulkTagScreen,
     ConfirmActionScreen,
     CreateFailureScreen,
     CreateSessionScreen,
@@ -85,6 +87,14 @@ async def wait_for_manage(pilot: Pilot[object], app: WsApp) -> ManageSessionScre
             return app.screen
         await pilot.pause(0.05)
     raise AssertionError("manage screen did not open")
+
+
+async def wait_for_bulk_actions(pilot: Pilot[object], app: WsApp) -> BulkActionsScreen:
+    for _ in range(40):
+        if isinstance(app.screen, BulkActionsScreen):
+            return app.screen
+        await pilot.pause(0.05)
+    raise AssertionError("bulk actions screen did not open")
 
 
 async def wait_for_search_output_screen(pilot: Pilot[object], app: WsApp) -> SearchOutputScreen:
@@ -2224,6 +2234,166 @@ async def test_manage_task_status_and_pin_stay_in_workflow(service: SessionServi
         assert service.get(name).pinned
         pin = manage.query_one("#manage-actions", OptionList).get_option("manage-action:pin")
         assert "Unpin session" in str(pin.prompt)
+
+
+@pytest.mark.asyncio
+async def test_toggle_mark_adds_and_removes_checkbox_prefix(service: SessionService) -> None:
+    name = create_managed(service, "markable", Tool.SHELL)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        identity = (name, service.get(name).session_id)
+        await pilot.press("space")
+        await pilot.pause()
+        assert identity in app._marked
+        option_id = f"session:{identity[1]}"
+        option = app.query_one("#sessions", OptionList).get_option(option_id)
+        assert str(option.prompt).startswith("[x] ")
+
+        await pilot.press("space")
+        await pilot.pause()
+        assert identity not in app._marked
+        option = app.query_one("#sessions", OptionList).get_option(option_id)
+        assert not str(option.prompt).startswith("[")
+
+
+@pytest.mark.asyncio
+async def test_bulk_actions_with_no_marks_notifies_and_stays_on_dashboard(
+    service: SessionService,
+) -> None:
+    create_managed(service, "unmarked", Tool.SHELL)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("b")
+        await pilot.pause()
+        assert not isinstance(app.screen, BulkActionsScreen)
+
+
+@pytest.mark.asyncio
+async def test_bulk_stop_stops_all_marked_sessions(service: SessionService) -> None:
+    first = create_managed(service, "bulk-stop-one", Tool.SHELL)
+    second = create_managed(service, "bulk-stop-two", Tool.SHELL)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        for target in (first, second):
+            app.selected_name = target
+            app.selected_session_id = service.get(target).session_id
+            await pilot.press("space")
+            await pilot.pause()
+        assert len(app._marked) == 2
+
+        await pilot.press("b")
+        bulk = await wait_for_bulk_actions(pilot, app)
+        bulk.query_one("#bulk-actions-list", OptionList).highlighted = 0
+        await pilot.press("enter")
+        confirm = await wait_for_confirmation(pilot, app)
+        assert first in confirm.session_name
+        assert second in confirm.session_name
+        confirm.query_one("#confirm-submit", Button).press()
+        await pilot.pause()
+
+        assert service.get(first).runtime.value == "stopped"
+        assert service.get(second).runtime.value == "stopped"
+        assert app._marked == set()
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_removes_all_marked_sessions(service: SessionService) -> None:
+    first = create_managed(service, "bulk-delete-one", Tool.SHELL)
+    second = create_managed(service, "bulk-delete-two", Tool.SHELL)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        for target in (first, second):
+            app.selected_name = target
+            app.selected_session_id = service.get(target).session_id
+            await pilot.press("space")
+            await pilot.pause()
+
+        await pilot.press("b")
+        bulk = await wait_for_bulk_actions(pilot, app)
+        bulk.query_one("#bulk-actions-list", OptionList).highlighted = 1
+        await pilot.press("enter")
+        confirm = await wait_for_confirmation(pilot, app)
+        confirm.query_one("#confirm-submit", Button).press()
+        await pilot.pause()
+
+    assert service.store.load(first) is None
+    assert service.store.load(second) is None
+
+
+@pytest.mark.asyncio
+async def test_bulk_add_tag_merges_into_existing_tags(service: SessionService) -> None:
+    first = create_managed(service, "bulk-tag-one", Tool.SHELL)
+    second = create_managed(service, "bulk-tag-two", Tool.SHELL)
+    service.organize(first, tags=["backend"])
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        for target in (first, second):
+            app.selected_name = target
+            app.selected_session_id = service.get(target).session_id
+            await pilot.press("space")
+            await pilot.pause()
+
+        await pilot.press("b")
+        bulk = await wait_for_bulk_actions(pilot, app)
+        bulk.query_one("#bulk-actions-list", OptionList).highlighted = 2
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, BulkTagScreen)
+        app.screen.query_one("#bulk-tag-value", Input).value = "urgent"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert service.get(first).tags == ["backend", "urgent"]
+        assert service.get(second).tags == ["urgent"]
+        assert app._marked == set()
+
+
+@pytest.mark.asyncio
+async def test_bulk_clear_marks_leaves_sessions_untouched(service: SessionService) -> None:
+    name = create_managed(service, "bulk-clear", Tool.SHELL)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("space")
+        await pilot.pause()
+        assert app._marked
+
+        await pilot.press("b")
+        bulk = await wait_for_bulk_actions(pilot, app)
+        bulk.query_one("#bulk-actions-list", OptionList).highlighted = 3
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app._marked == set()
+        assert service.get(name).runtime.value != "stopped"
+
+
+@pytest.mark.asyncio
+async def test_bulk_action_skips_session_that_vanished_before_confirmation(
+    service: SessionService, fake_backend: FakeBackend
+) -> None:
+    survivor = create_managed(service, "bulk-survivor", Tool.SHELL)
+    vanished = create_managed(service, "bulk-vanished", Tool.SHELL)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 35)) as pilot:
+        for target in (survivor, vanished):
+            app.selected_name = target
+            app.selected_session_id = service.get(target).session_id
+            await pilot.press("space")
+            await pilot.pause()
+
+        service.delete(vanished)
+
+        await pilot.press("b")
+        bulk = await wait_for_bulk_actions(pilot, app)
+        bulk.query_one("#bulk-actions-list", OptionList).highlighted = 0
+        await pilot.press("enter")
+        confirm = await wait_for_confirmation(pilot, app)
+        confirm.query_one("#confirm-submit", Button).press()
+        await pilot.pause()
+
+        assert service.get(survivor).runtime.value == "stopped"
+        assert app._marked == set()
 
 
 @pytest.mark.asyncio

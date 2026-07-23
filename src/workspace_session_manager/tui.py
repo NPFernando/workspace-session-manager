@@ -665,15 +665,21 @@ def session_row(
     warning_dim_color: str = "#8a7a2a",
     monochrome: bool = False,
     activity_spark: str = "",
+    bulk_mode: bool = False,
+    marked: bool = False,
 ) -> Text:
     """Build a stable two-line row sized to its current pane."""
     alert = notice or detect_activity(session, "")
     marker = ("*" if ascii_only else "★") if session.pinned else "!" if alert.warning else " "
     tool = session.tool.value.upper()
     when = relative_activity(session.last_active_at)
-    name_width = max(10, width - len(tool) - len(when) - 7)
+    checkbox_width = 4 if bulk_mode else 0
+    name_width = max(10, width - len(tool) - len(when) - 7 - checkbox_width)
     name = truncate(session.name, name_width, ascii_only=ascii_only)
     first = Text()
+    if bulk_mode:
+        checkbox = "[x] " if marked else "[ ] "
+        first.append(checkbox, style="bold" if marked else "dim")
     marker_style = (
         ""
         if marker == " "
@@ -700,6 +706,12 @@ def session_row(
         first.append("  ")
         first.append(activity_spark, style="dim")
     return first
+
+
+def _format_marked_names(names: Sequence[str], *, limit: int = 5) -> str:
+    shown = ", ".join(names[:limit])
+    remaining = len(names) - limit
+    return shown + (f", and {remaining} more" if remaining > 0 else "")
 
 
 def section_title(label: str) -> Text:
@@ -2144,6 +2156,127 @@ class ConfirmActionScreen(ModalScreen[bool]):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+
+BULK_ACTIONS: tuple[tuple[str, str], ...] = (
+    ("stop", "Stop sessions"),
+    ("delete", "Delete sessions and metadata"),
+    ("add-tag", "Add tag"),
+    ("clear-marks", "Clear marks"),
+)
+
+
+class BulkActionsScreen(ModalScreen[str | None]):
+    BINDINGS: ClassVar[list[BindingSpec]] = [Binding("escape", "cancel", "Close")]
+
+    def __init__(self, count: int) -> None:
+        super().__init__()
+        self.count = count
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="bulk-actions-dialog", classes="dialog manage-dialog"):
+            yield Label("Bulk Actions", classes="dialog-title")
+            yield Static(f"{self.count} session(s) marked", classes="dialog-context")
+            options = OptionList(id="bulk-actions-list")
+            for action_id, label in BULK_ACTIONS:
+                options.add_option(Option(label, id=f"bulk-action:{action_id}"))
+            yield options
+            yield Static(
+                "BULK ACTIONS  Up/Down Navigate   Enter Select   Esc Close",
+                classes="mode-help",
+            )
+            with Horizontal(classes="dialog-actions"):
+                yield Button("Close", id="bulk-actions-cancel")
+
+    def on_mount(self) -> None:
+        animate_modal_open(self)
+        self.query_one("#bulk-actions-list", OptionList).focus()
+
+    @on(OptionList.OptionSelected, "#bulk-actions-list")
+    def option_selected(self, event: OptionList.OptionSelected) -> None:
+        option_id = event.option.id
+        if option_id is None:
+            return
+        self.dismiss(option_id.removeprefix("bulk-action:"))
+
+    @on(Button.Pressed, "#bulk-actions-cancel")
+    def cancel_pressed(self) -> None:
+        self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class BulkTagScreen(ModalScreen[str | None]):
+    BINDINGS: ClassVar[list[BindingSpec]] = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, count: int) -> None:
+        super().__init__()
+        self.count = count
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="bulk-tag-dialog", classes="dialog small-dialog"):
+            yield Label("Add Tag", classes="dialog-title")
+            yield Static(f"Applies to {self.count} marked session(s)", classes="dialog-context")
+            yield Input(placeholder="tag-name", id="bulk-tag-value")
+            yield Static("", id="bulk-tag-status", classes="field-status")
+            yield Static(
+                "FORM  Enter Add   Esc Cancel",
+                classes="mode-help",
+            )
+            with Horizontal(classes="dialog-actions"):
+                yield Button("Cancel", id="bulk-tag-cancel")
+                yield Button("Add", variant="primary", id="bulk-tag-submit")
+
+    def on_mount(self) -> None:
+        animate_modal_open(self)
+        self.query_one("#bulk-tag-value", Input).focus()
+        self._validate()
+
+    def _validate(self) -> str | None:
+        raw = self.query_one("#bulk-tag-value", Input).value
+        status = self.query_one("#bulk-tag-status", Static)
+        button = self.query_one("#bulk-tag-submit", Button)
+        if not raw.strip():
+            status.update("")
+            button.disabled = True
+            return None
+        try:
+            normalized = normalize_tags([raw])
+        except ValueError as error:
+            status.update(str(error))
+            status.add_class("invalid")
+            button.disabled = True
+            return None
+        status.remove_class("invalid")
+        status.update(f"Will add: {normalized[0]}")
+        button.disabled = False
+        return normalized[0]
+
+    @on(Input.Changed, "#bulk-tag-value")
+    def tag_changed(self) -> None:
+        self._validate()
+
+    @on(Input.Submitted, "#bulk-tag-value")
+    def tag_submitted(self) -> None:
+        self.action_submit()
+
+    @on(Button.Pressed)
+    def button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "bulk-tag-cancel":
+            self.dismiss(None)
+        elif event.button.id == "bulk-tag-submit":
+            self.action_submit()
+
+    def action_submit(self) -> None:
+        tag = self._validate()
+        if tag is None:
+            animate_modal_shake(self)
+            return
+        self.dismiss(tag)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class MessageScreen(ModalScreen[None]):
@@ -3633,6 +3766,8 @@ class WsApp(App[str | None]):
         Binding("p", "command_palette", "Palette"),
         Binding("a", "advanced_details", "Advanced", show=False),
         Binding("t", "cycle_theme", "Theme", show=False),
+        Binding("space", "toggle_mark", "Mark", show=False),
+        Binding("b", "bulk_actions", "Bulk actions", show=False),
         Binding("question_mark", "help", "Help"),
         Binding("escape", "escape", "Cancel", show=False),
     ]
@@ -3664,6 +3799,7 @@ class WsApp(App[str | None]):
         self._expected_option_id: str | None = None
         self._option_sessions: dict[str, SessionView] = {}
         self._option_actions: dict[str, str] = {}
+        self._marked: set[tuple[str, str]] = set()
         self._alerts: dict[tuple[str, str], ActivityNotice] = {}
         self._activity_history: dict[tuple[str, str], deque[int]] = {}
         self._last_preview: dict[tuple[str, str], str] = {}
@@ -4255,6 +4391,8 @@ class WsApp(App[str | None]):
                 warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=self._notice_for(session),
                 pulse_dim=self._marker_pulse_phase,
+                bulk_mode=bool(self._marked),
+                marked=self._is_marked(session),
             )
             options.replace_option_prompt(option_id, prompt)
 
@@ -4556,6 +4694,9 @@ class WsApp(App[str | None]):
         history = self._activity_history.setdefault(identity, deque(maxlen=ACTIVITY_HISTORY_LENGTH))
         history.append(changed)
 
+    def _is_marked(self, session: SessionView) -> bool:
+        return (session.name, session.session_id) in self._marked
+
     def _activity_spark_for(self, session: SessionView) -> str:
         if not self.has_class("wide") and not self.has_class("very-wide"):
             return ""
@@ -4591,6 +4732,8 @@ class WsApp(App[str | None]):
                 warning_color=self._theme_colors.get("warning", "yellow"),
                 warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=notice,
+                bulk_mode=bool(self._marked),
+                marked=self._is_marked(session),
             )
             if self.motion != "off" and notice.warning and notice.kind != previous.kind:
                 prompt.stylize("on #4b3b1f")
@@ -4621,6 +4764,8 @@ class WsApp(App[str | None]):
                 warning_color=self._theme_colors.get("warning", "yellow"),
                 warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                 notice=self._notice_for(session),
+                bulk_mode=bool(self._marked),
+                marked=self._is_marked(session),
             ),
         )
 
@@ -4734,6 +4879,7 @@ class WsApp(App[str | None]):
         self.visible_sessions = [item for item in self.sessions if self._matches_query(item)]
         selected_index: int | None = None
         first_session_index: int | None = None
+        bulk_mode = bool(self._marked)
         for group_name, group_sessions in build_session_groups(
             self.visible_sessions,
             grouping=self.grouping,
@@ -4756,6 +4902,8 @@ class WsApp(App[str | None]):
                             warning_color=self._theme_colors.get("warning", "yellow"),
                             warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
                             notice=self._notice_for(session),
+                            bulk_mode=bulk_mode,
+                            marked=self._is_marked(session),
                         ),
                         id=option_id,
                     )
@@ -4787,10 +4935,13 @@ class WsApp(App[str | None]):
             return
         separator = " / " if self.ascii_only else " · "
         toolbar = self.query_one("#session-toolbar-meta", Static)
-        toolbar.update(
+        text = (
             f"Sessions{separator}Group: {GROUPING_LABELS[self.grouping]} (g)"
             f"{separator}Density: {self.density.title()} (z)"
         )
+        if self._marked:
+            text += f"{separator}{len(self._marked)} marked (b bulk actions)"
+        toolbar.update(text)
 
     def _render_header(self) -> None:
         attached = sum(session.runtime is RuntimeState.ATTACHED for session in self.sessions)
@@ -5557,6 +5708,8 @@ class WsApp(App[str | None]):
             warning_color=self._theme_colors.get("warning", "yellow"),
             warning_dim_color=self._theme_colors.get("warning-muted", "#8a7a2a"),
             notice=self._notice_for(session),
+            bulk_mode=bool(self._marked),
+            marked=self._is_marked(session),
         )
         prompt.stylize(style)
         self.query_one("#sessions", OptionList).replace_option_prompt(option_id, prompt)
@@ -5775,6 +5928,127 @@ class WsApp(App[str | None]):
         self.selected_session_id = updated.session_id
         self._notify_success("Session unpinned" if session.pinned else "Session pinned")
         self.refresh_sessions()
+
+    def action_toggle_mark(self) -> None:
+        session = self._selected()
+        if session is None:
+            return
+        identity = (session.name, session.session_id)
+        if identity in self._marked:
+            self._marked.discard(identity)
+        else:
+            self._marked.add(identity)
+        self._render_options()
+
+    def action_bulk_actions(self) -> None:
+        if not self._marked:
+            self.notify("Mark a session with space first.", title="No sessions marked")
+            return
+        self._begin_overlay(InteractionMode.MANAGE)
+        self.push_screen(BulkActionsScreen(len(self._marked)), self._bulk_action_chosen)
+
+    def _marked_names(self) -> list[str]:
+        marked_ids = self._marked
+        return [
+            session.name
+            for session in self.sessions
+            if (session.name, session.session_id) in marked_ids
+        ]
+
+    def _bulk_action_chosen(self, action: str | None) -> None:
+        if action is None:
+            self._restore_dashboard_mode()
+            return
+        if action == "clear-marks":
+            self._marked.clear()
+            self._restore_dashboard_mode()
+            self.refresh_sessions()
+            self._notify_success("Marks cleared")
+            return
+        if action == "add-tag":
+            self._set_interaction_mode(InteractionMode.FORM)
+            self.call_after_refresh(self._open_bulk_tag_screen)
+            return
+        self._set_interaction_mode(InteractionMode.CONFIRMATION)
+        self.call_after_refresh(self._open_bulk_confirmation, action)
+
+    def _open_bulk_tag_screen(self) -> None:
+        self.push_screen(BulkTagScreen(len(self._marked)), self._bulk_tag_chosen)
+
+    def _bulk_tag_chosen(self, tag: str | None) -> None:
+        if tag is None:
+            self._restore_dashboard_mode()
+            return
+        succeeded = 0
+        failed = 0
+        for name in self._marked_names():
+            try:
+                current = self.service.get(name)
+                tags = normalize_tags([*current.tags, tag])
+                self.service.organize(name, tags=tags)
+            except (WsError, ValueError):
+                failed += 1
+            else:
+                succeeded += 1
+        self._marked.clear()
+        self._restore_dashboard_mode()
+        self.refresh_sessions()
+        self._notify_bulk_result("Tagged", succeeded, failed)
+
+    def _open_bulk_confirmation(self, action: str) -> None:
+        names = self._marked_names()
+        joined = _format_marked_names(names)
+        if action == "stop":
+            title, consequence, confirm_label = (
+                "Stop Sessions",
+                "The tmux sessions will stop. ws metadata and sanitized logs are retained.",
+                "Stop Sessions",
+            )
+        else:
+            title, consequence, confirm_label = (
+                "Delete Sessions",
+                "tmux will stop and ws metadata and logs will be permanently removed.",
+                "Delete Sessions",
+            )
+        screen = ConfirmActionScreen(title, joined, consequence, confirm_label=confirm_label)
+        self.push_screen(
+            screen,
+            lambda confirmed, selected=action: self._bulk_confirmation_result(selected, confirmed),
+        )
+
+    def _bulk_confirmation_result(self, action: str, confirmed: bool) -> None:
+        if not confirmed:
+            self._restore_dashboard_mode()
+            return
+        names = self._marked_names()
+        succeeded = 0
+        failed = 0
+        for name in names:
+            try:
+                if action == "stop":
+                    self.service.stop_session(name)
+                else:
+                    self.service.delete(name)
+            except (WsError, OSError):
+                failed += 1
+            else:
+                succeeded += 1
+        self._marked.clear()
+        self._restore_dashboard_mode()
+        self.refresh_sessions()
+        self._notify_bulk_result("Stopped" if action == "stop" else "Deleted", succeeded, failed)
+
+    def _notify_bulk_result(self, verb: str, succeeded: int, failed: int) -> None:
+        if failed:
+            self.notify(
+                f"{verb} {succeeded} of {succeeded + failed} session(s); {failed} failed",
+                title="Bulk action partially completed",
+                severity="warning",
+            )
+        elif succeeded:
+            self._notify_success(f"{verb} {succeeded} session(s)")
+        else:
+            self.notify("Nothing to do", title="Bulk action")
 
     def action_manage(self) -> None:
         session = self._selected()
