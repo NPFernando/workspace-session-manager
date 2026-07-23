@@ -1265,6 +1265,47 @@ async def test_advanced_options_preserve_values_and_focus(
 
 
 @pytest.mark.asyncio
+async def test_create_form_preset_select_populates_fields(
+    service: SessionService,
+    tmp_path: Path,
+) -> None:
+    service.save_preset(
+        "backend-dev",
+        tool=Tool.SHELL,
+        cwd=tmp_path,
+        project="api",
+        tags=["backend"],
+        logging_enabled=False,
+    )
+    app = WsApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.press("c")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, CreateSessionScreen)
+        screen.query_one("#create-preset", Select).value = "backend-dev"
+        await pilot.pause()
+
+        assert screen.query_one("#create-tool", Select).value == Tool.SHELL.value
+        assert screen.query_one("#create-cwd", Input).value == display_path(tmp_path)
+        assert screen.query_one("#create-project", Input).value == "api"
+        assert screen.query_one("#create-tags", Input).value == "backend"
+        assert screen.query_one("#create-logging", Switch).value is False
+        assert screen.query_one("#create-preset", Select).value == Select.NULL
+
+
+@pytest.mark.asyncio
+async def test_create_form_has_no_preset_select_when_no_presets_saved(
+    service: SessionService,
+) -> None:
+    app = WsApp(service, monochrome=False, onboarding=False)
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("c")
+        await pilot.pause()
+        assert not app.screen.query("#create-preset")
+
+
+@pytest.mark.asyncio
 async def test_home_directory_does_not_become_ubuntu_project(
     service: SessionService,
 ) -> None:

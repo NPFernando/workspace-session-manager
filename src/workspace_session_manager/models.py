@@ -280,6 +280,23 @@ class CreateRequest(BaseModel):
         return normalize_tags(values)
 
 
+class Preset(BaseModel):
+    """A saved tool/cwd/project/tags/logging combination, reused via `ws create --from-preset`."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    name: str
+    tool: Tool
+    cwd: Path
+    project: Annotated[str, Field(max_length=200)] = ""
+    tags: Annotated[list[str], Field(max_length=12)] = Field(default_factory=list)
+    logging_enabled: bool = True
+
+    @field_validator("tags")
+    @classmethod
+    def valid_tags(cls, values: list[str]) -> list[str]:
+        return normalize_tags(values)
+
+
 class HealthStatus(StrEnum):
     PASS = "pass"  # noqa: S105
     WARN = "warn"

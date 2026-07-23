@@ -102,6 +102,125 @@ def test_dry_run_does_not_create(
     assert fake_backend.sessions == {}
 
 
+def test_preset_save_list_and_delete_round_trip(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    runner = CliRunner()
+
+    save_result = runner.invoke(
+        cli.app,
+        [
+            "preset",
+            "save",
+            "backend-dev",
+            "--tool",
+            "shell",
+            "--cwd",
+            str(tmp_path),
+            "--tag",
+            "backend",
+        ],
+    )
+    assert save_result.exit_code == 0, save_result.output
+    assert "Saved preset: backend-dev" in save_result.stdout
+
+    list_result = runner.invoke(cli.app, ["preset", "list", "--json"])
+    assert list_result.exit_code == 0, list_result.output
+    payload = json.loads(list_result.stdout)
+    assert payload[0]["name"] == "backend-dev"
+    assert payload[0]["tags"] == ["backend"]
+
+    delete_result = runner.invoke(cli.app, ["preset", "delete", "backend-dev"])
+    assert delete_result.exit_code == 0, delete_result.output
+    assert "Deleted preset: backend-dev" in delete_result.stdout
+    assert service.list_presets() == []
+
+
+def test_preset_delete_missing_preset_errors(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    result = CliRunner().invoke(cli.app, ["preset", "delete", "does-not-exist"])
+    assert result.exit_code == 1
+    assert "preset not found" in result.output
+
+
+def test_create_from_preset_applies_preset_values(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    service.save_preset(
+        "backend-dev", tool=Tool.SHELL, cwd=tmp_path, project="api", tags=["backend"]
+    )
+    result = CliRunner().invoke(
+        cli.app,
+        ["create", "--name", "from-preset-test", "--from-preset", "backend-dev"],
+    )
+    assert result.exit_code == 0, result.output
+    session = service.get("from-preset-test")
+    assert session.tool is Tool.SHELL
+    assert session.cwd == tmp_path
+    assert session.project == "api"
+    assert session.tags == ["backend"]
+
+
+def test_create_from_preset_explicit_flags_override_preset(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    service.save_preset("backend-dev", tool=Tool.SHELL, cwd=tmp_path, tags=["backend"])
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "create",
+            "--name",
+            "override-test",
+            "--from-preset",
+            "backend-dev",
+            "--tool",
+            "codex",
+            "--tag",
+            "frontend",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    session = service.get("codex-override-test")
+    assert session.tool is Tool.CODEX
+    assert session.tags == ["frontend"]
+
+
+def test_create_without_tool_or_preset_errors_clearly(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    result = CliRunner().invoke(cli.app, ["create", "--name", "no-tool"])
+    assert result.exit_code == 1
+    assert "--tool is required" in result.output
+
+
+def test_create_from_missing_preset_errors_clearly(
+    service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Runtime, "service", lambda self: service)
+    result = CliRunner().invoke(
+        cli.app, ["create", "--name", "x", "--from-preset", "does-not-exist"]
+    )
+    assert result.exit_code == 1
+    assert "preset not found" in result.output
+
+
 def test_default_list_hides_unmanaged_session(
     service: SessionService,
     fake_backend: FakeBackend,

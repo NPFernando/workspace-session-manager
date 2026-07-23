@@ -683,6 +683,16 @@ class CreateSessionScreen(ModalScreen[CreateFormResult | None]):
         with Vertical(id="create-dialog", classes="dialog create-dialog"):
             yield Label("Create Session", classes="dialog-title")
             with Vertical(id="create-basic"):
+                if self.service and self.service.list_presets():
+                    with Horizontal(classes="form-row"):
+                        yield Label("Preset", classes="field-label")
+                        yield Select(
+                            [(preset.name, preset.name) for preset in self.service.list_presets()],
+                            prompt="Load preset (optional)",
+                            allow_blank=True,
+                            compact=True,
+                            id="create-preset",
+                        )
                 with Horizontal(classes="form-row"):
                     yield Label("Tool", classes="field-label")
                     yield Select(
@@ -1060,6 +1070,31 @@ class CreateSessionScreen(ModalScreen[CreateFormResult | None]):
             self._touched.add("cwd")
             self.query_one("#create-cwd", Input).value = selected
             self.query_one("#create-recent-dir", Select).value = Select.NULL
+
+    @on(Select.Changed, "#create-preset")
+    def preset_selected(self, event: Select.Changed) -> None:
+        if event.value is Select.NULL or not self.service:
+            return
+        preset = next(
+            (item for item in self.service.list_presets() if item.name == str(event.value)),
+            None,
+        )
+        self.query_one("#create-preset", Select).value = Select.NULL
+        if preset is None:
+            return
+        self.query_one("#create-tool", Select).value = preset.tool.value
+        self._touched.add("tool")
+        self.query_one("#create-cwd", Input).value = display_path(preset.cwd)
+        self._touched.add("cwd")
+        self.query_one("#create-project", Input).value = preset.project
+        self._project_user_edited = True
+        self.query_one("#create-tags", Input).value = ", ".join(preset.tags)
+        self._touched.add("tags")
+        self.query_one("#create-logging", Switch).value = preset.logging_enabled
+        self.query_one("#logging-state", Static).update(
+            "Enabled" if preset.logging_enabled else "Disabled"
+        )
+        self._schedule_validation()
 
     @on(Select.Changed, "#create-task-state, #create-startup")
     def advanced_select_changed(self) -> None:

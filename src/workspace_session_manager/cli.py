@@ -43,6 +43,8 @@ console = Console()
 error_console = Console(stderr=True)
 migration_app = typer.Typer(help="Preview, apply, inspect, and roll back session adoption.")
 app.add_typer(migration_app, name="migrate")
+preset_app = typer.Typer(help="Save, list, and delete create-session presets.")
+app.add_typer(preset_app, name="preset")
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,30 +233,49 @@ def inspect(
 @app.command()
 def create(
     context: typer.Context,
-    tool: Annotated[Tool, typer.Option("--tool", "-t")],
     name: Annotated[str, typer.Option("--name", "-n")],
+    tool: Annotated[Tool | None, typer.Option("--tool", "-t")] = None,
     cwd: Annotated[Path | None, typer.Option("--cwd", "-C")] = None,
     project: Annotated[str, typer.Option("--project")] = "",
     note: Annotated[str, typer.Option("--note")] = "",
     tag: Annotated[list[str] | None, typer.Option("--tag")] = None,
     logging: Annotated[
-        bool,
+        bool | None,
         typer.Option("--logging/--no-logging", help="Persist sanitized, size-limited output."),
-    ] = True,
+    ] = None,
+    from_preset: Annotated[
+        str | None,
+        typer.Option(
+            "--from-preset", help="Load tool/cwd/project/tags/logging from a saved preset."
+        ),
+    ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     attach: Annotated[bool, typer.Option("--attach")] = False,
 ) -> None:
     """Create a detached, persistent ws-owned session."""
+    service = runtime_from_context(context).service()
+    preset = None
+    if from_preset is not None:
+        try:
+            preset = service.get_preset(from_preset)
+        except WsError as error:
+            abort(error)
+            return
+    resolved_tool = tool if tool is not None else (preset.tool if preset else None)
+    if resolved_tool is None:
+        abort(WsError("--tool is required unless --from-preset supplies one"))
+        return
     request = CreateRequest(
         name=name,
-        tool=tool,
-        cwd=cwd or Path.cwd(),
-        project=project,
+        tool=resolved_tool,
+        cwd=cwd if cwd is not None else (preset.cwd if preset else Path.cwd()),
+        project=project or (preset.project if preset else ""),
         note=note,
-        tags=tag or [],
-        logging_enabled=logging,
+        tags=tag if tag is not None else (list(preset.tags) if preset else []),
+        logging_enabled=logging
+        if logging is not None
+        else (preset.logging_enabled if preset else True),
     )
-    service = runtime_from_context(context).service()
     try:
         session = service.create(request, dry_run=dry_run)
     except WsError as error:
@@ -266,6 +287,74 @@ def create(
             service.attach(session.name)
         except WsError as error:
             abort(error)
+
+
+@preset_app.command("save")
+def preset_save(
+    context: typer.Context,
+    name: Annotated[str, typer.Argument(help="Preset identifier, e.g. backend-dev.")],
+    tool: Annotated[Tool, typer.Option("--tool", "-t")],
+    cwd: Annotated[Path, typer.Option("--cwd", "-C")],
+    project: Annotated[str, typer.Option("--project")] = "",
+    tag: Annotated[list[str] | None, typer.Option("--tag")] = None,
+    logging: Annotated[
+        bool,
+        typer.Option("--logging/--no-logging", help="Persist sanitized, size-limited output."),
+    ] = True,
+) -> None:
+    """Save (or overwrite) a named create-session preset."""
+    service = runtime_from_context(context).service()
+    try:
+        preset = service.save_preset(
+            name, tool=tool, cwd=cwd, project=project, tags=tag or [], logging_enabled=logging
+        )
+    except WsError as error:
+        abort(error)
+        return
+    console.print(f"Saved preset: [bold]{preset.name}[/bold]")
+
+
+@preset_app.command("list")
+def preset_list(
+    context: typer.Context,
+    as_json: Annotated[bool, typer.Option("--json", help="Emit machine-readable JSON.")] = False,
+) -> None:
+    """List saved create-session presets."""
+    presets = runtime_from_context(context).service().list_presets()
+    if as_json:
+        typer.echo(json.dumps([item.model_dump(mode="json") for item in presets], indent=2))
+        return
+    table = Table(show_header=True, header_style="bold cyan", box=None)
+    table.add_column("Name")
+    table.add_column("Tool")
+    table.add_column("Directory")
+    table.add_column("Project")
+    table.add_column("Tags")
+    table.add_column("Logging")
+    for preset in presets:
+        table.add_row(
+            preset.name,
+            preset.tool.value,
+            str(preset.cwd),
+            preset.project,
+            ", ".join(preset.tags),
+            "enabled" if preset.logging_enabled else "disabled",
+        )
+    console.print(table)
+
+
+@preset_app.command("delete")
+def preset_delete(
+    context: typer.Context,
+    name: Annotated[str, typer.Argument(help="Preset identifier to delete.")],
+) -> None:
+    """Delete a saved create-session preset."""
+    try:
+        runtime_from_context(context).service().delete_preset(name)
+    except WsError as error:
+        abort(error)
+        return
+    console.print(f"Deleted preset: [bold]{name}[/bold]")
 
 
 @app.command()
