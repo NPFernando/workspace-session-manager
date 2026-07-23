@@ -23,6 +23,8 @@ from workspace_session_manager.models import (
     CreateRequest,
     DoctorReport,
     InputState,
+    Preset,
+    SessionView,
     TaskState,
     Tool,
 )
@@ -249,32 +251,44 @@ def create(
             "--from-preset", help="Load tool/cwd/project/tags/logging from a saved preset."
         ),
     ] = None,
+    from_session: Annotated[
+        str | None,
+        typer.Option(
+            "--from-session",
+            help="Load tool/cwd/project/tags/logging from an existing session (clone).",
+        ),
+    ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     attach: Annotated[bool, typer.Option("--attach")] = False,
 ) -> None:
     """Create a detached, persistent ws-owned session."""
+    if from_preset is not None and from_session is not None:
+        abort(WsError("--from-preset and --from-session cannot be combined"))
+        return
     service = runtime_from_context(context).service()
-    preset = None
-    if from_preset is not None:
-        try:
-            preset = service.get_preset(from_preset)
-        except WsError as error:
-            abort(error)
-            return
-    resolved_tool = tool if tool is not None else (preset.tool if preset else None)
+    template: Preset | SessionView | None = None
+    try:
+        if from_preset is not None:
+            template = service.get_preset(from_preset)
+        elif from_session is not None:
+            template = service.get(from_session)
+    except WsError as error:
+        abort(error)
+        return
+    resolved_tool = tool if tool is not None else (template.tool if template else None)
     if resolved_tool is None:
-        abort(WsError("--tool is required unless --from-preset supplies one"))
+        abort(WsError("--tool is required unless --from-preset/--from-session supplies one"))
         return
     request = CreateRequest(
         name=name,
         tool=resolved_tool,
-        cwd=cwd if cwd is not None else (preset.cwd if preset else Path.cwd()),
-        project=project or (preset.project if preset else ""),
+        cwd=cwd if cwd is not None else (template.cwd if template else Path.cwd()),
+        project=project or (template.project if template else ""),
         note=note,
-        tags=tag if tag is not None else (list(preset.tags) if preset else []),
+        tags=tag if tag is not None else (list(template.tags) if template else []),
         logging_enabled=logging
         if logging is not None
-        else (preset.logging_enabled if preset else True),
+        else (template.logging_enabled if template else True),
     )
     try:
         session = service.create(request, dry_run=dry_run)

@@ -1295,6 +1295,49 @@ async def test_create_form_preset_select_populates_fields(
 
 
 @pytest.mark.asyncio
+async def test_manage_clone_action_prefills_create_form_from_session(
+    service: SessionService,
+) -> None:
+    name = create_managed(service, "original", Tool.SHELL)
+    service.organize(name, tags=["backend"], project="api")
+    service.set_logging(name, False)
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.press("d", "c")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, CreateSessionScreen)
+        assert screen.query_one("#create-tool", Select).value == Tool.SHELL.value
+        assert screen.query_one("#create-cwd", Input).value == display_path(Path("/tmp"))
+        assert screen.query_one("#create-project", Input).value == "api"
+        assert screen.query_one("#create-tags", Input).value == "backend"
+        assert screen.query_one("#create-logging", Switch).value is False
+
+
+@pytest.mark.asyncio
+async def test_manage_clone_action_creates_matching_session_on_submit(
+    service: SessionService,
+) -> None:
+    name = create_managed(service, "original", Tool.SHELL)
+    service.organize(name, tags=["backend"], project="api")
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.press("d", "c")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, CreateSessionScreen)
+        screen.query_one("#create-name", Input).value = "cloned-session"
+        await wait_for_create_validation(pilot, screen)
+        await pilot.press("ctrl+enter")
+        await pilot.pause()
+
+    cloned = service.get("cloned-session")
+    assert cloned.tool is Tool.SHELL
+    assert cloned.project == "api"
+    assert cloned.tags == ["backend"]
+
+
+@pytest.mark.asyncio
 async def test_create_form_has_no_preset_select_when_no_presets_saved(
     service: SessionService,
 ) -> None:
@@ -1994,7 +2037,7 @@ async def test_manage_fits_all_categories_at_120x35(service: SessionService) -> 
             options.get_option_at_index(index).id for index in range(options.option_count)
         }
 
-        assert options.option_count == 15
+        assert options.option_count == 16
         assert options.max_scroll_y == 0
         assert {
             "manage-category:general",
@@ -2028,7 +2071,7 @@ async def test_manage_find_is_local_and_cancellable(service: SessionService) -> 
 
         await pilot.press("escape")
         assert not screen.has_class("finding")
-        assert options.option_count == 15
+        assert options.option_count == 16
         assert app.focused is options
 
         await pilot.press("/", *"identity", "enter")
