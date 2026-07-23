@@ -46,6 +46,7 @@ from workspace_session_manager.tui import (
     MoreActionsScreen,
     NoteScreen,
     OnboardingScreen,
+    SearchOutputScreen,
     StatusScreen,
     WsApp,
     detect_activity,
@@ -83,6 +84,24 @@ async def wait_for_manage(pilot: Pilot[object], app: WsApp) -> ManageSessionScre
             return app.screen
         await pilot.pause(0.05)
     raise AssertionError("manage screen did not open")
+
+
+async def wait_for_search_output_screen(pilot: Pilot[object], app: WsApp) -> SearchOutputScreen:
+    for _ in range(40):
+        if isinstance(app.screen, SearchOutputScreen):
+            return app.screen
+        await pilot.pause(0.05)
+    raise AssertionError("search output screen did not open")
+
+
+async def wait_for_output_search(pilot: Pilot[object], screen: SearchOutputScreen) -> None:
+    for _ in range(80):
+        options = screen.query_one("#search-output-results", OptionList)
+        ids = {options.get_option_at_index(index).id for index in range(options.option_count)}
+        if screen._debounce_timer is None and "search-output-loading" not in ids:
+            return
+        await pilot.pause(0.05)
+    raise AssertionError("output search did not complete")
 
 
 async def wait_for_identity_validation(
@@ -2288,3 +2307,105 @@ async def test_health_alerts_screen_opens_shows_checks_and_refreshes(
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, HealthAlertsScreen)
+
+
+def _write_log(service: SessionService, name: str, content: str) -> None:
+    record = service.store.load(name)
+    assert record is not None
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    log_path.write_text(content, encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_search_output_finds_matches_across_sessions(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    logged = service.create(
+        CreateRequest(name="logged-one", tool=Tool.SHELL, cwd=Path("/tmp"), logging_enabled=True)
+    )
+    service.create(
+        CreateRequest(name="unlogged-one", tool=Tool.SHELL, cwd=Path("/tmp"), logging_enabled=False)
+    )
+    _write_log(service, logged.name, "before\nneedle appears here\nafter\n")
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("s")
+        screen = await wait_for_search_output_screen(pilot, app)
+        for char in "needle":
+            await pilot.press(char)
+        await wait_for_output_search(pilot, screen)
+
+        options = screen.query_one("#search-output-results", OptionList)
+        option_ids = {options.get_option_at_index(i).id for i in range(options.option_count)}
+        assert f"search-output-result:{logged.name}" in option_ids
+        assert not any(
+            id_ and id_.startswith("search-output-result:unlogged") for id_ in option_ids
+        )
+        detail = str(screen.query_one("#search-output-detail", Static).content)
+        assert "needle appears here" in detail
+        assert "before" in detail
+        assert "after" in detail
+
+
+@pytest.mark.asyncio
+async def test_search_output_shows_no_matches_message(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    logged = service.create(
+        CreateRequest(name="logged-two", tool=Tool.SHELL, cwd=Path("/tmp"), logging_enabled=True)
+    )
+    _write_log(service, logged.name, "nothing interesting here\n")
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("s")
+        screen = await wait_for_search_output_screen(pilot, app)
+        for char in "zzznomatch":
+            await pilot.press(char)
+        await wait_for_output_search(pilot, screen)
+
+        options = screen.query_one("#search-output-results", OptionList)
+        prompts = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        assert any("No matches" in prompt for prompt in prompts)
+
+
+@pytest.mark.asyncio
+async def test_search_output_short_query_does_not_search(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    logged = service.create(
+        CreateRequest(name="logged-three", tool=Tool.SHELL, cwd=Path("/tmp"), logging_enabled=True)
+    )
+    _write_log(service, logged.name, "a single needle line\n")
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("s")
+        screen = await wait_for_search_output_screen(pilot, app)
+        await pilot.press("n")
+        await pilot.pause(0.5)
+
+        options = screen.query_one("#search-output-results", OptionList)
+        option_ids = {options.get_option_at_index(i).id for i in range(options.option_count)}
+        assert option_ids == {"search-output-empty"}
+
+
+@pytest.mark.asyncio
+async def test_search_output_closes_and_restores_dashboard(
+    service: SessionService,
+    fake_backend: FakeBackend,
+) -> None:
+    service.create(CreateRequest(name="dash-session", tool=Tool.SHELL, cwd=Path("/tmp")))
+    app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
+
+    async with app.run_test(size=(120, 35)) as pilot:
+        await pilot.press("s")
+        await wait_for_search_output_screen(pilot, app)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.interaction_mode is InteractionMode.NORMAL
+        assert not isinstance(app.screen, SearchOutputScreen)

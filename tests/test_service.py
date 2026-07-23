@@ -27,7 +27,7 @@ from workspace_session_manager.models import (
     Tool,
 )
 from workspace_session_manager.paths import AppPaths
-from workspace_session_manager.service import SessionService, TailResult
+from workspace_session_manager.service import LogSearchSummary, SessionService, TailResult
 from workspace_session_manager.store import MetadataStore
 
 
@@ -381,6 +381,122 @@ def test_tail_log_missing_session_or_log_returns_empty(
         CreateRequest(name="tail-no-log", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=False)
     )
     assert service.tail_log(created.name, 0) == TailResult(text="", offset=0, rotated=False)
+
+
+def test_search_logs_finds_matches_with_surrounding_context(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(
+        CreateRequest(name="search-one", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    log_path.write_text(
+        "before one\nbefore two\nthe needle is here\nafter one\nafter two\n", encoding="utf-8"
+    )
+
+    summary = service.search_logs("needle", service.list_sessions())
+    assert summary.skipped_no_log == 0
+    assert len(summary.results) == 1
+    result = summary.results[0]
+    assert result.name == created.name
+    assert len(result.matches) == 1
+    match = result.matches[0]
+    assert match.line == "the needle is here"
+    assert match.line_number == 3
+    assert match.context_before == ("before one", "before two")
+    assert match.context_after == ("after one", "after two")
+
+
+def test_search_logs_is_case_insensitive(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(
+        CreateRequest(name="search-case", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    log_path.write_text("Something NEEDLE-like appears\n", encoding="utf-8")
+
+    summary = service.search_logs("needle", service.list_sessions())
+    assert len(summary.results) == 1
+    assert summary.results[0].matches[0].line == "Something NEEDLE-like appears"
+
+
+def test_search_logs_skips_sessions_without_captured_output(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    logged = service.create(
+        CreateRequest(name="search-logged", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    service.create(
+        CreateRequest(name="search-unlogged", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=False)
+    )
+    record = service.store.load(logged.name)
+    assert record is not None
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    log_path.write_text("needle appears here\n", encoding="utf-8")
+
+    summary = service.search_logs("needle", service.list_sessions())
+    assert len(summary.results) == 1
+    assert summary.results[0].name == logged.name
+    assert summary.skipped_no_log == 1
+
+
+def test_search_logs_redacts_secrets_in_matched_context(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(
+        CreateRequest(name="search-secret", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    log_path.write_text("password=hunter2\nneedle here\n", encoding="utf-8")
+
+    summary = service.search_logs("needle", service.list_sessions())
+    match = summary.results[0].matches[0]
+    assert "hunter2" not in match.context_before[0]
+    assert "[REDACTED]" in match.context_before[0]
+
+
+def test_search_logs_caps_matches_per_session(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    created = service.create(
+        CreateRequest(name="search-many", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    record = service.store.load(created.name)
+    assert record is not None
+    log_path = service.paths.logs_dir / f"{record.record_id}.log"
+    log_path.write_text("\n".join(f"needle {index}" for index in range(10)), encoding="utf-8")
+
+    summary = service.search_logs("needle", service.list_sessions(), max_matches=3)
+    assert len(summary.results[0].matches) == 3
+
+
+def test_search_logs_empty_query_returns_empty_summary(
+    service: SessionService,
+    fake_backend: FakeBackend,
+    tmp_path: Path,
+) -> None:
+    service.create(
+        CreateRequest(name="search-empty", tool=Tool.SHELL, cwd=tmp_path, logging_enabled=True)
+    )
+    summary = service.search_logs("   ", service.list_sessions())
+    assert summary == LogSearchSummary(results=(), skipped_no_log=0)
 
 
 def test_create_validation_detects_duplicate_directory_and_git_project(

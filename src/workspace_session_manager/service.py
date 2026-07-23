@@ -54,6 +54,10 @@ from workspace_session_manager.security import BoundedOutput, bounded_output, re
 from workspace_session_manager.store import MetadataStore
 from workspace_session_manager.tmux import Runner, subprocess_runner
 
+SEARCH_CONTEXT_LINES = 2
+SEARCH_MAX_MATCHES_PER_SESSION = 20
+SEARCH_READ_CAP_BYTES = 2_097_152
+
 
 class SessionBackend(Protocol):
     def version(self) -> str: ...
@@ -144,6 +148,27 @@ class TailResult:
     offset: int
     rotated: bool
     truncated: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class LogSearchMatch:
+    line_number: int
+    line: str
+    context_before: tuple[str, ...]
+    context_after: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class LogSearchResult:
+    name: str
+    display_name: str
+    matches: tuple[LogSearchMatch, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class LogSearchSummary:
+    results: tuple[LogSearchResult, ...]
+    skipped_no_log: int
 
 
 def slugify_name(value: str) -> str:
@@ -760,6 +785,75 @@ class SessionService:
                 os.close(descriptor)
         except OSError as error:
             raise StateError(f"unable to tail log for {name}: {error}") from error
+
+    def search_logs(
+        self,
+        query: str,
+        sessions: Sequence[SessionView],
+        *,
+        context_lines: int = SEARCH_CONTEXT_LINES,
+        max_matches: int = SEARCH_MAX_MATCHES_PER_SESSION,
+        read_cap_bytes: int = SEARCH_READ_CAP_BYTES,
+    ) -> LogSearchSummary:
+        """Search each session's saved log for `query`, newest bytes first.
+
+        Sessions with no captured output (never logged, or the log file is
+        missing/unsafe) are skipped and counted rather than erroring -- a
+        cross-session search should degrade gracefully, not fail because one
+        session has nothing to search.
+        """
+        needle = query.strip().casefold()
+        if not needle:
+            return LogSearchSummary(results=(), skipped_no_log=0)
+        results: list[LogSearchResult] = []
+        skipped = 0
+        for session in sessions:
+            record = self.store.load(session.name)
+            if record is None:
+                skipped += 1
+                continue
+            path = self._log_path(record)
+            if not path.exists() or path.is_symlink():
+                skipped += 1
+                continue
+            try:
+                details = path.stat()
+                if not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid():
+                    skipped += 1
+                    continue
+                with path.open("rb") as handle:
+                    handle.seek(max(0, details.st_size - read_cap_bytes))
+                    raw = handle.read()
+            except OSError:
+                skipped += 1
+                continue
+            content = redact_text(raw.decode("utf-8", errors="replace"))
+            lines = content.splitlines()
+            matches: list[LogSearchMatch] = []
+            for index, line in enumerate(lines):
+                if needle not in line.casefold():
+                    continue
+                before = tuple(lines[max(0, index - context_lines) : index])
+                after = tuple(lines[index + 1 : index + 1 + context_lines])
+                matches.append(
+                    LogSearchMatch(
+                        line_number=index + 1,
+                        line=line,
+                        context_before=before,
+                        context_after=after,
+                    )
+                )
+                if len(matches) >= max_matches:
+                    break
+            if matches:
+                results.append(
+                    LogSearchResult(
+                        name=session.name,
+                        display_name=session.display_name or session.name,
+                        matches=tuple(matches),
+                    )
+                )
+        return LogSearchSummary(results=tuple(results), skipped_no_log=skipped)
 
     def _managed_record(self, name: str, *, require_live: bool = False) -> SessionMetadata:
         record = self.store.load(name)
