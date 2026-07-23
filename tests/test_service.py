@@ -1,3 +1,4 @@
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -708,6 +709,9 @@ def _disk_only_service(tmp_path: Path, fake_backend: FakeBackend) -> SessionServ
             reboot_required_enabled=False,
             git_dirty_enabled=False,
             docker_enabled=False,
+            zombie_sessions_enabled=False,
+            idle_sessions_enabled=False,
+            orphaned_logs_enabled=False,
             disk_ttl_seconds=5.0,
         ),
     )
@@ -814,6 +818,185 @@ def test_refresh_health_alerts_isolates_check_that_raises_unexpectedly(
     monkeypatch.setattr("workspace_session_manager.service.disk_space_check", explode)
     checks = service.refresh_health_alerts(force=True)
     assert checks[0].name == "disk-space"
+    assert checks[0].status is HealthStatus.INFO
+    assert checks[0].detail == "check failed unexpectedly"
+
+
+def _hygiene_only_service(
+    tmp_path: Path, fake_backend: FakeBackend, **health_overrides: object
+) -> SessionService:
+    """A service with every VM-level check disabled, isolating the three
+    session-hygiene checks (which don't shell out, unlike disk/apt/docker/git)."""
+    config = AppConfig(
+        legacy_state_dirs=(),
+        health=HealthConfig(
+            disk_space_enabled=False,
+            apt_updates_enabled=False,
+            reboot_required_enabled=False,
+            git_dirty_enabled=False,
+            docker_enabled=False,
+            **health_overrides,
+        ),
+    )
+    paths = AppPaths(tmp_path / "config", tmp_path / "state", tmp_path / "cache")
+    return SessionService(
+        backend=fake_backend,
+        store=MetadataStore(paths),
+        config=config,
+        paths=paths,
+        legacy=LegacyMetadataReader(()),
+    )
+
+
+def test_zombie_sessions_check_is_wired_and_disableable(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _hygiene_only_service(
+        tmp_path, fake_backend, idle_sessions_enabled=False, orphaned_logs_enabled=False
+    )
+    checks = service.refresh_health_alerts(force=True)
+    assert [check.name for check in checks] == ["zombie-sessions"]
+    assert checks[0].status is HealthStatus.PASS
+
+    disabled = _hygiene_only_service(
+        tmp_path,
+        fake_backend,
+        zombie_sessions_enabled=False,
+        idle_sessions_enabled=False,
+        orphaned_logs_enabled=False,
+    )
+    assert disabled.refresh_health_alerts(force=True) == []
+
+
+def test_zombie_sessions_check_warns_on_stale_stopped_session(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _hygiene_only_service(
+        tmp_path,
+        fake_backend,
+        idle_sessions_enabled=False,
+        orphaned_logs_enabled=False,
+        zombie_stale_after_days=1,
+    )
+    created = service.create(CreateRequest(name="stale", tool=Tool.SHELL, cwd=tmp_path))
+    record = service.store.load(created.name)
+    assert record is not None
+    stale_record = record.model_copy(
+        update={
+            "last_attached_at": datetime.now(UTC) - timedelta(days=2),
+            "updated_at": datetime.now(UTC) - timedelta(days=2),
+        }
+    )
+    service.store.save(stale_record)
+    fake_backend.sessions.pop(created.name, None)
+
+    checks = service.refresh_health_alerts(force=True)
+    assert checks[0].name == "zombie-sessions"
+    assert checks[0].status is HealthStatus.WARN
+    assert created.name in checks[0].detail
+
+
+def test_idle_sessions_check_is_wired_and_disableable(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _hygiene_only_service(
+        tmp_path, fake_backend, zombie_sessions_enabled=False, orphaned_logs_enabled=False
+    )
+    checks = service.refresh_health_alerts(force=True)
+    assert [check.name for check in checks] == ["idle-sessions"]
+    assert checks[0].status is HealthStatus.PASS
+
+    disabled = _hygiene_only_service(
+        tmp_path,
+        fake_backend,
+        zombie_sessions_enabled=False,
+        idle_sessions_enabled=False,
+        orphaned_logs_enabled=False,
+    )
+    assert disabled.refresh_health_alerts(force=True) == []
+
+
+def test_idle_sessions_check_warns_on_idle_live_session(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _hygiene_only_service(
+        tmp_path,
+        fake_backend,
+        zombie_sessions_enabled=False,
+        orphaned_logs_enabled=False,
+        idle_after_days=1,
+    )
+    created = service.create(CreateRequest(name="idle", tool=Tool.SHELL, cwd=tmp_path))
+    record = service.store.load(created.name)
+    assert record is not None
+    idle_record = record.model_copy(
+        update={
+            "last_attached_at": datetime.now(UTC) - timedelta(days=2),
+            "updated_at": datetime.now(UTC) - timedelta(days=2),
+        }
+    )
+    service.store.save(idle_record)
+
+    checks = service.refresh_health_alerts(force=True)
+    assert checks[0].name == "idle-sessions"
+    assert checks[0].status is HealthStatus.WARN
+    assert created.name in checks[0].detail
+
+
+def test_orphaned_logs_check_is_wired_and_disableable(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _hygiene_only_service(
+        tmp_path, fake_backend, zombie_sessions_enabled=False, idle_sessions_enabled=False
+    )
+    checks = service.refresh_health_alerts(force=True)
+    assert [check.name for check in checks] == ["orphaned-logs"]
+    assert checks[0].status is HealthStatus.PASS
+
+    disabled = _hygiene_only_service(
+        tmp_path,
+        fake_backend,
+        zombie_sessions_enabled=False,
+        idle_sessions_enabled=False,
+        orphaned_logs_enabled=False,
+    )
+    assert disabled.refresh_health_alerts(force=True) == []
+
+
+def test_orphaned_logs_check_warns_on_unknown_log_file(
+    tmp_path: Path, fake_backend: FakeBackend
+) -> None:
+    service = _hygiene_only_service(
+        tmp_path,
+        fake_backend,
+        zombie_sessions_enabled=False,
+        idle_sessions_enabled=False,
+        orphaned_logs_min_age_hours=1,
+    )
+    service.paths.logs_dir.mkdir(parents=True, exist_ok=True)
+    orphan = service.paths.logs_dir / "00000000-0000-0000-0000-000000000000.log"
+    orphan.write_text("leftover output", encoding="utf-8")
+    old_time = (datetime.now(UTC) - timedelta(days=2)).timestamp()
+    os.utime(orphan, (old_time, old_time))
+
+    checks = service.refresh_health_alerts(force=True)
+    assert checks[0].name == "orphaned-logs"
+    assert checks[0].status is HealthStatus.WARN
+
+
+def test_session_hygiene_checks_isolate_unexpected_failures(
+    tmp_path: Path, fake_backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _hygiene_only_service(
+        tmp_path, fake_backend, idle_sessions_enabled=False, orphaned_logs_enabled=False
+    )
+
+    def explode(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("workspace_session_manager.service.zombie_sessions_check", explode)
+    checks = service.refresh_health_alerts(force=True)
+    assert checks[0].name == "zombie-sessions"
     assert checks[0].status is HealthStatus.INFO
     assert checks[0].detail == "check failed unexpectedly"
 

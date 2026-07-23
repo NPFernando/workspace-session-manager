@@ -2108,6 +2108,9 @@ def diagnostic_name(check: HealthCheck) -> str:
         "apt-updates": "Apt updates",
         "docker-containers": "Docker",
         "git-dirty": "Dirty repos",
+        "zombie-sessions": "Zombie sessions",
+        "idle-sessions": "Idle sessions",
+        "orphaned-logs": "Orphaned logs",
     }
     return labels.get(check.name, display_state(check.name))
 

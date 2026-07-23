@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence, Set
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from workspace_session_manager.models import HealthCheck, HealthStatus
+from workspace_session_manager.models import HealthCheck, HealthStatus, SessionMetadata
 from workspace_session_manager.tmux import Runner, subprocess_runner
 
 
@@ -166,4 +167,118 @@ def git_dirty_repos_check(
         detail=f"{len(dirty)} dirty repo(s): {', '.join(dirty[:5])}"
         + (f", and {len(dirty) - 5} more" if len(dirty) > 5 else ""),
         corrective_action="Commit or stash pending changes.",
+    )
+
+
+def _format_names(names: Sequence[str], *, limit: int = 5) -> str:
+    shown = ", ".join(sorted(names)[:limit])
+    remaining = len(names) - limit
+    return shown + (f", and {remaining} more" if remaining > 0 else "")
+
+
+def _stale_records(
+    records: Mapping[str, SessionMetadata],
+    live_names: Set[str],
+    *,
+    now: datetime,
+    threshold: timedelta,
+    want_live: bool,
+) -> list[SessionMetadata]:
+    return [
+        record
+        for name, record in records.items()
+        if (name in live_names) == want_live
+        and now - (record.last_attached_at or record.updated_at) > threshold
+    ]
+
+
+def zombie_sessions_check(
+    records: Mapping[str, SessionMetadata],
+    live_names: Set[str],
+    *,
+    now: datetime,
+    stale_after: timedelta,
+) -> HealthCheck:
+    """Flag ws-owned metadata whose tmux session is gone and has sat untouched."""
+    stale = _stale_records(records, live_names, now=now, threshold=stale_after, want_live=False)
+    if not stale:
+        return HealthCheck(
+            name="zombie-sessions", status=HealthStatus.PASS, detail="no stale stopped sessions"
+        )
+    days = stale_after.days
+    return HealthCheck(
+        name="zombie-sessions",
+        status=HealthStatus.WARN,
+        detail=(
+            f"{len(stale)} stopped session(s) untouched for {days}+ days: "
+            f"{_format_names([record.name for record in stale])}"
+        ),
+        corrective_action=(
+            "Review with `ws list --all` and `ws delete <name>` for ones no longer needed."
+        ),
+    )
+
+
+def idle_live_sessions_check(
+    records: Mapping[str, SessionMetadata],
+    live_names: Set[str],
+    *,
+    now: datetime,
+    idle_after: timedelta,
+) -> HealthCheck:
+    """Flag sessions that are still live in tmux but haven't been touched in a long time."""
+    idle = _stale_records(records, live_names, now=now, threshold=idle_after, want_live=True)
+    if not idle:
+        return HealthCheck(
+            name="idle-sessions", status=HealthStatus.PASS, detail="no idle sessions"
+        )
+    days = idle_after.days
+    return HealthCheck(
+        name="idle-sessions",
+        status=HealthStatus.WARN,
+        detail=(
+            f"{len(idle)} live session(s) untouched for {days}+ days: "
+            f"{_format_names([record.name for record in idle])}"
+        ),
+        corrective_action=(
+            "Attach and finish up, or `ws delete <name>` to reclaim the tmux session."
+        ),
+    )
+
+
+def orphaned_logs_check(
+    logs_dir: Path,
+    known_record_ids: Set[str],
+    *,
+    now: datetime,
+    min_age: timedelta,
+) -> HealthCheck:
+    """Flag saved log files with no matching session metadata record."""
+    if not logs_dir.is_dir():
+        return HealthCheck(
+            name="orphaned-logs", status=HealthStatus.PASS, detail="no log directory"
+        )
+    orphans: list[Path] = []
+    for path in logs_dir.glob("*.log"):
+        if path.stem in known_record_ids:
+            continue
+        try:
+            modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=now.tzinfo)
+        except OSError:
+            continue
+        if now - modified_at >= min_age:
+            orphans.append(path)
+    if not orphans:
+        return HealthCheck(
+            name="orphaned-logs", status=HealthStatus.PASS, detail="no orphaned log files"
+        )
+    total_bytes = sum(path.stat().st_size for path in orphans if path.exists())
+    return HealthCheck(
+        name="orphaned-logs",
+        status=HealthStatus.WARN,
+        detail=(
+            f"{len(orphans)} orphaned log file(s) ({total_bytes // 1024} KB) "
+            "with no matching session"
+        ),
+        corrective_action=f"Safe to delete manually from {logs_dir}.",
     )

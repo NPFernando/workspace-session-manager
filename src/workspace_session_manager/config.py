@@ -74,6 +74,15 @@ class HealthConfig(BaseModel):
     git_scan_budget: int = Field(default=20, ge=1, le=200)
     subprocess_timeout: float = Field(default=5.0, ge=1.0, le=30.0)
     project_scan_roots: tuple[Path, ...] = Field(default_factory=default_health_scan_roots)
+    zombie_sessions_enabled: bool = True
+    zombie_sessions_ttl_seconds: float = Field(default=1800.0, ge=5.0, le=3600.0)
+    zombie_stale_after_days: int = Field(default=14, ge=1, le=365)
+    orphaned_logs_enabled: bool = True
+    orphaned_logs_ttl_seconds: float = Field(default=1800.0, ge=5.0, le=3600.0)
+    orphaned_logs_min_age_hours: int = Field(default=24, ge=1, le=8760)
+    idle_sessions_enabled: bool = True
+    idle_sessions_ttl_seconds: float = Field(default=1800.0, ge=5.0, le=3600.0)
+    idle_after_days: int = Field(default=30, ge=1, le=365)
 
     @field_validator("project_scan_roots")
     @classmethod

@@ -1,14 +1,19 @@
+import os
 import subprocess
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from workspace_session_manager.health import (
     apt_updates_check,
     docker_containers_check,
     git_dirty_repos_check,
+    idle_live_sessions_check,
+    orphaned_logs_check,
     reboot_required_check,
+    zombie_sessions_check,
 )
-from workspace_session_manager.models import HealthStatus
+from workspace_session_manager.models import HealthStatus, SessionMetadata, Tool
 
 
 class ScriptedRunner:
@@ -166,4 +171,130 @@ def test_git_dirty_repos_check_isolates_per_repo_failure(tmp_path: Path, monkeyp
         raise OSError("boom")
 
     check = git_dirty_repos_check([tmp_path], runner=raise_error)
+    assert check.status is HealthStatus.PASS
+
+
+def _record(name: str, *, last_attached_at: datetime) -> SessionMetadata:
+    return SessionMetadata(
+        tmux_session_id="$1",
+        name=name,
+        tool=Tool.CLAUDE,
+        cwd=Path("/tmp"),
+        last_attached_at=last_attached_at,
+    )
+
+
+def test_zombie_sessions_check_pass_when_no_stale_stopped_sessions() -> None:
+    now = datetime.now(UTC)
+    records = {"claude-fresh": _record("claude-fresh", last_attached_at=now)}
+    check = zombie_sessions_check(
+        records, live_names=set(), now=now, stale_after=timedelta(days=14)
+    )
+    assert check.status is HealthStatus.PASS
+
+
+def test_zombie_sessions_check_warns_on_stale_stopped_session() -> None:
+    now = datetime.now(UTC)
+    old = now - timedelta(days=20)
+    records = {"claude-old": _record("claude-old", last_attached_at=old)}
+    check = zombie_sessions_check(
+        records, live_names=set(), now=now, stale_after=timedelta(days=14)
+    )
+    assert check.status is HealthStatus.WARN
+    assert "claude-old" in check.detail
+    assert check.corrective_action
+
+
+def test_zombie_sessions_check_ignores_live_sessions() -> None:
+    now = datetime.now(UTC)
+    old = now - timedelta(days=20)
+    records = {"claude-old": _record("claude-old", last_attached_at=old)}
+    check = zombie_sessions_check(
+        records, live_names={"claude-old"}, now=now, stale_after=timedelta(days=14)
+    )
+    assert check.status is HealthStatus.PASS
+
+
+def test_zombie_sessions_check_truncates_long_lists() -> None:
+    now = datetime.now(UTC)
+    old = now - timedelta(days=20)
+    records = {
+        f"claude-old-{index}": _record(f"claude-old-{index}", last_attached_at=old)
+        for index in range(7)
+    }
+    check = zombie_sessions_check(
+        records, live_names=set(), now=now, stale_after=timedelta(days=14)
+    )
+    assert "7 stopped" in check.detail
+    assert "2 more" in check.detail
+
+
+def test_idle_live_sessions_check_pass_when_none_idle() -> None:
+    now = datetime.now(UTC)
+    records = {"claude-active": _record("claude-active", last_attached_at=now)}
+    check = idle_live_sessions_check(
+        records, live_names={"claude-active"}, now=now, idle_after=timedelta(days=30)
+    )
+    assert check.status is HealthStatus.PASS
+
+
+def test_idle_live_sessions_check_warns_on_idle_live_session() -> None:
+    now = datetime.now(UTC)
+    old = now - timedelta(days=45)
+    records = {"claude-idle": _record("claude-idle", last_attached_at=old)}
+    check = idle_live_sessions_check(
+        records, live_names={"claude-idle"}, now=now, idle_after=timedelta(days=30)
+    )
+    assert check.status is HealthStatus.WARN
+    assert "claude-idle" in check.detail
+
+
+def test_idle_live_sessions_check_ignores_stopped_sessions() -> None:
+    now = datetime.now(UTC)
+    old = now - timedelta(days=45)
+    records = {"claude-idle": _record("claude-idle", last_attached_at=old)}
+    check = idle_live_sessions_check(
+        records, live_names=set(), now=now, idle_after=timedelta(days=30)
+    )
+    assert check.status is HealthStatus.PASS
+
+
+def test_orphaned_logs_check_pass_when_directory_missing(tmp_path: Path) -> None:
+    check = orphaned_logs_check(
+        tmp_path / "missing",
+        known_record_ids=set(),
+        now=datetime.now(UTC),
+        min_age=timedelta(hours=1),
+    )
+    assert check.status is HealthStatus.PASS
+
+
+def test_orphaned_logs_check_pass_when_all_logs_known(tmp_path: Path) -> None:
+    log_path = tmp_path / "abc.log"
+    log_path.write_text("output", encoding="utf-8")
+    check = orphaned_logs_check(
+        tmp_path, known_record_ids={"abc"}, now=datetime.now(UTC), min_age=timedelta(hours=1)
+    )
+    assert check.status is HealthStatus.PASS
+
+
+def test_orphaned_logs_check_warns_on_unknown_aged_log(tmp_path: Path) -> None:
+    log_path = tmp_path / "orphan.log"
+    log_path.write_text("output", encoding="utf-8")
+    old_time = (datetime.now(UTC) - timedelta(days=2)).timestamp()
+    os.utime(log_path, (old_time, old_time))
+    check = orphaned_logs_check(
+        tmp_path, known_record_ids=set(), now=datetime.now(UTC), min_age=timedelta(hours=1)
+    )
+    assert check.status is HealthStatus.WARN
+    assert "1 orphaned" in check.detail
+    assert check.corrective_action
+
+
+def test_orphaned_logs_check_respects_min_age_grace_period(tmp_path: Path) -> None:
+    log_path = tmp_path / "fresh.log"
+    log_path.write_text("output", encoding="utf-8")
+    check = orphaned_logs_check(
+        tmp_path, known_record_ids=set(), now=datetime.now(UTC), min_age=timedelta(hours=1)
+    )
     assert check.status is HealthStatus.PASS
