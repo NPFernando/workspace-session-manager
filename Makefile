@@ -1,4 +1,4 @@
-.PHONY: setup format lint type test test-integration check build secret-scan
+.PHONY: setup format lint type test test-integration check build secret-scan release-check release-check-fast release-check-ci
 
 setup:
 	uv sync --locked --extra dev
@@ -27,3 +27,12 @@ build:
 
 secret-scan:
 	scripts/secret-scan.sh
+
+release-check:
+	scripts/release-checklist.sh
+
+release-check-fast:
+	scripts/release-checklist.sh --fast
+
+release-check-ci:
+	scripts/release-checklist.sh --ci

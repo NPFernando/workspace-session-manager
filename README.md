@@ -22,6 +22,7 @@ tmux sessions. Release installation and cutover remain separate approval-gated o
 - Optional owner-only sanitized logging, usage-limit warnings, diagnostics export, and onboarding
 - Session-aware command palette with categorized commands, shortcuts, and availability details
 - Twelve built-in themes, explicit high-contrast mode, plus monochrome (`NO_COLOR`) and ASCII-compatible (`WS_ASCII=1`) rendering
+- Standalone semantic themes with optional Omarchy palette detection and safe custom `colors.toml` files (`ws theme ...`)
 - Subtle SSH-friendly motion with config, `--no-animation`, and `WS_MOTION=off` overrides
 - Read-only discovery and preview of legacy ws sidecar metadata
 - Exact-ID, snapshot-validated, reversible session adoption
@@ -300,6 +301,10 @@ to use lower scan budgets and slower refresh pacing for weak SSH links.
 When an active profile sets `allowed_actions`, mutating operations are blocked unless the action is explicitly allowed.
 `ws audit` prints recent audit lines.
 `ws ux-audit` runs a lightweight UI consistency check (themes, controls, hint layering, and contrast hooks).
+
+Theme inspection is available without opening the TUI: `ws theme list`, `ws theme current`, `ws theme set auto`,
+`ws theme preview <name>`, and `ws theme doctor`. See [docs/themes.md](docs/themes.md)
+and [docs/cli-reference.md](docs/cli-reference.md) for custom and Omarchy-compatible palettes.
 `ws ux-a11y-audit` runs accessibility-focused checks (contrast, motion, readable text scale, and keyboard discoverability).
 `ws chaos-check` optionally injects synthetic artifacts for diagnostics validation.
 `ws self-heal` runs optional remediation policies with dry-run preview or `--apply`, and logs audit entries.
@@ -396,7 +401,18 @@ WS_SNAPSHOT_MODE=1 WS_SNAPSHOT_NOW=2099-01-01T00:00:00+00:00 uv run pytest -m la
 uv run pytest -m tui_behavior tests/test_tui.py
 WS_RUN_TMUX_INTEGRATION=1 uv run pytest -m integration -q --no-cov
 make secret-scan
+scripts/release-checklist.sh
+scripts/release-checklist.sh --fast
+scripts/release-checklist.sh --ci
+make release-check
+make release-check-fast
+make release-check-ci
 ```
+
+`release-check-ci` treats layout snapshot differences as non-blocking (like the CI monitor job).
+Set `WS_RELEASE_CHECKLIST_STRICT_LAYOUT=1` to make layout snapshots blocking in CI mode.
+Set `WS_RELEASE_CHECKLIST_RUN_INTEGRATION=1` and/or `WS_RELEASE_CHECKLIST_RUN_LAYOUT=1` to execute
+those optional CI-only phases from local `--ci` runs.
 
 The real-tmux integration tests use socket paths inside pytest temporary directories. Cleanup removes
 only exact test session IDs and temporary sockets. Adoption coverage also verifies that rollback does

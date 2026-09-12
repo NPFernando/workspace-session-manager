@@ -100,6 +100,7 @@ class InterfacePreferences(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: Literal[1] = 1
+    ui_theme: str = "ithaca"
     grouping: Literal["attention", "runtime", "agent", "project", "warning", "recent"] = "attention"
     density: Literal["compact", "comfortable"] = "comfortable"
     text_scale: Literal["compact", "comfortable", "readable"] = "comfortable"

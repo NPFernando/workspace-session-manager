@@ -3,6 +3,28 @@ Screen {
     color: $foreground;
 }
 
+/* Omarchy-inspired workstation chrome: quiet surfaces, crisp separators,
+   warm focus states, and compact keyboard-first controls. */
+Button:focus,
+Input:focus,
+Select:focus,
+TextArea:focus,
+OptionList:focus {
+    border: tall $primary;
+}
+
+#app-header,
+#session-toolbar,
+#action-bar {
+    border-bottom: solid $primary-muted;
+}
+
+.section-title,
+.form-section,
+.dialog-title {
+    color: $accent;
+}
+
 /* Design tokens v2 (semantic intent)
    spacing-xs=0, spacing-sm=1, spacing-md=2, spacing-lg=3
    radius-soft=tall, radius-sharp=none
@@ -1074,6 +1096,12 @@ ModalScreen {
     text-style: bold;
 }
 
+.dialog-subtitle {
+    height: auto;
+    color: $foreground-muted;
+    margin-bottom: 1;
+}
+
 .dialog-context, .confirm-name {
     height: auto;
     margin-bottom: 1;
@@ -1342,6 +1370,28 @@ Button.-error:focus {
     scrollbar-background: $scrollbar-background;
 }
 
+.compact-form #create-advanced {
+    height: 1fr;
+    overflow-y: auto;
+    scrollbar-color: $scrollbar;
+    scrollbar-background: $scrollbar-background;
+}
+
+.compact-form #create-form-help {
+    display: none;
+}
+
+#create-submit-shortcut-hint {
+    display: none;
+    width: 1fr;
+    text-align: left;
+    color: $text-muted;
+}
+
+.compact-form #create-submit-shortcut-hint {
+    display: block;
+}
+
 .dialog-actions {
     height: 3;
     min-height: 3;
@@ -1360,7 +1410,11 @@ Button.-error:focus {
 
 .create-dialog .dialog-actions {
     margin-top: 0;
+    dock: bottom;
+    background: $panel;
+    border-top: solid $border;
 }
+
 
 .failure-actions {
     height: auto;
@@ -1378,6 +1432,7 @@ Button.-error:focus {
 
 .danger-dialog {
     border: solid $error;
+    background: $panel-darken-1;
 }
 
 .danger-chip {
@@ -1408,6 +1463,11 @@ Button.-error:focus {
 .confirm-copy {
     height: auto;
     margin-bottom: 1;
+}
+
+.danger-dialog .mode-help {
+    border-left: solid $error-muted;
+    color: $foreground-muted;
 }
 
 #message-content,

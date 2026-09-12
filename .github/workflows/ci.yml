@@ -37,12 +37,17 @@ jobs:
         run: uv run ruff check .
       - name: Type check
         run: uv run mypy
-      - name: Unit and TUI tests
-        run: uv run pytest -m 'not integration and not layout_snapshot'
+      # Keep a dedicated full TUI run to lock UX behavior while avoiding
+      # duplicate execution across the whole Python matrix.
+      - name: TUI regression suite
+        if: matrix.python-version == '3.13'
+        run: uv run pytest tests/test_tui.py --no-cov
+      - name: Unit tests (excluding integration, layout snapshot, and TUI suite)
+        run: uv run pytest -m 'not integration and not layout_snapshot' --ignore=tests/test_tui.py
       - name: Isolated tmux integration test
         env:
           WS_RUN_TMUX_INTEGRATION: "1"
-        run: uv run pytest -m integration -q --no-cov
+        run: uv run pytest -m integration -q --no-cov --snapshot-warn-unused
       - name: Secret and privacy scan
         run: scripts/secret-scan.sh
 

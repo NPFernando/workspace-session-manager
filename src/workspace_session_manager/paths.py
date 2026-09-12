@@ -100,6 +100,11 @@ class AppPaths:
         return self.cache_dir / "backups"
 
     @property
+    def themes_dir(self) -> Path:
+        """User data-only themes under the application config directory."""
+        return self.config_dir / "themes"
+
+    @property
     def health_dir(self) -> Path:
         return self.cache_dir / "health"
 
