@@ -18,17 +18,17 @@ class CustomThemeProvider:
     def names(self) -> list[str]:
         try:
             entries = self.root.iterdir()
+            return sorted(
+                entry.name
+                for entry in entries
+                if entry.is_dir()
+                and not entry.is_symlink()
+                and THEME_NAME.fullmatch(entry.name)
+                and (entry / "colors.toml").is_file()
+                and not (entry / "colors.toml").is_symlink()
+            )
         except OSError:
             return []
-        return sorted(
-            entry.name
-            for entry in entries
-            if entry.is_dir()
-            and not entry.is_symlink()
-            and THEME_NAME.fullmatch(entry.name)
-            and (entry / "colors.toml").is_file()
-            and not (entry / "colors.toml").is_symlink()
-        )
 
     def load(self, name: str) -> ThemeRecord | None:
         if not THEME_NAME.fullmatch(name):
