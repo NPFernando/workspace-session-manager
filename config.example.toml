@@ -17,6 +17,7 @@ default_grouping = "attention" # attention, runtime, agent, project, warning, re
 default_density = "comfortable" # compact, comfortable
 default_text_scale = "comfortable" # compact, comfortable, readable
 performance_profile = "balanced" # ssh-safe, balanced, rich
+theme = "auto" # auto, builtin name, or custom theme name
 
 [health]
 enabled = true

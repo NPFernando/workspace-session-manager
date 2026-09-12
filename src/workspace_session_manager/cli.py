@@ -45,7 +45,8 @@ from workspace_session_manager.service import (
     command_available,
     default_enabled_tool,
 )
-from workspace_session_manager.store import MetadataStore
+from workspace_session_manager.store import InterfacePreferencesStore, MetadataStore
+from workspace_session_manager.theme import ThemeManager
 from workspace_session_manager.tmux import TmuxBackend
 from workspace_session_manager.tui import THEME_MODES, WsApp
 
@@ -192,6 +193,10 @@ incident_app = typer.Typer(help="Coordinate and track incidents.")
 app.add_typer(incident_app, name="incident")
 approval_app = typer.Typer(help="Issue signed approvals for guarded actions.")
 app.add_typer(approval_app, name="approval")
+theme_app = typer.Typer(help="List, inspect, and select data-only terminal themes.")
+app.add_typer(theme_app, name="theme")
+session_app = typer.Typer(help="Create and operate ws-managed sessions.")
+app.add_typer(session_app, name="session")
 
 
 @dataclass(frozen=True, slots=True)
@@ -2773,6 +2778,7 @@ def ux_audit_command(
     del context
     source_root = Path(__file__).resolve().parent
     tui_source = (source_root / "tui.py").read_text(encoding="utf-8")
+    palette_source = (source_root / "tui_palette.py").read_text(encoding="utf-8")
     css_source = (source_root / "wf.tcss").read_text(encoding="utf-8")
 
     checks: list[dict[str, str]] = []
@@ -2867,7 +2873,7 @@ def ux_audit_command(
     )
     add(
         "palette-alias-fuzzy",
-        "PALETTE_ALIASES" in tui_source and "SequenceMatcher" in tui_source,
+        "PALETTE_ALIASES" in tui_source and "SequenceMatcher" in palette_source,
         "Command palette alias and typo-tolerant search hooks detected",
         (
             "Add alias mappings and typo-tolerant ranking so palette "
@@ -3021,6 +3027,207 @@ def ux_a11y_audit_command(
         console.print(table)
     if any(check["status"] == "fail" for check in checks):
         raise typer.Exit(1)
+
+
+def _theme_manager(runtime: Runtime) -> ThemeManager:
+    return ThemeManager(runtime.paths)
+
+
+@session_app.command("list")
+def session_list(
+    context: typer.Context,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+    include_unmanaged: Annotated[bool, typer.Option("--all")] = False,
+    tag: Annotated[str | None, typer.Option("--tag")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+) -> None:
+    """Compatibility-grouped alias for ``ws list``."""
+    list_command(context, as_json, include_unmanaged, tag, project)
+
+
+@session_app.command("inspect")
+def session_inspect(
+    context: typer.Context,
+    name: Annotated[str, typer.Argument(help="Exact session name.")],
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Compatibility-grouped alias for ``ws inspect``."""
+    inspect(context, name, as_json)
+
+
+@session_app.command("attach")
+def session_attach(
+    context: typer.Context,
+    name: Annotated[str, typer.Argument(help="Exact session name.")],
+) -> None:
+    """Attach to or switch to a managed session."""
+    attach(context, name)
+
+
+@session_app.command("create")
+def session_create(
+    context: typer.Context,
+    name: Annotated[str, typer.Option("--name", "-n")],
+    tool: Annotated[Tool | None, typer.Option("--tool", "-t")] = None,
+    cwd: Annotated[Path | None, typer.Option("--cwd", "-C")] = None,
+    project: Annotated[str, typer.Option("--project")] = "",
+    note: Annotated[str, typer.Option("--note")] = "",
+    attach_after: Annotated[bool, typer.Option("--attach")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+) -> None:
+    """Guided grouped entry point for creating a managed session."""
+    create(
+        context,
+        name=name,
+        tool=tool,
+        cwd=cwd,
+        project=project,
+        note=note,
+        tag=None,
+        logging=None,
+        from_preset=None,
+        from_session=None,
+        from_template=None,
+        var=None,
+        dry_run=dry_run,
+        attach=attach_after,
+    )
+
+
+@session_app.command("stop")
+def session_stop(
+    context: typer.Context,
+    name: Annotated[str, typer.Argument(help="Exact session name.")],
+    yes: Annotated[bool, typer.Option("--yes")] = False,
+) -> None:
+    """Stop a managed session after an explicit confirmation."""
+    runtime = runtime_from_context(context)
+    if not yes and not typer.confirm(f"Stop managed session {name!r}?", default=False):
+        raise typer.Exit(1)
+    try:
+        require_approval(runtime, "stop-session", None)
+        runtime.service().stop_session(name)
+    except WsError as error:
+        abort(error)
+
+
+@session_app.command("delete")
+def session_delete(
+    context: typer.Context,
+    name: Annotated[str, typer.Argument(help="Exact session name.")],
+    yes: Annotated[bool, typer.Option("--yes")] = False,
+) -> None:
+    """Grouped alias for the protected delete operation."""
+    delete(context, name, yes, None, None)
+
+
+def _stored_theme(runtime: Runtime) -> str:
+    path = runtime.paths.interface_preferences_file
+    if path.exists():
+        return InterfacePreferencesStore(runtime.paths).load().ui_theme
+    return runtime.config.interface.theme
+
+
+@theme_app.command("list")
+def theme_list(context: typer.Context, as_json: bool = typer.Option(False, "--json")) -> None:
+    """List built-in, custom, and auto theme choices."""
+    runtime = runtime_from_context(context)
+    names = _theme_manager(runtime).list_names()
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {"schema_version": 1, "success": True, "data": {"themes": names}, "error": None}
+            )
+        )
+        return
+    for name in names:
+        console.print(name)
+
+
+@theme_app.command("current")
+def theme_current(context: typer.Context, as_json: bool = typer.Option(False, "--json")) -> None:
+    """Show the effective theme and its source."""
+    runtime = runtime_from_context(context)
+    diagnostic = _theme_manager(runtime).diagnostic(
+        _stored_theme(runtime), config_theme=runtime.config.interface.theme
+    )
+    payload = {
+        "name": diagnostic.name,
+        "source": diagnostic.source,
+        "mode": diagnostic.mode,
+        "path": diagnostic.path,
+        "following_system": diagnostic.following_system,
+    }
+    if as_json:
+        typer.echo(
+            json.dumps({"schema_version": 1, "success": True, "data": payload, "error": None})
+        )
+        return
+    console.print(f"Theme: {diagnostic.name}")
+    console.print(f"Source: {diagnostic.source}")
+    console.print(f"Mode: {diagnostic.mode}")
+    if diagnostic.path:
+        console.print(f"Path: {diagnostic.path}")
+    console.print(f"Following system theme: {'yes' if diagnostic.following_system else 'no'}")
+
+
+@theme_app.command("set")
+def theme_set(context: typer.Context, name: str) -> None:
+    """Persist a theme choice without modifying session state."""
+    runtime = runtime_from_context(context)
+    manager = _theme_manager(runtime)
+    if name != "auto" and name not in manager.list_names():
+        abort(WsError(f"unknown theme {name!r}; run 'ws theme list'"))
+    store = InterfacePreferencesStore(runtime.paths)
+    store.save(store.load().model_copy(update={"ui_theme": name}))
+    console.print(f"Theme preference set to [bold]{name}[/bold].")
+
+
+@theme_app.command("preview")
+def theme_preview(context: typer.Context, name: str) -> None:
+    """Print semantic colors for a theme without opening a terminal UI."""
+    runtime = runtime_from_context(context)
+    palette = (
+        _theme_manager(runtime).resolve(name, config_theme=runtime.config.interface.theme).palette
+    )
+    for key in (
+        "background",
+        "foreground",
+        "accent",
+        "selection",
+        "muted",
+        "red",
+        "yellow",
+        "green",
+        "cyan",
+        "blue",
+        "magenta",
+    ):
+        console.print(f"{key}: {getattr(palette, key)}")
+
+
+@theme_app.command("doctor")
+def theme_doctor(context: typer.Context) -> None:
+    """Explain theme capability and fallback selection."""
+    runtime = runtime_from_context(context)
+    diagnostic = _theme_manager(runtime).diagnostic(
+        _stored_theme(runtime), config_theme=runtime.config.interface.theme
+    )
+    truecolor = os.environ.get("COLORTERM", "").lower() in {"truecolor", "24bit"}
+    color_mode = (
+        "NO_COLOR"
+        if os.environ.get("NO_COLOR")
+        else "truecolor"
+        if truecolor
+        else "terminal colors"
+    )
+    console.print(f"Theme: {diagnostic.name}")
+    console.print(f"Source: {diagnostic.source}")
+    console.print(f"Terminal color mode: {color_mode}")
+    console.print(
+        f"Omarchy palette: {'detected' if diagnostic.source == 'omarchy' else 'not selected'}"
+    )
+    console.print("Theme files are data-only; no theme code is executed.")
 
 
 @app.command()

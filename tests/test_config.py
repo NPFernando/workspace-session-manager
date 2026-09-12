@@ -50,6 +50,14 @@ def test_tools_config_backfills_missing_profiles_for_forward_compatibility() -> 
     assert config.tools[Tool.COPILOT].command == ("copilot",)
 
 
+def test_tools_repair_legacy_copilot_command_in_codex_profile() -> None:
+    config = AppConfig.model_validate(
+        {"tools": {"codex": {"command": ["/opt/bin/copilot"], "enabled": True}}}
+    )
+    assert config.tools[Tool.CODEX].command == ("codex",)
+    assert config.tools[Tool.COPILOT].command == ("copilot",)
+
+
 def test_tilde_paths_expand() -> None:
     config = AppConfig(legacy_state_dirs=(Path("~/.legacy-wf"),))
     assert config.legacy_state_dirs[0].is_absolute()

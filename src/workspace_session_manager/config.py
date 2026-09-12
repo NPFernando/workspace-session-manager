@@ -60,6 +60,7 @@ class InterfaceConfig(BaseModel):
     default_density: Literal["compact", "comfortable"] = "comfortable"
     default_text_scale: Literal["compact", "comfortable", "readable"] = "comfortable"
     performance_profile: Literal["ssh-safe", "balanced", "rich"] = "balanced"
+    theme: str = Field(default="ithaca", min_length=1, max_length=64)
 
     @field_validator("environment_label")
     @classmethod
@@ -346,12 +347,23 @@ class AppConfig(BaseModel):
         raw_tools = value.get("tools")
         if not isinstance(raw_tools, dict):
             return value
-        merged_tools: dict[Tool, ToolProfile | dict[str, object]] = dict(default_tools())
+        defaults = default_tools()
+        merged_tools: dict[Tool, ToolProfile | dict[str, object]] = dict(defaults)
         for key, profile in raw_tools.items():
             try:
                 tool = key if isinstance(key, Tool) else Tool(str(key))
             except ValueError:
                 continue
+            # A short-lived VM setup bug wrote the Copilot executable into the
+            # Codex profile. Repair that exact legacy alias while retaining all
+            # other explicit commands, including wrappers and absolute paths.
+            if tool is Tool.CODEX and isinstance(profile, dict):
+                command = profile.get("command")
+                if isinstance(command, (list, tuple)) and len(command) == 1:
+                    command_name = Path(str(command[0])).name
+                    if command_name == Tool.COPILOT.value:
+                        profile = dict(profile)
+                        profile["command"] = list(defaults[Tool.CODEX].command)
             merged_tools[tool] = profile
         merged = dict(value)
         merged["tools"] = merged_tools

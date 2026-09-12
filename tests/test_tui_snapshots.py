@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 from textual.pilot import Pilot
-from textual.widgets import Button, Input, LoadingIndicator, Static
+from textual.widgets import Button, Input, LoadingIndicator, Static, TextArea
 
 from conftest import FakeBackend
 from workspace_session_manager.config import HealthConfig
@@ -47,6 +47,7 @@ def _export_svg_stable(self: Console, *args: object, **kwargs: object) -> str:
     rendered = _ORIGINAL_EXPORT_SVG(self, *args, **kwargs)
     rendered = re.sub(r"terminal-\d+", "terminal", rendered)
     rendered = re.sub(r"terminal-r\d+", "terminal-r", rendered)
+    rendered = rendered.replace("\u00a0", "&#160;").replace("&nbsp;", "&#160;")
     return re.sub(r"<style>.*?</style>", "<style></style>", rendered, flags=re.DOTALL)
 
 
@@ -204,7 +205,10 @@ async def open_logs(pilot: Pilot, app: WsApp) -> LogScreen:
             break
         await pilot.pause(0.05)
     assert not screen.refreshing
-    await pilot.pause()
+    output = screen.query_one("#log-output", TextArea)
+    output.focus()
+    await pilot.pause(0.05)
+    assert app.focused is output
     return screen
 
 
