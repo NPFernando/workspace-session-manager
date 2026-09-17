@@ -20,6 +20,7 @@ SSH_SCRIPT = PROJECT_ROOT / "scripts" / "migrate-ssh-hook.py"
 INSTALL_SCRIPT = PROJECT_ROOT / "scripts" / "install.sh"
 UNINSTALL_SCRIPT = PROJECT_ROOT / "scripts" / "uninstall.sh"
 RETIRE_SCRIPT = PROJECT_ROOT / "scripts" / "retire-classic.sh"
+RETIRE_WF_SCRIPT = PROJECT_ROOT / "scripts" / "retire-wf.sh"
 TEST_MIGRATION_ID = "a05a540e-15ef-4121-944c-fd02616ab938"
 
 
@@ -29,6 +30,7 @@ TEST_MIGRATION_ID = "a05a540e-15ef-4121-944c-fd02616ab938"
         INSTALL_SCRIPT,
         UNINSTALL_SCRIPT,
         RETIRE_SCRIPT,
+        RETIRE_WF_SCRIPT,
     ),
 )
 def test_shell_script_syntax(script: Path) -> None:
@@ -674,3 +676,135 @@ def test_classic_retirement_refuses_non_private_marker(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "installer ownership marker" in result.stderr
     assert classic.exists()
+
+
+def make_wf_retirement_fixture(tmp_path: Path) -> dict[str, str]:
+    home = tmp_path / "home"
+    data = tmp_path / "data"
+
+    ws_expected = data / "workspace-session-manager" / "venv" / "bin" / "ws"
+    ws_expected.parent.mkdir(parents=True)
+    ws_expected.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    ws_expected.chmod(0o700)
+    ws_target = home / ".local" / "bin" / "ws"
+    ws_target.parent.mkdir(parents=True)
+    ws_target.symlink_to(ws_expected)
+
+    wf_expected = data / "wf-session-manager" / "venv" / "bin" / "WF"
+    wf_expected.parent.mkdir(parents=True)
+    wf_expected.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    wf_expected.chmod(0o700)
+    wf_target = home / ".local" / "bin" / "WF"
+    wf_target.symlink_to(wf_expected)
+
+    return {**os.environ, "HOME": str(home), "XDG_DATA_HOME": str(data)}
+
+
+def test_retire_wf_dry_run_leaves_everything_in_place(tmp_path: Path) -> None:
+    env = make_wf_retirement_fixture(tmp_path)
+    wf_target = Path(env["HOME"]) / ".local" / "bin" / "WF"
+
+    result = subprocess.run(
+        ["bash", str(RETIRE_WF_SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Dry run" in result.stdout
+    assert wf_target.is_symlink()
+    assert (Path(env["XDG_DATA_HOME"]) / "wf-session-manager").exists()
+
+
+def test_retire_wf_removes_symlink_and_install_dir(tmp_path: Path) -> None:
+    env = make_wf_retirement_fixture(tmp_path)
+    wf_target = Path(env["HOME"]) / ".local" / "bin" / "WF"
+    wf_root = Path(env["XDG_DATA_HOME"]) / "wf-session-manager"
+
+    result = subprocess.run(
+        ["bash", str(RETIRE_WF_SCRIPT), "--approve-retirement"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not wf_target.exists()
+    assert not wf_root.exists()
+
+
+def test_retire_wf_is_a_noop_when_already_absent(tmp_path: Path) -> None:
+    env = make_wf_retirement_fixture(tmp_path)
+    wf_target = Path(env["HOME"]) / ".local" / "bin" / "WF"
+    wf_root = Path(env["XDG_DATA_HOME"]) / "wf-session-manager"
+    wf_target.unlink()
+    shutil.rmtree(wf_root)
+
+    result = subprocess.run(
+        ["bash", str(RETIRE_WF_SCRIPT), "--approve-retirement"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "nothing to retire" in result.stderr
+
+
+def test_retire_wf_refuses_when_ws_is_not_active(tmp_path: Path) -> None:
+    env = make_wf_retirement_fixture(tmp_path)
+    ws_target = Path(env["HOME"]) / ".local" / "bin" / "ws"
+    ws_target.unlink()
+    wf_target = Path(env["HOME"]) / ".local" / "bin" / "WF"
+
+    result = subprocess.run(
+        ["bash", str(RETIRE_WF_SCRIPT), "--approve-retirement"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "ws is not the active installation" in result.stderr
+    assert wf_target.exists()
+
+
+def test_retire_wf_leaves_ordinary_group_readable_venv_permissions_alone(tmp_path: Path) -> None:
+    # Real venv installs are commonly group/other readable+executable
+    # depending on umask — that alone must not block retirement.
+    env = make_wf_retirement_fixture(tmp_path)
+    wf_expected = Path(env["XDG_DATA_HOME"]) / "wf-session-manager" / "venv" / "bin" / "WF"
+    wf_expected.chmod(0o775)
+    wf_target = Path(env["HOME"]) / ".local" / "bin" / "WF"
+
+    result = subprocess.run(
+        ["bash", str(RETIRE_WF_SCRIPT), "--approve-retirement"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not wf_target.exists()
+
+
+def test_retire_wf_refuses_when_wf_symlink_points_elsewhere(tmp_path: Path) -> None:
+    env = make_wf_retirement_fixture(tmp_path)
+    wf_target = Path(env["HOME"]) / ".local" / "bin" / "WF"
+    decoy = Path(env["HOME"]) / "decoy-wf"
+    decoy.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    decoy.chmod(0o700)
+    wf_target.unlink()
+    wf_target.symlink_to(decoy)
+
+    result = subprocess.run(
+        ["bash", str(RETIRE_WF_SCRIPT), "--approve-retirement"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "unexpected WF installation" in result.stderr
+    assert wf_target.exists()
