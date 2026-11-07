@@ -366,3 +366,13 @@ def test_socket_path_is_applied_to_every_tmux_command(tmp_path: Path) -> None:
 def test_socket_name_and_path_are_mutually_exclusive(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="not both"):
         TmuxBackend(socket_name="wf-test", socket_path=tmp_path / "tmux.sock")
+
+
+def test_list_sessions_accepts_raw_unit_separator() -> None:
+    """Newer tmux emits the raw 0x1f byte instead of the escaped text form."""
+    line = FIELD_SEPARATOR.join(["$1", "demo", "1", "2", "0", "1", "/tmp", "bash", "", "", "0", ""])
+    raw = line.replace(FIELD_SEPARATOR, "\x1f")
+    from workspace_session_manager.tmux import _FIELD_SPLIT
+
+    assert _FIELD_SPLIT.split(raw) == _FIELD_SPLIT.split(line)
+    assert len(_FIELD_SPLIT.split(raw)) == 12

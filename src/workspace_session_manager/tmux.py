@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -16,6 +17,8 @@ from workspace_session_manager.models import TmuxSession
 
 # tmux escapes control characters in format output as backslash-octal text.
 FIELD_SEPARATOR = "\\037"
+# Older tmux escapes the unit separator to the text "\037"; newer builds emit the raw \x1f byte.
+_FIELD_SPLIT = re.compile(r"\\037|\x1f")
 TMUX_FORMAT = "\x1f".join(
     (
         "#{session_id}",
@@ -121,7 +124,7 @@ class TmuxBackend:
         for line in result.stdout.splitlines():
             if not line:
                 continue
-            fields = line.split(FIELD_SEPARATOR)
+            fields = _FIELD_SPLIT.split(line)
             if len(fields) != 12:
                 raise TmuxError("tmux returned an unexpected session record")
             (

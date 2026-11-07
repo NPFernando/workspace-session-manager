@@ -1211,9 +1211,7 @@ def test_raw_legacy_task_is_humanized() -> None:
 
 
 def test_condensed_session_label_shortens_long_slug(service: SessionService) -> None:
-    long_name = create_managed(
-        service, "https-astrology-fernandofamily-com-en-pancha-pakshi", Tool.CODEX
-    )
+    long_name = create_managed(service, "https-astrology-example-com-en-pancha-pakshi", Tool.CODEX)
     session = service.get(long_name)
     assert condensed_session_label(session) == "codex · astrology / pancha-pakshi"
 
@@ -3189,9 +3187,7 @@ async def test_manage_fits_all_categories_at_120x35(service: SessionService) -> 
 async def test_manage_modal_shows_display_name_full_id_and_shortcuts(
     service: SessionService,
 ) -> None:
-    name = create_managed(
-        service, "https-astrology-fernandofamily-com-en-pancha-pakshi", Tool.CODEX
-    )
+    name = create_managed(service, "https-astrology-example-com-en-pancha-pakshi", Tool.CODEX)
     app = WsApp(service, monochrome=False, onboarding=False, no_animation=True)
     async with app.run_test(size=(120, 35)) as pilot:
         await pilot.press("d")
